@@ -46,7 +46,7 @@ VoxelGrid.WIDTH = 1.0
 
 -- where it persists and the rows that cycle it (see ModSetting)
 VoxelGrid.setting = ModSetting.new(VoxelGrid.KEY, VoxelGrid.LABEL,
-                                   { false, true }, { "OFF", "ON" })
+                                   { false, true, "btloff" }, { "OFF", "ON", "BTL-OFF" })
 
 -- A pass that needs the wireframe whatever the player left the row on sets
 -- this for the length of its own draw and puts it back after. nil means
@@ -61,7 +61,13 @@ VoxelGrid.override = nil
 
 function VoxelGrid.enabled()
   if VoxelGrid.override ~= nil then return VoxelGrid.override end
-  return VoxelGrid.setting:get() and true or false
+  local v = VoxelGrid.setting:get()
+  if v == "btloff" then return false end
+  return v and true or false
+end
+
+function VoxelGrid.battleForced()
+  return VoxelGrid.setting:get() ~= "btloff"
 end
 
 function VoxelGrid.set(enabled, game)
@@ -73,7 +79,7 @@ function VoxelGrid.toggle(game)
 end
 
 function VoxelGrid.sync(value)
-  VoxelGrid.setting:sync(value and true or false)
+  VoxelGrid.setting:sync(value)
 end
 
 function VoxelGrid.row()

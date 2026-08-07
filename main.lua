@@ -329,7 +329,7 @@ local function stagedBattles()
 end
 
 local SETTINGS = {
-  { VoxelGrid.setting, "One-pixel wireframe along every voxel edge." },
+  { VoxelGrid.setting, "One-pixel wireframe along every voxel edge. BTL-OFF disables it during battles." },
   { WorldCurve.setting,
     "Bend the world down over the horizon, Animal Crossing style." },
   -- `full` marks a row FULL does not take away. FULL owns the diorama's own

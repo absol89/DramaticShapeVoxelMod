@@ -379,7 +379,9 @@ function BattleScene.render(state, arena, textures, token)
   -- the seams are what make it read as built rather than photographed. Forced
   -- through the override so the player's own row is never written to.
   local gridWas = VoxelGrid.override
-  VoxelGrid.override = true
+  if VoxelGrid.battleForced() then
+    VoxelGrid.override = true
+  end
   local out = nil
   local ok, err = pcall(function()
     -- its own canvas slot: this renders at the window's pixel size and the
