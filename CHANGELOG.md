@@ -4,6 +4,11 @@
 
 ### Added
 
+- **Renderer-neutral battle presentation contract.** Replacement UI mods can
+  claim Battle Art's native `hud`, `text`, or `panels` surfaces through the
+  versioned `battle.presentation.suppress_native.v1` hook. Claims are granular,
+  compose across consumers, and fail open so missing or broken consumers leave
+  native battle rendering intact.
 - **Zero-configuration bring-your-own battle PNGs.** `BATTLE ART: STATIC`
   looks in `front-static` and the selected `back-static/gen1` through `gen5`,
   uses native image dimensions,

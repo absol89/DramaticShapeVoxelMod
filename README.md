@@ -81,6 +81,54 @@ menu.
 **3D-BTL** is on by default and is independent of **VOXEL**: battles draw
 on the world whether or not the free-roam camera is pitched over.
 
+## Battle presentation compatibility
+
+Battle Art publishes a renderer-neutral suppression contract for mods that
+replace part of the battle presentation. Consumers wrap the public
+`battle.presentation.suppress_native.v1` hook and may claim only the native
+surface they actually replace:
+
+| surface | Battle Art-owned rendering |
+| --- | --- |
+| `hud` | native battle status HUD glyphs and bars |
+| `text` | native battle dialogue and command/menu layer |
+| `panels` | Battle Art's frosted native HUD backplates |
+
+Each request has this shape:
+
+```lua
+{
+  apiVersion = 1,
+  sourceModId = "BATTLE_ART_VOXEL_FORK",
+  surface = "hud", -- or "text" / "panels"
+}
+```
+
+A consumer returns exactly `true` to suppress that one surface for that draw.
+It must call `next(request)` first and preserve an existing `true` so multiple
+replacement mods compose monotonically:
+
+```lua
+local HOOK = "battle.presentation.suppress_native.v1"
+
+mod.hooks:wrap(HOOK, function(next, request)
+  local claimed = next(request)
+  if claimed == true then return true end
+  if type(request) ~= "table" or request.apiVersion ~= 1 then return false end
+
+  return myBattlePresenterIsActive()
+    and request.sourceModId == "BATTLE_ART_VOXEL_FORK"
+    and request.surface == "hud"
+end)
+```
+
+The source descriptor is available at
+`mod.find("BATTLE_ART_VOXEL_FORK").exports.battlePresentation`. Missing hooks,
+unknown versions or surfaces, disabled consumers, and throwing consumers all
+fail open to Battle Art's native rendering. This contract suppresses drawing
+only; Battle Art remains responsible for battle state and animations, and no
+third-party draw callback is executed.
+
 ## Bring your own battle art
 
 `BATTLE ART: STATIC` is the default. Drop a front PNG named for the species
