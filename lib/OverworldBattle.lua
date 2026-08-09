@@ -44,6 +44,7 @@ local BattleCam = V.require("BattleCam")
 local BattleScene = V.require("BattleScene")
 local BattleDOF = V.require("BattleDOF")
 local BattleHud = V.require("BattleHud")
+local BattlePresentation = V.require("BattlePresentation")
 local UiBackplates = V.require("UiBackplates")
 local BattlePics = V.require("BattlePics")
 local BattleArt = V.require("BattleArt")
@@ -1259,6 +1260,7 @@ function OverworldBattle.install()
   local innerText = BattleState.drawTextArea
   function BattleState:drawTextArea()
     if not self.dramaticShapeShot then return innerText(self) end
+    if BattlePresentation.suppressed("text") then return end
     if isIOS() then return innerText(self) end
     local battle = self
     -- Every battle box -- the dialogue, the FIGHT/ITEM/RUN menu and the
@@ -1367,6 +1369,7 @@ function OverworldBattle.install()
   -- only an exactly-black set is remapped.
   innerHUDs = BattleState.drawHUDs
   function BattleState:drawHUDs(slide)
+    if self.dramaticShapeShot and BattlePresentation.suppressed("hud") then return end
     -- Normally the HUDs have already been drawn this frame, snapped out to the
     -- window's edges and composited into the world image (snapHUDs). Drawing
     -- them here as well would show each block twice, once in each place.
