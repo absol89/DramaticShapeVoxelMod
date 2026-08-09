@@ -41,6 +41,11 @@ local half = UiBackplates.textboxFillStyle()
 eq(half[1], 0, "HALF is black")
 eq(half[4], 0.5, "HALF matches v1.68 translucency")
 
+settings.textboxFill:sync("BLACK")
+local black = UiBackplates.textboxFillStyle()
+eq(black[1], 0, "BLACK is black")
+eq(black[4], 1, "BLACK is opaque")
+
 settings.textboxFill:sync("OFF")
 eq(UiBackplates.textboxFillStyle(), nil, "OFF has no paper fill")
 

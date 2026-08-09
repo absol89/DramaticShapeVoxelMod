@@ -12,7 +12,7 @@
 --      full voxel one. Works with SHADED or UNLIT sprites (UNLIT just keeps
 --      the cards brighter on white).
 --
---   A) TEXTBOX FILL  WHITE / HALF / OFF
+--   A) TEXTBOX FILL  WHITE / HALF / BLACK / OFF
 --      Controls the engine's own battle-box paper at draw time. Because the
 --      fill, border and ink stay in the same 160x144 UI canvas, BATTLE SIZE
 --      FIXED and FILL transform them together and the corners stay aligned.
@@ -59,8 +59,8 @@ end
 -- ------- A) TEXTBOX FILL -------
 
 UiBackplates.textboxFill = ModSetting.new("textboxFill", "TEXTBOX FILL",
-  { "WHITE", "HALF", "OFF" },
-  { "WHITE", "HALF", "OFF" })
+  { "WHITE", "HALF", "BLACK", "OFF" },
+  { "WHITE", "HALF", "BLACK", "OFF" })
 
 -- ARENA FILL: WHITE keeps the latest-build presentation: black ink on opaque
 -- paper. On the 3D arena, the player's explicit textbox choice owns the box.
@@ -73,6 +73,7 @@ function UiBackplates.textboxFillStyle()
   local mode = UiBackplates.textboxMode()
   if mode == "WHITE" then return { 1, 1, 1, 1 } end
   if mode == "HALF" then return { 0, 0, 0, 0.5 } end
+  if mode == "BLACK" then return { 0, 0, 0, 1 } end
   return nil
 end
 

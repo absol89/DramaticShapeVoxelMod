@@ -490,7 +490,7 @@ local SETTINGS = {
     when = function() return stagedBattles() end, full = true },
   { UiBackplates.textboxFill,
     "WHITE keeps the latest build's opaque paper. HALF draws translucent "
-    .. "black, and OFF removes only the paper. "
+    .. "black, BLACK draws opaque black, and OFF removes only the paper. "
     .. "Dark and transparent modes use white ink with a one-pixel shadow. "
     .. "The fill is drawn with the engine textbox so BATTLE SIZE FIXED and "
     .. "FILL stay aligned. ARENA FILL: WHITE overrides this row to WHITE.",
