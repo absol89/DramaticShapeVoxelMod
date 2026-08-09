@@ -488,9 +488,14 @@ local SETTINGS = {
     .. "LIGHT: UNLIT so the sprites stay flat and true-colour with no night "
     .. "tint (as in the traditional games).",
     when = function() return stagedBattles() end, full = true },
-  -- The battle box is ALWAYS an opaque white panel with black ink (see
-  -- BattleState:drawTextArea), so TEXTBOX FILL was dropped -- no option row.
-  -- Marked `full` for the opposite reason the battle rows are: this is not a
+  { UiBackplates.textboxFill,
+    "WHITE keeps the latest build's opaque paper. HALF draws translucent "
+    .. "black, and OFF removes only the paper. "
+    .. "Dark and transparent modes use white ink with a one-pixel shadow. "
+    .. "The fill is drawn with the engine textbox so BATTLE SIZE FIXED and "
+    .. "FILL stay aligned. ARENA FILL: WHITE overrides this row to WHITE.",
+    when = function() return stagedBattles() end, full = true },
+  -- AA is marked `full` for the opposite reason the battle rows are: this is not a
   -- knob on the look at all, it is what the look COSTS. FULL is a preset for
   -- the diorama, not a licence to spend four times the fill rate on the
   -- machine it happens to be running on, so it neither sets this nor takes

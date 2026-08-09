@@ -45,6 +45,7 @@ local BattleScene = V.require("BattleScene")
 local BattleDOF = V.require("BattleDOF")
 local BattleHud = V.require("BattleHud")
 local UiBackplates = V.require("UiBackplates")
+local TextboxStyle = V.require("TextboxStyle")
 local BattlePics = V.require("BattlePics")
 local BattleArt = V.require("BattleArt")
 local AnimatedBattleArt = V.require("AnimatedBattleArt")
@@ -733,41 +734,33 @@ local function withoutBackgroundFill(battle, fn)
   if not ok then error(err, 0) end
 end
 
--- ------- the box, without its paper
+-- ------- the battle box's own paper
 --
--- Font.drawBox is a white fill and then six border glyphs, and the fill is the
--- opaque slab the frosted panel underneath is there to replace. So for the
--- length of one drawTextArea the white fills are dropped and everything else
--- -- the border, the text, the cursor, the down arrow -- draws exactly as it
--- always did, over the glass instead of over paper.
---
--- Every fill drawTextArea issues is one of those: the box's own, and the two
--- eight-pixel cells MoveSelectionMenu wipes back to box white before it writes
--- the border glyphs that hardware would have overwritten. Both are opaque
--- white, both are paper, and both go.
---
--- The same shim shape as withoutBackgroundFill above, and scoped as tightly:
--- installed around a single call, removed on the way out including on error,
--- never live outside a battle frame this mode is drawing.
--- WHITE arena fill: paint the box background (and anything else the engine
--- fills inside the text-area draw) opaque white, so the engine's coloured BG
--- palette -- orange on the intro flash, grey once the mons appear -- cannot
--- show through. The text, border and cursor are drawn as glyphs, not fills,
--- so they survive untouched. (Forcing the palette itself crashed PaletteFX,
--- so we whiten at draw time instead.)
-local function whiteBoxFill(battle, fn)
-  local g = love.graphics
-  local rectangle = g.rectangle
-  g.rectangle = function(mode, ...)
-    if mode == "fill" then
-      g.setColor(1, 1, 1, 1)
-    end
-    return rectangle(mode, ...)
+-- Font.drawBox issues its fill, border and ink into the engine's 160x144 UI
+-- canvas. Styling the opaque-white fills inside that exact draw keeps the
+-- paper and its corners together under both BATTLE SIZE FIXED's integer scale
+-- and FILL's fractional scale. v1.68 drew a second slab into shot.canvas using
+-- shot.scale, which is why HALF only lined up in FIXED.
+local function drawStyledTextArea(battle, draw)
+  local graphics = love.graphics
+  local style = UiBackplates.textboxFillStyle()
+  local whiteInk = UiBackplates.textboxUsesWhiteInk()
+  local drawEngineText = function() draw(battle) end
+
+  -- Preserve the latest build's WHITE rendering, including its black-ink
+  -- treatment. Dark and paperless modes composite their paper separately so
+  -- the white-ink shader cannot mistake a black slab for glyphs.
+  if not whiteInk then
+    return BattleHud.flipGlyphs(BattleScene.GB_W, BattleScene.GB_H, function()
+      TextboxStyle.withFill(graphics, style, drawEngineText)
+    end, true)
   end
-  local ok, err = pcall(fn, battle)
-  g.rectangle = rectangle
-  g.setColor(1, 1, 1, 1)
-  if not ok then error(err, 0) end
+
+  return TextboxStyle.withWhiteInk(graphics, style, drawEngineText,
+    function(drawInk)
+      BattleHud.flipGlyphs(BattleScene.GB_W, BattleScene.GB_H,
+                           drawInk, false)
+    end)
 end
 
 -- ------- the hour's light, on a pic that is not geometry
@@ -1260,15 +1253,7 @@ function OverworldBattle.install()
   function BattleState:drawTextArea()
     if not self.dramaticShapeShot then return innerText(self) end
     if isIOS() then return innerText(self) end
-    local battle = self
-    -- Every battle box -- the dialogue, the FIGHT/ITEM/RUN menu and the
-    -- move-select / type panels -- is drawn as an OPAQUE WHITE panel with
-    -- BLACK ink, the same as the overworld / trainer-intro textbox. Black ink
-    -- sits on white (never white-on-white), so the words always read. This is
-    -- the one predictable backplate, so TEXTBOX FILL was dropped: the box is
-    -- simply always white.
-    BattleHud.flipGlyphs(BattleScene.GB_W, BattleScene.GB_H,
-                         function() whiteBoxFill(battle, innerText) end, true)
+    return drawStyledTextArea(self, innerText)
   end
 
   local innerAnim = BattleState.drawAnimLayer
