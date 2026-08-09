@@ -1,4 +1,4 @@
--- Voxel world mode: assemble and draw one frame of the 3D scene.
+﻿-- Voxel world mode: assemble and draw one frame of the 3D scene.
 --
 -- World space is world pixels and shares its origin with the 2D paths, so
 -- the terrain mesh needs no transform at all and a connected map just
@@ -20,6 +20,8 @@ local SpriteBillboards = V.require("SpriteBillboards")
 local TileShape = V.require("TileShape")
 local TerrainAtlas = V.require("TerrainAtlas")
 local Voxel = V.require("VoxelState")
+local Sky = V.require("Sky")
+local DayNight = V.require("DayNight")
 local PaletteFX = require("src.render.PaletteFX")
 local Map = require("src.world.Map")
 
@@ -49,12 +51,16 @@ VoxelScene._modeColors = modeColors   -- named for the suite
 
 -- ------------------------------------------------------------------ sky --
 --
--- At the top rung the camera is pitched far enough over that the horizon
--- comes into frame and a good part of the picture is void -- so the void
--- becomes the sky, and the diorama reads as standing under something
--- rather than floating on a black plate. Below that rung the camera looks
--- down steeply enough that the horizon is off-screen, and painting the
--- void only tints the gaps between meshes, so it stays transparent.
+-- The void behind the diorama is SKY, at every rung -- so the world reads as
+-- standing under something rather than floating on a black plate.
+--
+-- What is up there differs by rung, and the sky follows it rather than being
+-- retuned for each. At 75 degrees the camera is pitched far enough over that
+-- the horizon is genuinely in frame, and the bands run down to meet it. At the
+-- steeper rungs the horizon is above the top edge and the void that shows is
+-- where the ground runs OUT -- past the map edge, past the curve -- so the
+-- bands take a fixed slice of the frame instead (lib/Sky.lua, Sky.SPAN) and the
+-- haze below them fills the rest.
 --
 -- INDOORS THERE IS NO SKY. A house, a cave or a gym is a room with a
 -- ceiling, and the void past its walls is the outside of a box, not open
@@ -67,30 +73,78 @@ VoxelScene._modeColors = modeColors   -- named for the suite
 -- CLASSIC a green one, GBC INV a dark one, and the colour modes the blue.
 -- A hardcoded blue would sit wrong in every non-colour mode -- the same
 -- mismatch the terrain bake had.
+--
+-- This ramp is the FLAT sky -- what a caller clears the void to. The free-roam
+-- camera's banded sky has a palette of its own (lib/Sky.lua), transformed the
+-- same way by the same seam; they are separate because the flat one also has to
+-- serve an indoor void and a battle's arena, which want a colour rather than a
+-- sky.
 local SKY_SHADES = { { 222, 242, 255 }, { 135, 196, 240 },
                      { 64, 120, 192 }, { 16, 40, 80 } }
 local SKY_SHADE = 2       -- the ramp's "sky" proper; 1 is its highlight
 
--- fade across the approach to the top rung, so the sky arrives with the
--- camera tween instead of popping in on the keypress
-local function skyStrength(angleRad)
-  local deg = math.deg(angleRad or 0)
-  local from = Voxel.ANGLES_DEG[Voxel.MAX_LEVEL] or 50      -- the rung below
-  local to = Voxel.ANGLES_DEG[Voxel.MAX_LEVEL + 1] or 75    -- the top rung
-  if to <= from then return deg >= to and 1 or 0 end
-  local t = (deg - from) / (to - from)
-  if t < 0 then return 0 end
-  if t > 1 then return 1 end
-  return t
+-- the ramp as the display mode has it, which is the only form anything here
+-- should be reading it in
+local function skyRamp()
+  return PaletteFX.effectiveColors(SKY_SHADES) or SKY_SHADES
 end
 
-local function skyFor(map)
+-- Full strength at every rung: the sky is painted wherever the diorama is.
+--
+-- The ramp that is left is for ARRIVAL alone. Switching the mode on eases the
+-- camera up from flat, and the sky comes up with it over the first few degrees
+-- rather than appearing whole on the keypress -- which is also what keeps a
+-- top-down camera, where there is no void worth speaking of, from painting one.
+local SKY_FADE_DEG = 8
+
+local function skyStrength(angleRad)
+  local deg = math.deg(angleRad or 0)
+  if deg <= 0 then return 0 end
+  local t = deg / SKY_FADE_DEG
+  return t < 1 and t or 1
+end
+
+-- One shade off the sky ramp, transformed by the display mode, as an
+-- {r, g, b, a} in 0..1. `shade` picks the rung (SKY_SHADE is the sky
+-- proper; 4 is its darkest, which is what an indoor void wants).
+function VoxelScene.skyShade(shade, alpha)
+  local shades = skyRamp()
+  local c = shades[shade] or SKY_SHADES[shade] or SKY_SHADES[SKY_SHADE]
+  return { c[1] / 255, c[2] / 255, c[3] / 255, alpha or 1 }
+end
+
+-- The sky `map` stands under at strength `t`, or nil where there is no sky
+-- to paint: indoors, or with the horizon out of frame.
+--
+-- One flat colour, which is what a caller that only needs something to clear the
+-- void to wants -- the overworld battle's arena shot is one of those. The
+-- gradient is added on top of this by skyFor, for the free-roam camera alone.
+function VoxelScene.skyColor(map, t)
   if not (map and map.def and Map.isOutdoor(map.def)) then return nil end
-  local t = skyStrength(Voxel.angle)
-  if t <= 0 then return nil end
-  local shades = PaletteFX.effectiveColors(SKY_SHADES) or SKY_SHADES
-  local c = shades[SKY_SHADE] or SKY_SHADES[SKY_SHADE]
-  return { c[1] / 255, c[2] / 255, c[3] / 255, t }
+  if not t or t <= 0 then return nil end
+  local sky = VoxelScene.skyShade(SKY_SHADE, t)
+  -- outdoors the flat fill follows the CLOCK: it becomes the hour's haze --
+  -- gold at dusk, navy at night -- so a battle staged on the map at
+  -- midnight is under a midnight void, not a noon one. Free-roam is
+  -- unchanged by this: Sky.dress overwrites the fill with the same value.
+  local haze = Sky.haze()
+  if haze then sky[1], sky[2], sky[3] = haze[1], haze[2], haze[3] end
+  return sky
+end
+
+-- The free-roam sky: the flat one above, dressed with the banded gradient
+-- (lib/Sky.lua).
+--
+-- Only here, and deliberately. This is the sky the walking camera stands under,
+-- where the horizon is a quarter of the way down the frame at the top rung and
+-- one flat blue reads as a wall of paint. A battle is a staged shot with its own
+-- placed camera whose horizon sits above the frame entirely, so it keeps the
+-- flat fill it has always had -- there is no gradient to see from down there,
+-- and the arena's look is not this rung's to change.
+local function skyFor(map)
+  local sky = VoxelScene.skyColor(map, skyStrength(Voxel.angle))
+  if not sky then return nil end
+  return Sky.dress(sky)
 end
 
 VoxelScene._skyFor = skyFor           -- named for the suite
@@ -131,6 +185,9 @@ local function groundAt(map, cellX, cellY)
 end
 
 VoxelScene.YAW = YAW
+-- shared with the overworld battle, which stands its mons on map cells and
+-- needs the same answer about what height "the floor" is there
+VoxelScene.groundAt = groundAt
 
 -- Camera-ward pull distance for billboards (and the grass rows, which
 -- must keep their relative depth to feet): just enough that a leaned-back
@@ -190,6 +247,36 @@ local function billboardPull()
   return VoxelScene.pull(math.max(Voxel.angle, 0.05))
 end
 
+-- An authored FIGURE's card -- a person the tileset draws INTO a piece of
+-- furniture, cut out by the profile's mask (Structures.buildFigures). It is
+-- a sprite, so it gets the sprite treatment: the mesh arrives in its own
+-- local space with its feet on y = 0, and this stands it at its drawn
+-- position and tips it back by exactly the camera's pitch -- the same
+-- pivot-at-the-feet lean billboardMatrix gives a character, so the man on
+-- the Pokemon Center couch reads face-on at every tilt like the NPCs
+-- around him. No cell centring: unlike a character he is not standing on a
+-- cell, he is standing where he was drawn, which may straddle two.
+local function figureMatrix(f, offX, offZ)
+  local Voxel = V.require("VoxelState")
+  return Mat4.mul(Mat4.translate(f.wx + (offX or 0), f.y, f.wz + (offZ or 0)),
+                  Mat4.rotateX(Voxel.angle - math.pi / 2))
+end
+
+-- What the sun sees: the same card UNLEANED and flattened, exactly as
+-- Voxel3D.casterMatrix does it for a character.
+local function figureCaster(f, offX, offZ)
+  return Mat4.mul(
+    Mat4.translate(f.wx + (offX or 0), f.y, f.wz + (offZ or 0)),
+    Mat4.scale(1, 1, 0))
+end
+
+-- Every figure on `map`, drawn with `draw(mesh, model, caster)`.
+local function eachFigure(map, offX, offZ, draw)
+  for _, f in ipairs(ChunkMesher.figures(map) or {}) do
+    draw(f.mesh, figureMatrix(f, offX, offZ), figureCaster(f, offX, offZ))
+  end
+end
+
 -- Draw one posed entity. Returns true if 3D geometry carried it, false
 -- when nothing could be built and the caller should fall back.
 -- `colors` is the 4-color world palette the entity stands under in the SGB
@@ -220,12 +307,13 @@ local function drawEntity(sprite, px, py, facing, phase, flip, gh, colors,
   -- drift): lets the leaned-back head win against the wall it leans
   -- OVER while a character genuinely BEHIND a building is dozens of
   -- pixels deeper and still loses, so real occlusion works.
-  -- the same card UNLEANED is what the sun saw (castShadows draws
-  -- exactly this mesh), so that is where each vertex asks whether the
-  -- light reached it -- see Voxel3D.draw
+  -- the same card UNLEANED -- and SNUGGED, exactly as the sun stored it
+  -- (castShadows draws this mesh through ShadowMap.snug) -- is where each
+  -- vertex asks whether the light reached it; see ShadowMap.snug for why
+  -- the lookup must match the stored transform to the letter
   Voxel3D.draw(mesh, tex, billboardMatrix(px, py, y, mirror),
                billboardPull(),
-               Voxel3D.casterMatrix(px, py, y, mirror))
+               ShadowMap.snug(Voxel3D.casterMatrix(px, py, y, mirror)))
   return true
 end
 
@@ -370,6 +458,38 @@ local function posesOf(state, spriteColors)
   return posed, me
 end
 
+-- ------- the glint's drive
+--
+-- A reflection is something the VIEWPOINT does, so the window glint is fed
+-- by the camera's own travel rather than by a clock: its phase advances
+-- with distance covered and its strength fades in over a few steps of
+-- walking and back out within a beat of standing still. Stand still and
+-- the glass is still; move and the light crosses it.
+-- The rate is slow on purpose: the sweep pattern lives in the pane's own
+-- texels (see the scene shader), so this is a FRACTION of a texel per world
+-- pixel walked -- one full pass of the glint across a pane per eight or so
+-- cells of travel, with no frame ever jumping it far enough to strobe.
+VoxelScene.GLINT_RATE = 0.05     -- radians of sweep per world pixel travelled
+VoxelScene.GLINT_IN = 0.12      -- strength gained per moving frame
+VoxelScene.GLINT_OUT = 0.08     -- and lost per resting frame
+
+function VoxelScene.glintStep(g, cx, cy)
+  local dist = 0
+  if g.x then
+    dist = math.abs(cx - g.x) + math.abs(cy - g.y)
+  end
+  g.x, g.y = cx, cy
+  g.phase = ((g.phase or 0) + dist * VoxelScene.GLINT_RATE) % (2 * math.pi)
+  if dist > 0.05 then
+    g.amp = math.min(1, (g.amp or 0) + VoxelScene.GLINT_IN)
+  else
+    g.amp = math.max(0, (g.amp or 0) - VoxelScene.GLINT_OUT)
+  end
+  return g
+end
+
+local glint = {}
+
 -- A stamp of everything the sun pass depends on. Nothing in it moving
 -- means the shadow map it produced last frame is still exactly right, and
 -- redrawing the whole world from the sun would buy nothing -- which is
@@ -391,6 +511,12 @@ local function shadowSignature(terrain, nbMesh, posed, cx, cy, vw, vh)
   -- standing perfectly still
   put(vw); put(vh)
   put(math.floor((V.require("VoxelState").angle or 0) * 512))
+  -- the sun itself: the cycle swings the shear as the clock runs, and a map
+  -- lit from somewhere new must be redrawn from there too. Quantised by the
+  -- rig's own step (DayNight.rigTime), so a running cycle redraws the map a
+  -- few times a minute rather than every frame.
+  put(math.floor(ShadowMap.KX * 128))
+  put(math.floor(ShadowMap.KZ * 128))
   put(tostring(terrain))
   for i = 1, #nbMesh do put(tostring(nbMesh[i])) end
   for _, p in ipairs(posed) do
@@ -427,11 +553,25 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
   end
   -- flower billboards live outside the terrain mesh (they draw after the
   -- characters, pulled -- see render), but the sun still sees them: a
-  -- handful of cutouts per meadow, unlike the grass left out below
-  ShadowMap.draw(ChunkMesher.flowers(state.map), atlasFor(state.map), nil)
+  -- handful of cutouts per meadow, unlike the grass left out below.
+  -- Every thin card from here down is SNUGGED toward the sun along its own
+  -- ray (ShadowMap.snug) so its shadow keeps contact with its feet instead
+  -- of starting a bias-width away.
+  ShadowMap.draw(ChunkMesher.flowers(state.map), atlasFor(state.map),
+                 ShadowMap.snug(nil))
   for _, nb in ipairs(state.neighbors or {}) do
     ShadowMap.draw(ChunkMesher.flowers(nb.map), atlasFor(nb.map),
-                   Mat4.translate(nb.ox, 0, nb.oy))
+                   ShadowMap.snug(Mat4.translate(nb.ox, 0, nb.oy)))
+  end
+  -- authored figures cast too, for the same reason the flowers do: a
+  -- handful of cards per map, and a person with no shadow reads as pasted on
+  eachFigure(state.map, 0, 0, function(mesh, _, caster)
+    ShadowMap.draw(mesh, atlasFor(state.map), ShadowMap.snug(caster))
+  end)
+  for _, nb in ipairs(state.neighbors or {}) do
+    eachFigure(nb.map, nb.ox, nb.oy, function(mesh, _, caster)
+      ShadowMap.draw(mesh, atlasFor(nb.map), ShadowMap.snug(caster))
+    end)
   end
   for _, p in ipairs(posed) do
     local def = p.sprite.def
@@ -439,8 +579,9 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
     local mesh = SpriteBillboards.shadowQuad(def, frame)
     if mesh then
       ShadowMap.draw(mesh, p.sprite:resolveImage(),
-                     Voxel3D.casterMatrix(p.px, p.py, p.gh + (p.lift or 0),
-                                          mirror))
+                     ShadowMap.snug(
+                       Voxel3D.casterMatrix(p.px, p.py, p.gh + (p.lift or 0),
+                                            mirror)))
     end
   end
 
@@ -457,6 +598,25 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
 
   local cam = state.camera
   local cx, cy = cam.x + vw / 2, cam.y + vh / 2
+
+  -- the hour's light, before anything is cast or drawn: point the shared
+  -- rig at the clock (or at noon, indoors -- a cave at midnight is exactly
+  -- as dark as a cave at noon) and set the tint the scene shader multiplies
+  -- every surface by. A CANOPY map (Viridian Forest) is the case between:
+  -- the rig stays at noon and no sky is painted, but the hour's tint still
+  -- falls through the leaves -- night reaches a forest floor.
+  local outdoor = state.map.def and Map.isOutdoor(state.map.def) or false
+  DayNight.applyRig(outdoor)
+  Voxel3D.tint = DayNight.tint(outdoor or DayNight.isCanopy(state.map))
+  -- and the window glass: the tileset's own panes (found in its art --
+  -- GlassMask), lit after dark. Outdoors only, like everything the clock
+  -- touches, which also keeps any pane-shaped art in an interior tileset
+  -- from picking up a glint.
+  local GlassMask = V.require("GlassMask")
+  Voxel3D.glassMask = outdoor and GlassMask.texture(state.map.tileset) or nil
+  Voxel3D.glassNight = outdoor and DayNight.windowLight() or 0
+  local g = VoxelScene.glintStep(glint, cx, cy)
+  Voxel3D.glassPhase, Voxel3D.glassGlint = g.phase, g.amp
 
   local function atlasFor(map)
     return TerrainAtlas.forMap(map, modeColors(paletteFor, map))
@@ -498,6 +658,11 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
     Voxel3D.endShadows()
   end
 
+  -- Sprite sheets from here to the figure pass: their texture coordinates
+  -- mean nothing to the tileset-shaped glass mask, so the glass is off or
+  -- the panes' atlas positions stripe the cast with lamplight at night
+  Voxel3D.glass(false)
+
   -- The player's silhouette goes down BEFORE the characters, so the only
   -- thing it can meet in the depth buffer is the WORLD -- terrain, buildings,
   -- trees. Drawn after the solid pass it would meet the player's own card
@@ -511,14 +676,46 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
     Voxel3D.endGhost()
   end
 
-  -- characters, normally depth-tested: the camera-ward pull inside
+  -- Characters carry no wireframe out here, whatever the V-GRID row says.
+  -- The seams are what makes the WORLD read as built out of voxels, and
+  -- the people walking around in it are the one thing that should read as
+  -- drawn instead -- a grid over a 16x16 sprite lands a line every couple
+  -- of display pixels and turns a face into a mesh. (The battle pass makes
+  -- the opposite call for its own combatants, deliberately: that is a
+  -- staged shot rather than the world being walked around in -- see
+  -- BattleBillboard.)
+  --
+  -- Characters, normally depth-tested: the camera-ward pull inside
   -- drawEntity resolves the lean-over-the-wall-in-front case, and a
   -- character genuinely behind a building is far deeper and loses the
   -- test, so buildings and trees really occlude.
+  Voxel3D.seams(false)
   for _, p in ipairs(posed) do
     drawEntity(p.sprite, p.px, p.py, p.facing, p.phase, p.flip, p.gh,
                p.colors, p.lift)
   end
+  -- back on for everything textured from the atlas again -- figures, grass
+  -- and flowers all sample it, where the mask's coordinates are honest
+  Voxel3D.glass(true)
+  -- Authored figures, alongside the characters and with the same lean and
+  -- the same camera-ward pull -- they ARE characters as far as the artwork
+  -- is concerned, just ones the tileset draws instead of a sprite sheet.
+  -- Drawn after the walkers so a player standing in front of the couch
+  -- wins the overlap, which is the order the flat game draws them in.
+  local figPull = billboardPull()
+  eachFigure(state.map, 0, 0, function(mesh, model, caster)
+    Voxel3D.draw(mesh, atlasFor(state.map), model, figPull,
+                 ShadowMap.snug(caster))
+  end)
+  for _, nb in ipairs(state.neighbors or {}) do
+    eachFigure(nb.map, nb.ox, nb.oy, function(mesh, model, caster)
+      Voxel3D.draw(mesh, atlasFor(nb.map), model, figPull,
+                   ShadowMap.snug(caster))
+    end)
+  end
+  -- and the seams are back on for the terrain art that follows: grass and
+  -- flowers are the world's own drawing, not people
+  Voxel3D.seams(true)
   -- tall grass last, pulled camera-ward exactly as far as the characters
   -- were (same per-vertex shader bias, so grass never drifts either):
   -- relative depth between a walker and the tuft row south of their feet
@@ -543,11 +740,14 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- ON, while the nearest flower of the cell south (+20) stays in front
   -- and keeps overdrawing their feet.
   local fpull = math.max(0, pull - 8 * math.sin(math.max(Voxel.angle, 0.05)))
+  -- flowers are snugged casters too, so they read their own shadowing
+  -- through the same snugged transform the sun stored them with
   Voxel3D.draw(ChunkMesher.flowers(state.map), atlasFor(state.map), nil,
-               fpull)
+               fpull, ShadowMap.snug(nil))
   for _, nb in ipairs(state.neighbors or {}) do
     Voxel3D.draw(ChunkMesher.flowers(nb.map), atlasFor(nb.map),
-                 Mat4.translate(nb.ox, 0, nb.oy), fpull)
+                 Mat4.translate(nb.ox, 0, nb.oy), fpull,
+                 ShadowMap.snug(Mat4.translate(nb.ox, 0, nb.oy)))
   end
 
   return Voxel3D.endScene()

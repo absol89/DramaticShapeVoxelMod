@@ -70,6 +70,21 @@
 -- pinned prop, overriding the flat-neighbour vote -- the cuttable bush
 -- stands on the grass Cut leaves behind, whatever borders it.
 --
+-- And `prop_bg` (not a class either): which GB shades count as BACKGROUND
+-- when a pinned per-pixel prop is cut out, for the drawings whose own body
+-- reaches the edge of their bounding box and so vote themselves away.
+-- Keyed by tile, because two props sharing an atlas can want opposite
+-- answers on the same shade.
+--
+-- And it may carry `figures` (not a class either): hand-drawn pixel masks
+-- that lift a FIGURE PAINTED INTO furniture off it and stand it up as a
+-- standee, leaving the furniture its own geometry.  A pin resolves a
+-- whole 8x8 tile, so it can never separate two things that share one --
+-- and nothing automatic can either when the figure has no background
+-- margin to flood from and wears the same shades as what it sits on.
+-- The Pokemon Center's seated man is the case; see POKECENTER below for
+-- the format.
+--
 -- Whole BUILDINGS are not tile pins -- one drawing packs a roof seen from
 -- above, a facade seen face-on and sloped ends as diagonal silhouettes,
 -- and no single class covers that.  They live in the `buildings` list at
@@ -87,6 +102,9 @@ return {
     fence = 10,
     sign = 12,
     wall = 16,
+    -- masonry drawn two courses tall (the Indigo Plateau's rim, the
+    -- badge-check gates): as tall as a statue on its plinth
+    cliff = 32,
     tree = 16,
     roof = 28,
     bed = 7,
@@ -694,22 +712,17 @@ return {
       -- bodies so they stand ON them) and the PC (66/70/82/86), which
       -- stands on its pinned desk
       billboard = { 58, 59, 66, 70, 74, 75, 82, 86 },
-      -- Why the man on the couch rides the top face instead of standing
-      -- up.  He is drawn across two tile rows (skin pixels appear in
-      -- rows 8 and 9 and stop dead at the row 9/10 seam), and folding
-      -- two rows upright requires both to share a class, which makes the
-      -- box two tiles deep -- and a fully folded box repeats its north
-      -- row across its whole top face.  So every upright arrangement
-      -- puts his head on screen two or three times: as a 16px seat-back
-      -- his head lands on the front AND twice on the top; as a 32px
-      -- bookcase he becomes a cabinet taller than the room's walls.
-      -- Dropping the seat to floor level to clear his face does not help
-      -- either, it only moves which copy you see.  He also cannot be a
-      -- standee: the drawing has no floor margin, so all three non-black
-      -- shades touch the cluster rim and the mask drains 307 of its 420
-      -- interior pixels -- 46% of him even segmented alone, because his
-      -- skin is the same light shade as the couch behind him.  Riding
-      -- the top face is the one arrangement that draws him exactly once.
+      -- The man on the couch, cut out by hand and stood up (see `figures`
+      -- below).  Nothing automatic reaches him.  A class pin resolves a
+      -- whole 8x8 tile and he SHARES his tiles with the couch, so pinning
+      -- them stands the furniture up with him; riding the couch's top
+      -- face (what this did before) draws him lying flat on the cushion;
+      -- and he cannot be segmented into a standee either, because the
+      -- drawing has no background margin for a flood to enter by and his
+      -- skin is the same light shade as the couch -- the mask drained 307
+      -- of his 420 interior pixels, 46% of him, even segmented alone.
+      -- An authored mask is the only thing that can tell a man from the
+      -- sofa he is painted into, so that is what `figures` carries.
       -- the PC's desk body, which the PC stands on
       table = { 9, 88 },
       -- the potted plants: bush (32/33/48/49) over pot (34/35/50/51,
@@ -721,6 +734,82 @@ return {
       -- them; the standee reads darker than the flat art, which is the
       -- accepted trade for a real plant silhouette
       prop = { 32, 33, 34, 35, 48, 49, 50, 51 },
+      -- ...but the POTS were draining outright.  The plant pair is drawn
+      -- as one 4x4-tile block and the pot's olive base is flush on that
+      -- block's bottom row, so the background vote -- which reads the
+      -- shades touching the drawing's own bounding box -- came back with
+      -- "dark" in it, and every dark pixel in the plant left with the
+      -- floor.  The pots rendered as hollow black frames around one or
+      -- two surviving pixels while the flat art has solid olive bodies.
+      --
+      -- So name the background outright for these eight tiles: the floor
+      -- IS light and white here, and nothing else is.  That restores 152
+      -- pixels of the block (55% -> 69% of it kept) and cannot move any
+      -- other prop, which matters -- the same call tileset-wide would pull
+      -- the dark wall band into the healing consoles' screens and strip
+      -- three pixels off the PC, because those two want the opposite
+      -- answer on the very same shades.
+      prop_bg = {
+        { tiles = { 32, 33, 34, 35, 48, 49, 50, 51 },
+          shades = { "light", "white" } },
+      },
+      -- THE MAN ON THE COUCH.  He is drawn INTO the lounge furniture and
+      -- spills out of it in BOTH directions, which is why he needs three
+      -- tile columns:
+      --
+      --   36 / 52   the couch's west arm.  36's two RIGHTMOST columns are
+      --             the back of his head; 52 is the plain arm, and is also
+      --             what 36 wears once his hair comes off it
+      --   37 / 53   him: head, then face and body
+      --   57 / 60   the floor east of the couch, which his hair and his
+      --             foot overhang.  1 and 26 are those same two floor
+      --             tiles as the artist drew them WITHOUT him -- 8 and 5
+      --             pixels apart respectively -- so lifting him off is
+      --             lossless there
+      --
+      -- `pixels` is the hand-drawn line between the man and the furniture;
+      -- `under` is what each tile wears once he is lifted off it.  The
+      -- couch keeps its polygonal box and he stands on top of it.
+      --
+      -- The mask keeps ALL of 37/53's column 7, the couch's east edge.
+      -- Where that column is drawn dark it is the couch's own rule -- but
+      -- it is also where his hair crosses the tile seam, so dropping it
+      -- floats the overhang free of his head.  And where it is drawn WHITE
+      -- it is the right side of his face, so dropping it opens a slit down
+      -- his cheek (rows 5-8, which is exactly what the first cut did).
+      -- Keeping the rule twice costs nothing: tile 39 redraws it on the
+      -- couch beneath him either way.  Repainting 36 as 52 does cost one
+      -- row -- 36's top trim band, which 52 does not carry -- and that is
+      -- the accepted price for not leaving a second copy of his head lying
+      -- on the arm.  The background corners around his head and the
+      -- cushion wedge under his legs are the only pixels given back.
+      figures = {
+        {
+          w = 3,
+          tiles = { 36, 37, 57,
+                    52, 53, 60 },
+          under = { 52, 39,  1,
+                    52, 39, 26 },
+          pixels = {
+            "..........XXXXX.........",
+            "........XXXXXXXX........",
+            ".......XXXXXXXXXX.......",
+            "......XXXXXXXXXXXX......",
+            "......XXXXXXXXXXXX......",
+            "......XXXXXXXXXXX.......",
+            "......XXXXXXXXXXX.......",
+            "......XXXXXXXXXXX.......",
+            "........XXXXXXXXX.......",
+            "........XXXXXXXX........",
+            "........XXXXXXXX........",
+            "........XXXXXXXX........",
+            "........XXXXXXXXX.......",
+            ".........XXXXXXXXX......",
+            "...........XXXXXX.......",
+            "..............XX........",
+          },
+        },
+      },
     },
 
     -- The Poke Marts (one 4x4 layout serves every city; the tileset
@@ -731,12 +820,61 @@ return {
     -- boxed the two free-standing shelf racks into one 4-tile-deep
     -- monolith.
     MART = {
-      -- the wall band stays one 16px face: the trim and case tops
-      -- (40/90/91), the SALE cases (78/79) with their feet (23/29), and
-      -- the glass drink fridges (44-47) with their feet (62/63) -- all
-      -- drawn built INTO the back wall, exactly like the Center's
-      -- healing consoles
-      wall = { 23, 29, 40, 44, 45, 46, 47, 62, 63, 78, 79, 90, 91 },
+      -- THE BACK WALL.  It is drawn FOUR tile rows tall -- trim (40, or
+      -- the fridge tops 90/91), the SALE signs (78/79) or glass upper
+      -- (44/45), the black display niche (76/77) or glass lower (46/47),
+      -- and the cases' base and goods (23/29, 62/63) -- which is 32px of
+      -- artwork depicting ONE wall, not four things at four depths.
+      --
+      -- Pinned `wall` that is exactly what it became: every row got its
+      -- own 16px box marching north, so the only face you ever saw was
+      -- the southmost row (the cases' base), the signs and the niche hid
+      -- behind it, and the trim ended up lying flat as a gold shelf on
+      -- the roofs of the boxes behind.  Laid out in depth instead of
+      -- stacked up.
+      --
+      -- `bookcase` is the class that collapses a tall drawing onto a
+      -- one-cell-deep box at its real drawn height, so the run of four
+      -- rows becomes a single 32px wall: bands from the south are base,
+      -- niche, sign, trim, its top face wears the trim, and the three
+      -- rows behind become hidden floor.  Same treatment the shelf racks
+      -- below already get -- a Mart's back wall IS a wall of display
+      -- cases, and the geometry does not care which we call it.
+      bookcase = { 23, 29, 40, 44, 45, 46, 47, 62, 63, 76, 77, 78, 79,
+                   90, 91,
+                   -- the free-standing shelf racks: TALL drawings, not
+                   -- deep ones -- each rank collapses onto a
+                   -- one-cell-deep shelf at its drawn height (the
+                   -- Dojo/Red's-house treatment). 64/65/67 and 80/81/83
+                   -- are the bottle rows the clerk's booth also wears as
+                   -- its top display; 68/69/71 and 84/85/87 the goods
+                   -- rows below
+                   64, 65, 67, 68, 69, 71, 80, 81, 83, 84, 85, 87 },
+      -- The wall's own tiles are reused elsewhere, and the back wall is
+      -- the one place they are drawn on the map's TOP EDGE.  So `bookcase`
+      -- is their default and this hands every other use back to `wall`,
+      -- which is what all of them were before: 40 is also the clerk's
+      -- booth back panel (under the shelf rows 80/81 or under itself), and
+      -- 40/76/77/90/91 all recur in INDIGO_PLATEAU_LOBBY, the ninth map on
+      -- this id, where they draw the hall and the lift bank.
+      --
+      -- NEVER put 0 in an `above` set.  Map:tileAt does not answer nil off
+      -- the top of a map -- it border-extends, so row 0 reads the map's
+      -- borderBlock, which indoors is the black void block 0.  Listing 0
+      -- to catch the Lobby's void-backed 90/91 fired the rule on every
+      -- Mart's fridge row as well: row 0 dropped out of the bookcase run,
+      -- the fridges came out 24px against the SALE cases' 32px, and their
+      -- trim row stood as a separate box BEHIND the wall instead of on top
+      -- of it.  Nothing can separate those two cases from above -- both
+      -- see void -- so the Lobby (already out of scope here) gets the
+      -- bookcase reading too, and the Marts come out right.
+      when_above = {
+        [40] = { { above = { 40, 80, 81, 83, 90, 91 }, class = "wall" } },
+        [76] = { { above = { 74, 75 }, class = "wall" } },
+        [77] = { { above = { 74, 75 }, class = "wall" } },
+        [90] = { { above = { 17 }, class = "wall" } },
+        [91] = { { above = { 27 }, class = "wall" } },
+      },
       -- the clerk's counter, half a cell high like every service
       -- counter.  It is a C wrapping the alcove the clerk stands in: the
       -- south arm's drawn front (24/25) under its top band (8/56), the
@@ -746,43 +884,66 @@ return {
       -- cash register, pinned it `billboard`, and got a bare black
       -- outline standing on the counter with the tile's own art replaced
       -- by its neighbour's.
-      counter = { 8, 16, 24, 25, 41, 56, 89 },
-      -- The CASH REGISTER (14/15 over 30/31), a keypad and a curl of
-      -- receipt paper drawn face-on across two tile rows in the middle of
-      -- the counter's east arm.  Pinned `counter` it was just paint on
-      -- the work surface.  In the `billboard` pool it is a standing
-      -- per-pixel cutout ten voxels deep -- the flower-and-vase treatment
-      -- of Red's house, but with a machine's body rather than a stem --
-      -- and the support rule lifts it onto the counter automatically,
-      -- because the tile drawn directly BELOW it (16/41) is a pinned 8px
-      -- box.  Its own pool, so the counter can never absorb it.  The art
-      -- has a clean light margin on three sides and a black outline all
-      -- round, so the shade flood drains the work surface away and leaves
-      -- the machine whole.
-      --
-      -- `console`, not `billboard`, for the two vertical black rules the
-      -- COUNTER draws down the outer edges of those same tiles (columns
-      -- 0 and 15 of the pair, full height).  They are the counter's own
-      -- edging, not the register, but black always survives the shade
-      -- flood, so the billboard pool extruded them too and the machine
-      -- stood flanked by a pair of tall black slabs.  A white column
-      -- separates them from the register body, so they are their own
-      -- connected components -- and `console` carries the same
-      -- one-object contract `cutout` has, which keeps the largest
-      -- drawing and drops them, at ten voxels of body rather than one.
-      console = { 14, 15, 30, 31 },
-      -- the free-standing shelf racks: TALL drawings, not deep ones --
-      -- each rank collapses onto a one-cell-deep shelf at its drawn
-      -- height (the Dojo/Red's-house treatment). 64/65/67 and 80/81/83
-      -- are the bottle rows the clerk's booth also wears as its top
-      -- display; 68/69/71 and 84/85/87 the goods rows below
-      bookcase = { 64, 65, 67, 68, 69, 71, 80, 81, 83, 84, 85, 87 },
+      -- ...and the register's own two tile rows (14/15 over 30/31) are
+      -- part of that same work surface now that the machine has been cut
+      -- off them as a sprite -- see `figures` below.
+      counter = { 8, 14, 15, 16, 24, 25, 30, 31, 41, 56, 89 },
       -- Left to the derived default on purpose: the floor checker and
       -- its shadowed variants (1/11/17/26/27/54) and the exit mat
       -- (12/28) all sit in cells the ROM marks walkable, so the cell
-      -- rule lays them flat unaided; 76/77 is the SALE case's black
-      -- interior, which the volume path recesses half a course into the
-      -- band -- a dark display niche, which is what it is drawn as.
+      -- rule lays them flat unaided.  (76/77, the SALE case's black
+      -- interior, used to be left to the volume path here; it is now the
+      -- back wall's third band, because a run of four rows has to be
+      -- contiguous for the wall to collapse into one box at all.)
+      -- THE CASH REGISTER: a keypad and a curl of receipt paper drawn
+      -- face-on across two tile rows in the middle of the counter's east
+      -- arm.  Like the Center's seated man it is a FIGURE drawn into the
+      -- furniture, so it gets the same treatment -- a flat sprite card
+      -- standing on the counter -- and for the same reason: no class pin
+      -- can separate it from the counter, because the counter draws its
+      -- own edging down columns 0 and 15 of the very same tiles.
+      --
+      -- That edging is what defeated every automatic reading. Black
+      -- always survives the shade flood, so the standee pools extruded
+      -- the two rules along with the machine and it stood flanked by a
+      -- pair of tall black slabs; `console`'s keep-the-largest-drawing
+      -- rule dropped them, but only by throwing away the receipt curl
+      -- too whenever the flood happened to cut it loose.  The mask just
+      -- says where the machine is: columns 2-13, plus the curl climbing
+      -- to the top right, and the counter keeps its edging and its light
+      -- work surface.
+      --
+      -- `under` is 16/41 twice -- the plain work surface, which already
+      -- carries the west edging (black over white) and the east (dark
+      -- over black), so the counter closes up behind the machine with no
+      -- synthesis at all.
+      figures = {
+        {
+          w = 2,
+          tiles = { 14, 15,
+                    30, 31 },
+          under = { 16, 41,
+                    16, 41 },
+          pixels = {
+            ".........XX.....",
+            "........XXXX....",
+            "........XXXXX...",
+            "........XXXXXX..",
+            "...XXXXXXXXXXX..",
+            "..XXXXXXXXXXXX..",
+            "..XXXXXXXXXXX...",
+            "..XXXXXXXXXXX...",
+            "..XXXXXXXXXXX...",
+            "..XXXXXXXXXXX...",
+            "..XXXXXXXXXXX...",
+            "..XXXXXXXXXXX...",
+            "..XXXXXXXXXXX...",
+            "..XXXXXXXXXXX...",
+            "..XXXXXXXXXXX...",
+            "..XXXXXXXXXXX...",
+          },
+        },
+      },
       -- NOT covered: INDIGO_PLATEAU_LOBBY, the ninth map on this id and
       -- the only one that is not the 4x4 shop.  It draws its own hall,
       -- lift bank and rope stanchions from tiles no Mart places, three
@@ -2100,6 +2261,231 @@ return {
       -- south-east).  Neither map places them; they belong with the
       -- wall band above if one ever does.
     },
+
+    -- The approach to the Pokemon League: two maps, INDIGO_PLATEAU (the
+    -- forecourt the League itself stands on) and ROUTE_23 (the long
+    -- climb up to it, with its badge-check gates).  Everything this
+    -- blockset draws is one piece of architecture -- striated rock
+    -- walls, white pillars, and the bird STATUES that line both the
+    -- avenue and the plaza.  29 of its 73 blocks are never placed, so
+    -- every tile named below really is one of these two maps'.
+    --
+    -- A statue is built exactly like the badge gyms' (see GYM above):
+    -- one cell of FIGURE ($10/$12 over $28/$29) standing on one cell of
+    -- PLINTH ($15/$16 the cap over $30/$31 the plaque).  47 of them --
+    -- 12 on INDIGO_PLATEAU, six a side down the avenue, and 35 more
+    -- across ROUTE_23's plaza (blocks $42/$43; the $25/$26 twins that
+    -- stand the same statue on grass are never placed).
+    --
+    -- What the detector made of them is the bug this entry exists for.
+    -- On the avenue the statues stack with NO gap: the plinth's plaque
+    -- row is drawn directly above the next figure's head, so the
+    -- flood-fill joined all six of a column into ONE region 24 tile rows
+    -- tall, and the volume builder's repeat scan read 32px down one half
+    -- of the drawing and 24px down the other.  Each row came out as a
+    -- continuous stepped RIDGE of boxes wearing the statue art folded
+    -- onto its south face -- probed INDIGO_PLATEAU tiles (16,12)-(17,35)
+    -- at 32/24 and (22,12)-(23,35) mirrored.  ROUTE_23's plaza statues
+    -- stand alone and fared no better: 24px boxes with the figure's top
+    -- row skipped outright.
+    --
+    -- Pinned the gyms' way the ridge becomes statues.  The plinth is a
+    -- SOLID 16px `wall` block; the figure is a per-pixel cutout 5 voxels
+    -- deep (the thin `prop` pool) that rides the plinth's top face
+    -- through the authored-box support rule and collapses to the
+    -- plinth's SINGLE cell of footprint -- Structures' wall-support case,
+    -- so the base never marches backwards.
+    --
+    -- The one thing the gyms did not have to deal with: $28/$29 is
+    -- SHARED.  The same bird is drawn again at the foot of every white
+    -- pillar, framed there by the pillar's black edge ($25/$26 over that
+    -- same $28/$29, blocks $18/$1B) -- 80 of them, 76 down ROUTE_23 and
+    -- four on INDIGO_PLATEAU (its two outer corners and the pair
+    -- flanking the League's recess).  So $25/$26 joins the same pool:
+    -- pinning half a cell would have stood a half-height bird under a
+    -- wall.  That in turn is why the pillar itself is pinned -- see the
+    -- last paragraph of `wall`.
+    PLATEAU = {
+      -- ONE 16px course for every piece of masonry here.
+      --
+      -- $03 is the striated rock face, 2436 placements and the bulk of
+      -- both maps.  It already read 16 nearly everywhere, but in the
+      -- columns of INDIGO_PLATEAU's rim that stand over a corner pillar
+      -- the repeat scan came out 24 -- a stagger in the plateau's
+      -- skyline (probed `03w24` at tiles (8,0)-(9,2), (12,0)-(13,2) and
+      -- their two mirrors).  Authored, the rim is one course.
+      --
+      -- $0D/$0F/$0E are the League's outer wall -- top band, face and
+      -- base.  The same three tiles draw the Pokemon League's own
+      -- facade, the long walls flanking the avenue, and every
+      -- badge-check gate down ROUTE_23.
+      --
+      -- $15/$16 + $05/$06 + $30/$31 are the pilaster: cap, shaft, and
+      -- the plaque base.  $15/$16 over $30/$31 IS the statue's plinth --
+      -- the artist drew the same stone twice -- which is why one pin
+      -- serves the gate corners and the statues alike.
+      --
+      -- $2E/$2F the white pillar shaft and $20/$21 its cap change no
+      -- HEIGHT: they derive 16 already.  What the pin buys is
+      -- `authored`, which is exactly what the prop support rule tests.
+      -- Without it a pillar-foot bird finds no support, drops to ground
+      -- level, and leaves a hole punched clean through the pillar
+      -- (probed, shot, then fixed).
+      -- TWO courses (32px) for the masonry that ENCLOSES both maps -- the
+      -- plateau's rim and every wall around the terraces.  It is drawn two
+      -- cells tall, which is exactly the height of a statue on its plinth
+      -- (a 16px plinth under a 16px standee), and that is the read: you are
+      -- walking in a walled compound whose wall matches the statues lining
+      -- it, not a room with a 16px skirting.  At one course the rim was a
+      -- kerb you appeared to look over.
+      --
+      -- $03 the striated rock face, $0D/$0F/$0E the League's outer wall
+      -- (top band, face, base -- the same three tiles draw the League's
+      -- facade, the walls flanking the avenue and every badge-check gate
+      -- down ROUTE_23), and $2E/$2F the white pillar shaft with $20/$21 its
+      -- cap.  These four groups are the enclosure.
+      cliff = { 3, 13,
+                32, 33, 46, 47 },
+      -- THE GATE WALLS, stacked rather than laid out in depth.  $0D/$0F/$0E
+      -- (13/15/14 -- top band, face, base) draw the League's facade, the
+      -- walls flanking the avenue and every badge-check gate down ROUTE_23,
+      -- as FOUR tile rows: 13 / 15 / 15 / 14.  That is 32px of artwork
+      -- depicting one wall, and at one class per row it built four boxes
+      -- marching north, so the wall was 32px DEEP -- you saw the southmost
+      -- row's face and the rest hid behind it.
+      --
+      -- `bookcase` collapses the run onto a single one-cell-deep box at its
+      -- full drawn height: bands from the south are base, face, face, top
+      -- band, and the two rows behind are vacated.  Same mechanism the
+      -- Mart's back wall uses.
+      -- ...and the PILASTER stacks with it.  $05/$06 is its shaft, and it
+      -- is drawn only ever inside a pilaster, so it needs no rule.  Without
+      -- this the pale columns stood 16px against a 32px brown wall and
+      -- their top vertices sat a whole course below the wall's crown.
+      bookcase = { 14, 15, 5, 6 },
+      -- Tile 13 is DUAL-USE and needs resolving per position.  It is the
+      -- gate wall's TOP BAND (block $28's first row) and it is also the
+      -- BASE COURSE under a column of rock face (blocks $18/$1A/$1B, last
+      -- row).  Pinned `bookcase` outright the second use became a one-row
+      -- rank -- an 8px stub under the rock, 352 of them over both maps.
+      --
+      -- ABOVE cannot tell them apart, which is what `when_below` is for.
+      -- Scanned over both maps through the engine's own tileAt, the tile
+      -- above a 13 is the rock face $03 for 140 base courses AND for 64
+      -- gate bands -- so a rule on `above` misfires on those 64 (it did:
+      -- their runs came out 2 and 3 bands instead of 4).  BELOW splits it
+      -- exactly: the wall's own face $0F sits under the top band and under
+      -- nothing else, 336 against 352.  So 13 defaults to `cliff` and is
+      -- promoted where the face is drawn beneath it.
+      --
+      -- 14 and 15 need no rule: 14 only ever sits under 15, 15 only ever
+      -- under 13 or 15.
+      when_below = {
+        [13] = { { below = { 15 }, class = "bookcase" } },
+        -- The pilaster's CAP ($15/$16) is the same stone as the statue's
+        -- plinth top -- the artist drew it twice -- so it too resolves per
+        -- position.  Scanned over both maps: a cap with the shaft $05/$06
+        -- beneath it is a pilaster (76 of them) and one with the plaque
+        -- base $30/$31 beneath it is a statue's plinth (47).  Default
+        -- `wall`, promoted here, so the plinth keeps its single course and
+        -- the statue standing on it still totals the 32px the wall is.
+        [21] = { { below = { 5 }, class = "bookcase" } },
+        [22] = { { below = { 6 }, class = "bookcase" } },
+      },
+      -- The other two ends of the same pair of drawings, keyed the other
+      -- way round.  A pilaster is capped at BOTH ends, so its lower cap has
+      -- the shaft ABOVE it (8 placements); and the plaque base $30/$31 is a
+      -- pilaster's foot when the shaft is above it (68) but a statue's
+      -- plinth bottom when the cap $15/$16 is (47).
+      when_above = {
+        [21] = { { above = { 5 }, class = "bookcase" } },
+        [22] = { { above = { 6 }, class = "bookcase" } },
+        [48] = { { above = { 5 }, class = "bookcase" } },
+        [49] = { { above = { 6 }, class = "bookcase" } },
+      },
+      -- The vacated rows behind a collapsed wall take the cell ABOVE the
+      -- run rather than the default hidden floor: here that is more rock
+      -- face on ROUTE_23 and the plateau's paving or grass on INDIGO_
+      -- PLATEAU, so the wall reads as set INTO the terrace instead of
+      -- standing in front of a trench of synthesized ground.
+      bookcase_backfill = "above",
+      -- ONE course, and it must stay one: $15/$16 + $05/$06 + $30/$31 is
+      -- the pilaster -- cap, shaft, plaque base -- and $15/$16 over $30/$31
+      -- IS the statue's plinth, the artist having drawn the same stone
+      -- twice.  Raising it would carry every statue standee up to 48px and
+      -- break the very match the cliff height was chosen for.
+      -- $05/$06 is NOT here: it moved to `bookcase` above, and a tile
+      -- listed in two groups resolves by whichever `pairs` order wins --
+      -- half the pilasters kept the shaft as `wall`, which broke the run
+      -- and left their caps as isolated 8px stubs.  One group per tile.
+      wall = { 21, 22, 48, 49 },
+      -- The statues, and the same bird at the pillar feet.  Black-outline
+      -- segmented: the outline and everything it encloses stay, the sky
+      -- and the paving around them flood away.
+      prop = { 16, 18, 40, 41, 37, 38 },
+      -- Round drawings, one voxel ball per 16x16 cell -- the treatment
+      -- the overworld's canopies and Celadon's hedge take.
+      --
+      -- $07/$08 over $17/$18: the seven canopies planted on pillar tops
+      -- along ROUTE_23 (blocks $44/$45; the $0F block that tiles four of
+      -- them together is never placed).  Boxed, the canopy art smeared
+      -- down the whole pillar column beneath it.
+      --
+      -- $2A/$2B over $22/$1D: the boulders strewn across ROUTE_23's
+      -- middle terrace (blocks $02/$13/$16), one per cell and NOT
+      -- walkable.  As boxes they sat flat enough to look painted onto
+      -- the path; as balls they read as the obstacles they are.
+      cylinder = { 7, 8, 23, 24,
+                   29, 34, 42, 43 },
+      -- The Route 23 sign, one cell, block $48's only placement.
+      -- Unpinned it probed `09w00 0Aw00 / 19w08 1Aw08` -- an 8px stub
+      -- with its board skipped.  Same thin plate on a stick every other
+      -- outdoor sign gets.
+      signpost = { 9, 10, 25, 26 },
+      -- The Route 22 gate's roof, drawn from ABOVE and filling
+      -- ROUTE_23's last two block rows ($3D the tiling, $3E/$44 its
+      -- edges, $40/$41 the corners).  Art on the TOP face -- the way
+      -- SHIP_PORT's hull is pinned -- rather than folded up a 16px kerb.
+      -- It stands past the map's last walkable row (you warp to
+      -- ROUTE_22_GATE before you reach it), so this is a tidy-up rather
+      -- than a fix.
+      roof = { 61, 62, 64, 65, 68 },
+      -- The ground painted where a pinned figure's cell used to be:
+      -- $23, the pale paving both maps are floored with.  It is also the
+      -- white the pillars are drawn in, so the cell a pillar-foot bird
+      -- vacates reads as more pillar -- where the neighbour vote left a
+      -- BLACK hole, having nothing to elect (all four neighbours of that
+      -- cell are wall).  On the avenue and the plaza the statues' own
+      -- cells simply keep the paving they stand on.
+      prop_ground = { [16] = 35, [18] = 35, [40] = 35, [41] = 35,
+                      [37] = 35, [38] = 35 },
+      -- Deliberately NOT pinned:
+      --
+      -- $14, the water -- 1446 placements, the pond on ROUTE_23's middle
+      -- terrace -- and its bank shading $32/$33/$1F.  $14 and $32 are
+      -- two of the three stale-cache water ids the trap is named for,
+      -- but here they are honestly water: TILEANIM_WATER animates $14,
+      -- the pond is real, and $32/$33/$1F are drawn in the TOP half of
+      -- water cells as the waterline itself, so the cell rule dropping
+      -- them to -2 is what the art means.  Left to fall through to the
+      -- engine's water set.  ($48, the third trap id, is not in this
+      -- atlas at all -- it stops at $45.)
+      --
+      -- $0B/$0C over $1B/$1C, the barred doors: the Pokemon League's two
+      -- and Victory Road's two.  They are the tileset's own doorTiles,
+      -- so the door fold already stands them upright in the facade;
+      -- probed 16px identically before and after this entry.
+      --
+      -- $23/$2C/$2D are in the walkable list outright, and $45 is the
+      -- tileset's grassTile, which derives its own standing-tuft pin.
+      --
+      -- The Victory Road entrance is a `buildings` template
+      -- (victory_road_gate, at the bottom of this file): 36x6 tiles at
+      -- ROUTE_23 (0,58), and its ends are built out of $25/$26/$28/$29
+      -- and $15/$16/$05/$06.  Buildings claim their tiles before any of
+      -- the above can reach them -- probed `b` class over all 216 of
+      -- them, unchanged by this entry.
+    },
   },
 
   -- Buildings whose whole sprite is voxelized band by band (lib/Buildings.lua,
@@ -2844,147 +3230,6 @@ return {
         roofRows = 17, roofBack = 5, roofFront = 3, roofCycle = { 5, 9 },
         slab = 4, frontEave = 4, ledge = nil,
       },
-    },
-
-    -- The approach to the Pokemon League: two maps, INDIGO_PLATEAU (the
-    -- forecourt the League itself stands on) and ROUTE_23 (the long
-    -- climb up to it, with its badge-check gates).  Everything this
-    -- blockset draws is one piece of architecture -- striated rock
-    -- walls, white pillars, and the bird STATUES that line both the
-    -- avenue and the plaza.  29 of its 73 blocks are never placed, so
-    -- every tile named below really is one of these two maps'.
-    --
-    -- A statue is built exactly like the badge gyms' (see GYM above):
-    -- one cell of FIGURE ($10/$12 over $28/$29) standing on one cell of
-    -- PLINTH ($15/$16 the cap over $30/$31 the plaque).  47 of them --
-    -- 12 on INDIGO_PLATEAU, six a side down the avenue, and 35 more
-    -- across ROUTE_23's plaza (blocks $42/$43; the $25/$26 twins that
-    -- stand the same statue on grass are never placed).
-    --
-    -- What the detector made of them is the bug this entry exists for.
-    -- On the avenue the statues stack with NO gap: the plinth's plaque
-    -- row is drawn directly above the next figure's head, so the
-    -- flood-fill joined all six of a column into ONE region 24 tile rows
-    -- tall, and the volume builder's repeat scan read 32px down one half
-    -- of the drawing and 24px down the other.  Each row came out as a
-    -- continuous stepped RIDGE of boxes wearing the statue art folded
-    -- onto its south face -- probed INDIGO_PLATEAU tiles (16,12)-(17,35)
-    -- at 32/24 and (22,12)-(23,35) mirrored.  ROUTE_23's plaza statues
-    -- stand alone and fared no better: 24px boxes with the figure's top
-    -- row skipped outright.
-    --
-    -- Pinned the gyms' way the ridge becomes statues.  The plinth is a
-    -- SOLID 16px `wall` block; the figure is a per-pixel cutout 5 voxels
-    -- deep (the thin `prop` pool) that rides the plinth's top face
-    -- through the authored-box support rule and collapses to the
-    -- plinth's SINGLE cell of footprint -- Structures' wall-support case,
-    -- so the base never marches backwards.
-    --
-    -- The one thing the gyms did not have to deal with: $28/$29 is
-    -- SHARED.  The same bird is drawn again at the foot of every white
-    -- pillar, framed there by the pillar's black edge ($25/$26 over that
-    -- same $28/$29, blocks $18/$1B) -- 80 of them, 76 down ROUTE_23 and
-    -- four on INDIGO_PLATEAU (its two outer corners and the pair
-    -- flanking the League's recess).  So $25/$26 joins the same pool:
-    -- pinning half a cell would have stood a half-height bird under a
-    -- wall.  That in turn is why the pillar itself is pinned -- see the
-    -- last paragraph of `wall`.
-    PLATEAU = {
-      -- ONE 16px course for every piece of masonry here.
-      --
-      -- $03 is the striated rock face, 2436 placements and the bulk of
-      -- both maps.  It already read 16 nearly everywhere, but in the
-      -- columns of INDIGO_PLATEAU's rim that stand over a corner pillar
-      -- the repeat scan came out 24 -- a stagger in the plateau's
-      -- skyline (probed `03w24` at tiles (8,0)-(9,2), (12,0)-(13,2) and
-      -- their two mirrors).  Authored, the rim is one course.
-      --
-      -- $0D/$0F/$0E are the League's outer wall -- top band, face and
-      -- base.  The same three tiles draw the Pokemon League's own
-      -- facade, the long walls flanking the avenue, and every
-      -- badge-check gate down ROUTE_23.
-      --
-      -- $15/$16 + $05/$06 + $30/$31 are the pilaster: cap, shaft, and
-      -- the plaque base.  $15/$16 over $30/$31 IS the statue's plinth --
-      -- the artist drew the same stone twice -- which is why one pin
-      -- serves the gate corners and the statues alike.
-      --
-      -- $2E/$2F the white pillar shaft and $20/$21 its cap change no
-      -- HEIGHT: they derive 16 already.  What the pin buys is
-      -- `authored`, which is exactly what the prop support rule tests.
-      -- Without it a pillar-foot bird finds no support, drops to ground
-      -- level, and leaves a hole punched clean through the pillar
-      -- (probed, shot, then fixed).
-      wall = { 3,
-               13, 14, 15,
-               21, 22, 48, 49, 5, 6,
-               32, 33, 46, 47 },
-      -- The statues, and the same bird at the pillar feet.  Black-outline
-      -- segmented: the outline and everything it encloses stay, the sky
-      -- and the paving around them flood away.
-      prop = { 16, 18, 40, 41, 37, 38 },
-      -- Round drawings, one voxel ball per 16x16 cell -- the treatment
-      -- the overworld's canopies and Celadon's hedge take.
-      --
-      -- $07/$08 over $17/$18: the seven canopies planted on pillar tops
-      -- along ROUTE_23 (blocks $44/$45; the $0F block that tiles four of
-      -- them together is never placed).  Boxed, the canopy art smeared
-      -- down the whole pillar column beneath it.
-      --
-      -- $2A/$2B over $22/$1D: the boulders strewn across ROUTE_23's
-      -- middle terrace (blocks $02/$13/$16), one per cell and NOT
-      -- walkable.  As boxes they sat flat enough to look painted onto
-      -- the path; as balls they read as the obstacles they are.
-      cylinder = { 7, 8, 23, 24,
-                   29, 34, 42, 43 },
-      -- The Route 23 sign, one cell, block $48's only placement.
-      -- Unpinned it probed `09w00 0Aw00 / 19w08 1Aw08` -- an 8px stub
-      -- with its board skipped.  Same thin plate on a stick every other
-      -- outdoor sign gets.
-      signpost = { 9, 10, 25, 26 },
-      -- The Route 22 gate's roof, drawn from ABOVE and filling
-      -- ROUTE_23's last two block rows ($3D the tiling, $3E/$44 its
-      -- edges, $40/$41 the corners).  Art on the TOP face -- the way
-      -- SHIP_PORT's hull is pinned -- rather than folded up a 16px kerb.
-      -- It stands past the map's last walkable row (you warp to
-      -- ROUTE_22_GATE before you reach it), so this is a tidy-up rather
-      -- than a fix.
-      roof = { 61, 62, 64, 65, 68 },
-      -- The ground painted where a pinned figure's cell used to be:
-      -- $23, the pale paving both maps are floored with.  It is also the
-      -- white the pillars are drawn in, so the cell a pillar-foot bird
-      -- vacates reads as more pillar -- where the neighbour vote left a
-      -- BLACK hole, having nothing to elect (all four neighbours of that
-      -- cell are wall).  On the avenue and the plaza the statues' own
-      -- cells simply keep the paving they stand on.
-      prop_ground = { [16] = 35, [18] = 35, [40] = 35, [41] = 35,
-                      [37] = 35, [38] = 35 },
-      -- Deliberately NOT pinned:
-      --
-      -- $14, the water -- 1446 placements, the pond on ROUTE_23's middle
-      -- terrace -- and its bank shading $32/$33/$1F.  $14 and $32 are
-      -- two of the three stale-cache water ids the trap is named for,
-      -- but here they are honestly water: TILEANIM_WATER animates $14,
-      -- the pond is real, and $32/$33/$1F are drawn in the TOP half of
-      -- water cells as the waterline itself, so the cell rule dropping
-      -- them to -2 is what the art means.  Left to fall through to the
-      -- engine's water set.  ($48, the third trap id, is not in this
-      -- atlas at all -- it stops at $45.)
-      --
-      -- $0B/$0C over $1B/$1C, the barred doors: the Pokemon League's two
-      -- and Victory Road's two.  They are the tileset's own doorTiles,
-      -- so the door fold already stands them upright in the facade;
-      -- probed 16px identically before and after this entry.
-      --
-      -- $23/$2C/$2D are in the walkable list outright, and $45 is the
-      -- tileset's grassTile, which derives its own standing-tuft pin.
-      --
-      -- The Victory Road entrance is a `buildings` template
-      -- (victory_road_gate, at the bottom of this file): 36x6 tiles at
-      -- ROUTE_23 (0,58), and its ends are built out of $25/$26/$28/$29
-      -- and $15/$16/$05/$06.  Buildings claim their tiles before any of
-      -- the above can reach them -- probed `b` class over all 216 of
-      -- them, unchanged by this entry.
     },
   },
 }

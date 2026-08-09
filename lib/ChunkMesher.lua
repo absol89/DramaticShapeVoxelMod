@@ -427,6 +427,18 @@ local function runGeometry(map, bodyOnly, masks, sink)
         s = nil
       end
 
+      -- Under the TREES fill the border wall is MODELLED or it is not there
+      -- (see Structures' hullRingOnly): a ring cell nothing claimed would
+      -- be a flat-topped box standing beside carved trunks, which reads as
+      -- a painted-on plateau rather than forest. Structures already stops
+      -- the ring at the carve distance; this catches the odd cell inside it
+      -- that the 2x2 grouping could not take -- a canopy whose partners
+      -- fall outside the shortened ring is left unclaimed, and one strip of
+      -- boxes along an edge is the whole artefact this avoids.
+      if not inBody and S.hideBareRing and not S.skip[k] then
+        s = nil
+      end
+
       if s and S.skip[k] then
         -- an object stands here; paint its synthesized ground and let the
         -- prebuilt prism quads (appended below) carry the art
@@ -801,6 +813,33 @@ local function buildFlowerMesh(map)
   return quadsMesh(Structures.forMap(map).flowerQuads)
 end
 
+-- Authored FIGURES (a person drawn into furniture) as one mesh each, in
+-- the card's own local space -- because each one is placed by its own
+-- matrix at draw time, leaned back by the camera pitch exactly like a
+-- character card (VoxelScene). A figure baked into the terrain mesh could
+-- not lean, and a shared mesh could not carry per-figure placement.
+--
+-- A list, not a mesh: `{ mesh, wx, wz, y }` per figure. Maps have one or
+-- none, so the loop that draws them is shorter than the terrain's.
+local function buildFigureMeshes(map)
+  local out = {}
+  for _, f in ipairs(Structures.forMap(map).figures or {}) do
+    local mesh = quadsMesh(f.quads)
+    if mesh then
+      out[#out + 1] = { mesh = mesh, wx = f.wx, wz = f.wz, y = f.y }
+    end
+  end
+  return out
+end
+
+-- Figure lists hold their meshes one level down, so the generic slot
+-- release cannot reach them.
+local function releaseFigures(list)
+  for _, f in ipairs(type(list) == "table" and list or {}) do
+    if f.mesh and f.mesh.release then pcall(f.mesh.release, f.mesh) end
+  end
+end
+
 -- Replace a cached slot, releasing whatever mesh it held.
 local function swapSlot(c, slot, mesh)
   local old = c[slot]
@@ -825,6 +864,8 @@ local function releaseEntry(c)
     if mesh and mesh.release then pcall(mesh.release, mesh) end
     c[slot] = nil
   end
+  releaseFigures(c.figures)
+  c.figures = nil
   c.stale = nil
 end
 
@@ -863,18 +904,23 @@ end
 local function runJob(job)
   local map = job.map
   local c = entry(job.id)
-  if c.grass == nil or c.flowers == nil or (c.stale and c.stale.aux) then
+  if c.grass == nil or c.flowers == nil or c.figures == nil
+     or (c.stale and c.stale.aux) then
     local okG, grass = pcall(buildGrassMesh, map)
     local okF, flowers = pcall(buildFlowerMesh, map)
+    local okX, figures = pcall(buildFigureMeshes, map)
     if (gen[job.id] or 0) ~= job.gen then
       if okG and grass and grass.release then pcall(grass.release, grass) end
       if okF and flowers and flowers.release then
         pcall(flowers.release, flowers)
       end
+      if okX then releaseFigures(figures) end
       return
     end
     swapSlot(c, "grass", (okG and grass) or false)
     swapSlot(c, "flowers", (okF and flowers) or false)
+    releaseFigures(c.figures)
+    c.figures = (okX and figures) or false
     if c.stale then c.stale.aux = nil end
   end
   local sink = newSink()
@@ -1020,6 +1066,14 @@ end
 function ChunkMesher.flowers(map)
   local c = cache[map.id]
   return c and c.flowers or nil
+end
+
+-- Authored figures as `{ mesh, wx, wz, y }` records -- each placed by its
+-- own leaning matrix at draw time, so they cannot share one mesh.
+function ChunkMesher.figures(map)
+  local c = cache[map.id]
+  local list = c and c.figures
+  return (type(list) == "table") and list or nil
 end
 
 -- Rebuild a map's meshes IN PLACE: the stale meshes keep drawing while

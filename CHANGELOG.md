@@ -1,6 +1,588 @@
 # Changelog
 
-## Unreleased
+## 1.3.1
+
+### Fixed
+
+- **A staged battle on a phone stood some Pokémon three times the size of the
+  square they were on.** A Pidgey towered over the arena while the mon beside
+  it was the right size, which reads as a bug in one species and is not one.
+
+  Putting the paper back inside a battle pic (BattlePics, 1.3.0) needs the
+  pic's pixels, and a LOVE Image does not hand them back -- so the pic is drawn
+  into a canvas of its own size and the canvas is read. `newCanvas` takes the
+  SURFACE's dpi scale when it is not told otherwise, `conf.lua` turns highdpi
+  on for Android and iOS, and Android's display density is routinely 2.75. So
+  `newCanvas(56, 56)` allocated a 154x154 texture there, the pic was magnified
+  into it, and the readback came back at the magnified size. The rebuilt pic
+  was 2.75x the artwork, the engine's pics layer drew it 1:1 because it trusts
+  `getWidth()`, and the mon stood on its tile nearly three times too big.
+
+  Only a pic with an enclosed hole in it is rebuilt at all -- the rest are
+  handed straight back untouched -- which is why it hit some species and not
+  others, and why it never showed on desktop, where the dpi scale is already 1.
+  The readback now asks for one texel per pic pixel, the way the engine's own
+  `PixelCanvas` does for the same reason. The animated-tile atlas readback took
+  the same fix: on a phone it would have come back magnified too, and every
+  tile coordinate in it counts in eights from the top-left.
+
+## 1.3.0
+
+### Added
+
+- **BACK SPRITES, a new row under 3D-BTL: your own Pokémon stays on the battle menu.**
+  The staged shot stands both mons on the map, which is the mode's whole claim
+  -- and it costs the framing Gen 1 is most recognisable by: your own Pokémon,
+  seen from behind, sitting on top of the battle menu with its feet on the box.
+
+  With BACK SPRITES on the foe is still geometry standing on its own tile at the far
+  end of the arena, and the player's side goes back to being the GB's own flat
+  back pic in the GB's own slot: same art, same 2x, same feet on row 96. It is
+  the engine's own pics layer that draws it, through the `onlySide` argument
+  that layer already takes, so every pic effect -- the grow-out-of-the-ball,
+  the faint slide, the damage blink, the send-out trainer pic -- comes along
+  unchanged and none of it is reimplemented.
+
+  Nothing else about the shot moves. The arena, the camera and the drift are
+  solved exactly as they were, so the foe stands where it always stood and the
+  player's cell is simply empty ground in the foreground. Two things follow the
+  setting: the `pokemon.sprite` hook stops asking for the front pic on the
+  player's side (it is a back view again, and the front art would be that mon
+  turned round to face the player it belongs to), and the move-animation offset
+  drops that side's contribution, because a pic that has not moved cannot have
+  moved the pair's centre.
+
+  OFF by default -- what the mode advertises is the two of them out there --
+  and only on the OPTIONS menu while 3D-BTL is on, since with staged battles
+  off the engine already draws exactly this.
+
+### Fixed
+
+- **Battle pics were see-through, and it took a back sprite on a tiled floor
+  to make it obvious.** Gen 1 pics are two-bit art whose lightest shade is
+  white, and the decoded PNGs key that shade to alpha 0 -- which cost nothing
+  when the field behind them was white too. Over a route, every belly, every
+  eye white and every highlight is a hole with the world showing through, and
+  the mon reads as a stencil.
+
+  `BattlePics` exists to put that paper back and, as written, put none of it
+  back. It flood-filled the outside from the border and filled what the flood
+  could not reach, which is exact and, on this game's art, empty: a Gen 1
+  figure is an open drawing, and its belly walks out to the border through the
+  gap between its legs. Read across all 305 of the game's battle pics, that
+  rule finds an enclosed hole in exactly none of them.
+
+  The fix is to start the flood somewhere else: at the edges of the ARTWORK'S
+  OWN BOUNDING BOX, and at three of them -- left, right and top. The bottom is
+  closed, because it is not a side the background is behind, it is where the
+  drawing was CUT. A pic is bottom-aligned in its slot with all the margin at
+  the top, so a mon's lowest row is the last row it was given and everything
+  below the belly simply stops. Treat that cut as open and the background
+  pours up inside the figure, which is the channel of world that used to show
+  through a Clefairy.
+
+  That is exact rather than a heuristic: nothing is filled because of what
+  surrounds it, only because the background provably cannot reach it. Which is
+  why it needs no idea whether it is holding a front pic or a back one -- the
+  sky between a pair of ears reaches the top edge and stays sky, the gap
+  between a body and a raised tail reaches the side and stays gap, the belly
+  reaches neither and is paper. The silhouette is untouched, so the mon still
+  cuts cleanly against the world.
+
+  It replaces the border flood outright rather than sitting beside it, since
+  anything the border could not reach the box edges cannot reach either.
+
+  The bottom edge needs one more distinction, because two different things
+  meet the underside of a figure. A DRAIN is where the drawing ran out -- a
+  belly whose white carries on down until the artist stopped, leaking out
+  through the inch between a body and a leg -- and is sealed. A MOUTH is the
+  space between two legs, background that happens to be enclosed on three
+  sides, and is left open so the world shows through a trainer's stride.
+
+  Width tells them apart, and on this game's art it is not a close call.
+  Measured along the bottom of every battle pic, the drains run 3 and 4 pixels
+  (Clefairy's back, Wartortle's back, Red's back) and the mouths run 10, 12, 14
+  and 17 (a Rattata's underbelly, Blue's stride, Brock's, a Pikachu's back).
+  Nothing lands between 4 and 10, so the cut is taken at 6 with room either
+  side rather than tuned to one sprite. Apart from that number the rule stays
+  exact.
+
+  Front pics come back untouched, and not by being special-cased: they are
+  near-solid silhouettes with almost nothing inside them to fill, so their own
+  shape is what says so.
+
+  Both mons were affected -- the cards in the arena as much as anything -- so
+  this lands wherever a battle pic is drawn over the world, not just under
+  BACK SPRITES.
+
+- **The pinned back pic was lit at noon while the world behind it was not.**
+  Everything standing in the arena goes through the voxel shader, and that
+  shader multiplies by the hour's tint, so at dusk the diorama warms and at
+  night it goes blue -- the two mons' cards included, because they are drawn
+  in the same pass as the ground they stand on. A back pic pinned to the menu
+  is not in that pass; it is a flat blit over the finished shot, and it stayed
+  bright over a midnight route.
+
+  The same tint is now applied to that one draw, by multiplying every colour
+  the pics layer sets on its way past -- so the alpha, the faint slide's fade
+  and the damage blink all compose with it instead of being overwritten. What
+  it does not get is the sun: the cards are shadow-mapped and a pic pinned to
+  the menu has no position in the scene to be shadowed at, so it carries the
+  hour and not the weather.
+
+### Added
+
+- **The hour reaches the FLAT world too, not just the diorama.** DAYTIME drove
+  the 3D pass through the voxel shader's own tint uniform -- a uniform the 2D
+  tile path never runs -- so with VOXEL off, the same evening that fell on the
+  diorama left the flat world at permanent noon. One clock, two worlds, one of
+  them ignoring it. Outdoor maps now get the same multiply, painted as one
+  rectangle over the composited world.
+
+  The whole difficulty is WHERE, and it is worth writing down. Not on the world
+  canvas: in a colorized mode that canvas is grayscale art and the blit that
+  puts it on screen runs it through the palette shader, which classifies each
+  pixel into a shade BY ITS RED CHANNEL -- multiply a night blue over it first
+  and every pixel lands in the wrong bucket, so the world does not darken, it
+  changes colour. Not over the finished frame either, or the dialog boxes and
+  menus darken along with the world they are held up in front of, which is the
+  same reason the tilt-shift blur is a `worldPresent` and not a `present`.
+
+  Which leaves the instant between the world blit and the UI blit, and the
+  engine has no seam there -- `worldPresent` only runs when a PIPELINE produced
+  the world, which in flat mode is precisely what did not happen. So
+  `Renderer:endFrame` is wrapped and the UI canvas's own draw is watched for:
+  `blit` passes the canvas it is compositing as the first argument, so the
+  first draw of `Renderer.canvas` IS the boundary, by identity rather than by
+  counting. The shader and scissor that call arrives under belong to the UI
+  blit already in progress, so both are put aside for the rectangle and handed
+  straight back.
+
+  Skipped entirely when a pipeline drew the frame (it tinted itself, and twice
+  is wrong), indoors (a room has no sky to take its light from), and at midday
+  (a multiply by white) -- so a game with the clock at DAY issues not one extra
+  call.
+
+### Changed
+
+- **FULL no longer takes the two battle rows off the menu.** It still owns the
+  rows that describe the LOOK -- the wireframe, the horizon bend, the blur, the
+  hour -- because it is a preset for the diorama and a row that no longer
+  decides anything is worse than no row. 3D-BTL and BACK SPRITES are not that:
+  one decides what a fight is drawn OVER and the other how it is framed.
+  FULL still SETS both on arrival; it does not hold them, and leaving them
+  reachable is the difference between a preset and a lock.
+
+  This makes `stagedBattles()` honest as a side effect. It used to answer yes
+  under FULL as well, on the grounds that FULL owned the 3D-BTL row and
+  switched it on -- safe only while the row was hidden. With the row reachable
+  from inside FULL, that clause would have claimed staged battles for a preset
+  the player had just switched them off inside, pinning BATTLE LAYOUT to OG for
+  a fight that never gets staged. The row is the only thing that decides now,
+  which is what `OverworldBattle.begin` and `wantsFront` already believed.
+
+- **TILT and GBC FX are off the OPTIONS menu entirely while this mod is
+  installed.** Both fight the diorama and both were already half-taken: the
+  mode's own key forces them off on every press, and the registry switches
+  TILT off whenever a world pipeline takes the pass. What was left was two
+  rows a player could set and watch get reverted -- TILT being the flat fake
+  of what this mode does for real, and GBC FX a full-screen present pass over
+  the top of the whole thing.
+
+  Dropped AND held at zero, which is the part that matters: hiding a live
+  setting is a trap, because a save written before the mod was installed can
+  carry TILT 3 and a row that is not there cannot turn it back off. Pinned
+  wherever the value could arrive from -- the menu opening, a save being
+  loaded or begun -- so there is no route by which either is on and
+  unreachable. Uninstalling the mod puts both rows back, at whatever they were
+  last set to.
+
+- **The battle's text box and menus are frosted glass, like the HUDs.** The
+  HUD blocks got panels because black glyphs on grass are not readable. The box
+  at the bottom had the opposite problem and the same cause: it is drawn as an
+  opaque white slab with a black border, which was the field's own colour back
+  when the field was white and is a sheet of paper laid over the bottom third
+  of the diorama now that it is not.
+
+  It gets exactly what the HUDs get -- the world behind it, blurred to frosted
+  glass and laid back down translucent, at the same frost and the same tint --
+  and it is measured into the same brightness verdict, so the ink over the menu
+  flips white with the ink over the HUDs rather than against it. Only the FILL
+  is taken away: the border, the text, the cursor and the down arrow are the
+  engine's own glyphs in their own places. The move menu's TYPE/PP box and
+  Mimic's copy menu get their own panels, trimmed to the rows above the box
+  below them so no pixel is frosted twice.
+
+## 1.2.1
+
+### Fixed
+
+- **On Android the sky went black below its first couple of bands.** A hard-edged
+  band of black ran from partway down the gradient to the horizon point, with the
+  moon still hanging correctly inside it. Desktop was unaffected.
+
+  What gave it away is that the same colour reached the screen by two routes and
+  only one of them was wrong. The haze filling the void UNDER the horizon is the
+  sky's palest band, and it is delivered by `love.graphics.clear` -- it landed
+  correctly. The bottom of the sky above it is that same band delivered by the
+  shader, and it was black. So the palette was not reaching the fragment shader,
+  and nothing was wrong with the palette, the layout or the camera.
+
+  The bands went in as `uniform vec3 bands[8]`, filled from Lua and read through
+  a loop counter, and on Android's GLSL ES the tail of that array arrived as
+  zero -- which is black. The likeliest reason is the fragment uniform budget:
+  ES 2.0 only guarantees sixteen uniform VECTORS, and eight band slots plus the
+  twilight glow plus LOVE's own built-ins is over it. A driver that truncates a
+  partly-filled array, or one that reflects `bands[0]` and nothing after it,
+  fails identically -- so the fix removes the whole class rather than the one
+  cause.
+
+  The bands are a one-texel-per-band TEXTURE now, sampled nearest, with the
+  band index clamped against the ramp's width. One texture unit replaces eight
+  uniform vectors, there is no array to index and no budget to overrun, and a
+  sample past the last band lands on the last band instead of on nothing. It is
+  still a palette and not a picture -- one texel per band on a single row -- so
+  the sky is still computed per pixel at the size it is displayed at, with
+  nothing resampled and nothing baked.
+
+  Also gone with it: `clamp(x, 0.0, 0.999999)`, which rounds its bound to 1.0 at
+  mediump -- the fragment default on GLSL ES -- and would have indexed one past
+  the last band on the sky's bottom row for the same black result.
+
+## 1.1.1
+
+### Fixed
+
+- A move that shakes the screen no longer whites out the frame. The zone pass
+  fills each zone with its blank colour before drawing the shifted copy -- the
+  hardware showing empty BG in the strip the shake vacated -- and a shake
+  program alternates offset and no-offset frames, so over the map that read as
+  the whole battle screen, menu box included, flashing white a few times a
+  second. The fill is dropped while a battle is staged on the map; the shake
+  itself still moves the HUD.
+
+## 1.2.0
+
+### Added
+
+- **A gradient sky behind the diorama, on every `VOXEL` rung.** The void behind
+  the world used to be a black plate at every rung but the top, where it became
+  one flat blue -- enough while that void was a sliver, and a wall of paint once
+  the horizon came into frame.
+
+  It is the 8-bit skybox recipe now: four blues painted as flat horizontal bands,
+  deepest overhead and palest at the bottom, with a CHECKERBOARD of the next band
+  dithered into the bottom 40% of each one. Alternating two colours on a pixel
+  grid is how a machine with four to a palette got a fifth, sixth and seventh out
+  of them, and it is what keeps four bands reading as a gradient rather than as
+  four stripes. Every channel of the palette is a multiple of 8 -- where a
+  five-bit GBC channel lands -- so no colour in it is one the hardware could not
+  have shown. No clouds, nothing moving.
+
+  Where the bands END is the camera's own answer. At `75` the ground plane's
+  vanishing line is genuinely in frame -- projected through the same matrix the
+  geometry is drawn with -- and the pale end meets it. At the steeper rungs that
+  line is above the top edge, and what shows up there is the ground running OUT
+  past the map edge instead, so the bands take a fixed slice of the frame and the
+  haze fills the rest. One sky across the whole ladder either way.
+
+  **Nothing is resampled**, which is why it is drawn the way it is: no baked
+  160x144 image scaled up to the window, no downsized buffer blown back up, no
+  texture at all. One rectangle through a shader answers every pixel from its own
+  canvas coordinate, so a pixel of sky is computed at the size it is displayed
+  at and there is nothing for a filter to soften. The band edges and the dither
+  cells are measured in the pass's own pixels-per-world-pixel, handed in fresh
+  every frame -- so a `ZOOM` keypress is reflected in the frame that follows it,
+  with nothing cached at the old scale, and the sky's grid is the same grid the
+  world's own texels sit on.
+
+  The palette goes through the display-mode transform like every other palette in
+  this mod, so GRAY gets four greys and CLASSIC four greens. Below the bands the
+  void is filled with the palest of them -- which is also what the bottom band
+  ends on -- so the join has no seam, and a driver that cannot compile the shader
+  gets flat bands and a logged line rather than a wrong sky.
+
+  The overworld only. A battle is a staged shot whose placed camera has the
+  horizon above the frame, so the arena keeps exactly the flat sky it had.
+
+- **A day/night cycle**, on a new **DAYTIME** options row: `DAY`, `NIGHT`,
+  `DUSK`, `DAWN`, `SYNC`, `CYCLE`. One twenty-minute clock underneath all of
+  them -- ten minutes of sun, ten of moon -- where the four named settings
+  are PINS on that dial (noon, mid-night, sunset, sunrise), `CYCLE` lets it
+  run, picking up from whichever pin or SYNC sky the player was just looking
+  at, and `SYNC` -- the DEFAULT -- lays the machine's own clock onto the
+  dial: local noon is the DAY pin, midnight is NIGHT, six and eighteen the
+  twilights, an hour of the real day is fifty seconds of dial. Everything is
+  a pure function of the clock, so the pinned DUSK is exactly the running
+  cycle stopped at sunset. While **VOXEL** sits on `FULL` the DAYTIME row is
+  HELD at `SYNC` and taken off the menu with the other rows the preset owns
+  (DayNight.forceSync, enforced from the preset, the rows hook and the
+  manager's options_changed -- the same three places BATTLE LAYOUT's pin
+  lives): the full diorama runs on the real sky.
+
+  **The sun and the moon are in the sky**, and their positions are honest:
+  the disc is the light's own direction projected through the same matrix the
+  geometry is drawn with, so it stands over the point on the horizon its
+  shadows point away from, at every pitch, window shape and zoom. The sun's
+  noon is this mod's existing sun to the digit -- southeast, 45 degrees up,
+  overhead behind the north-facing camera and correctly out of frame -- and
+  its arc swings north at both ends, so the disc stands IN frame through dawn
+  and dusk, rising half-set on the horizon. The moon arcs the northern sky
+  all night, due north (screen centre) at mid-night, with scaled crater
+  cells. Both are cell art on the sky's own dither grid, sized by the frame
+  (a celestial body's apparent size is an angle, so zooming the ground does
+  not swell it), and both are SCISSORED to the sky's region: the horizon
+  point is where a setting body disappears -- it never hangs under the map.
+
+  **The sky follows the clock.** Phase palettes -- the daytime blues,
+  gold-to-violet dawn, a hotter gold-to-indigo dusk, moonlit navy -- six
+  bands each now, blended along the dial and re-quantised onto the 5-bit
+  lattice, so every mixed frame is still a colour the hardware could show.
+  The blends bend through designed WAYPOINTS rather than straight across --
+  a golden hour on the way into dusk, a violet civil twilight either side of
+  the night -- because day's blue and dusk's gold are near-complements, and
+  a straight lerp between complements bottoms out in dishwater grey. Through the twilights a posterised, checker-dithered GLOW
+  warms the bands around the low sun -- painted light, not an airbrush. The
+  blends are 75 seconds wide either side of each twilight and the pins land
+  on their phase palette unmixed.
+
+  **The shadows follow the sun and the moon.** The shear every shadow is
+  thrown by (direction opposite the body's bearing, length its elevation's
+  cotangent, clamped at twice the caster's height) comes off the clock, the
+  shadow map's signature carries it, and the light's press fades out over the
+  last twelve degrees before the horizon -- so sunset hands off to moonrise
+  through a soft shadowless gap, and moonlight presses at about two-thirds
+  the sun's weight. The scene shader also multiplies every surface by the
+  hour's tint: neutral at noon, warm at the twilights, dim blue at night.
+
+  **Outdoors only**, by the same `Map.isOutdoor` test the sky already rests
+  on: indoors keeps the noon rig, the neutral tint and no sky -- a cave at
+  midnight is exactly as dark as a cave at noon. Viridian Forest is the case
+  between, a CANOPY map (DayNight.CANOPY): there is no sky to paint and no
+  sun to see, so the shadow rig stays the mod's fixed noon light -- all that
+  ever filtered through the leaves -- but night still FALLS in a forest, so
+  of everything the clock does, exactly one thing reaches it: the hour's
+  tint, in free-roam and staged battles alike. A battle staged on an
+  outdoor map fights under the hour: the night sky behind the arena, the
+  tint on the mons, the sunset taking the arena's shadows with it; an indoor
+  arena is untouched. The engine's own `world.tod` hook is answered
+  (`MORNING`/`DAY`/`EVENING`/`NIGHT`), so palette or music packs keyed to the
+  period ride this clock for free.
+
+  **The clock rides the save slot.** On the engine's `save.writing` event the
+  cycle's time is written into the mod's own save-file bucket
+  (`save.modData.DRAMATIC_SHAPE`), and read back when a save is opened. A
+  save with no clock in it starts at day.
+
+- **Window glass.** The panes in the overworld art -- the framed squares on
+  building fronts, the small lights in doors -- are found by SHAPE in the
+  tileset image (a black border row, four or five black-flanked glass rows,
+  a closing border), at pixel granularity because the door's pane straddles
+  a 2x2 tile block. No tile ids are hardcoded: a conversion that draws its
+  own windows in the same idiom gets glass for free. The scan yields a mask
+  texture aligned to the tileset atlas, which the scene shader samples with
+  the same coordinates the terrain does -- so the effect lands on any wall,
+  at any angle, in free-roam and staged battles alike, with no geometry
+  work.
+
+  By day a thin glint crosses the panes WHILE THE VIEW MOVES: the sweep's
+  phase is fed by the camera's own travel and its strength fades out within
+  a beat of standing still -- a reflection is something the viewpoint does,
+  so still camera means still glass. The sweep pattern lives in the pane's
+  OWN texels, not the screen's: a screen-anchored pattern has the world
+  sliding through it at zoom speed whenever the camera pans, which strobed
+  (worst walking against the sweep); anchored to the glass, panning moves
+  nothing and a step advances the glint a fraction of a texel, the same in
+  every direction. It lifts the texels toward sky-white and leaves the
+  shine art visible through it. The mask is consulted only by meshes
+  textured from the tileset atlas (Voxel3D.glass), never by sprite sheets,
+  whose coordinates would land on the panes' atlas positions by accident.
+  After dark the panes are LIT: the texel's own pattern carried into a warm
+  lamp colour, replacing the shaded answer entirely -- a lit window ignores
+  the sun, every shadow and the hour's tint, exactly as a window with a lamp
+  behind it does. The lamps follow the clock (DayNight.windowLight): on
+  through dusk, full all night, mostly out by dawn, and never lit indoors.
+
+- **A fade out of a battle, where there used to be a hard cut.** The engine
+  wipes INTO a fight with one of the original's eight transitions and cuts
+  straight out of it: `BattleState:finish` pops itself and the map is simply
+  there on the next frame. Between a white field and a tile map the original got
+  away with that; between a placed camera looking across an arena and a diorama
+  looking down on a walking player it reads as a glitch. The battle now fades to
+  black, closes behind it, and the map fades up out of it -- twelve frames each
+  way, registered as a `voxel_battle_exit` transitions record so the timing is
+  retunable in data like the wipes it answers.
+
+  Only while voxel mode is on, and then for EVERY battle, including one that
+  found no arena and drew on the flat battle screen: what is being smoothed over
+  is the return to the map, and the map is a diorama either way. With the mode
+  off, the vanilla cut is untouched.
+
+  One black rectangle over the FINISHED composite does the fading, so the world,
+  the letterbox bars and the battle's own text box all darken by the same amount
+  -- the renderer's existing warp-fade overlay is painted between the world and
+  the UI, which would have left the text box bright over the black. A blackout's
+  own warp fade or an evolution prompt still owns the way out when it takes the
+  screen: the fade stops at the cut rather than fading in over the top of it.
+
+- **A `FULL` rung on the VOXEL row**, directly after `OFF`. One choice that
+  puts the whole mode in its intended state -- the 35-degree camera, the
+  miniature blur at maximum, the horizon flat, the view fitted, and battles
+  on the map -- rather than making a player assemble it from four rows.
+
+  While it is selected, every row it owns comes OFF the menu: V-GRID,
+  V-CURVE, 3D-BTL and T-SHIFT. A row that no longer decides anything is
+  worse than no row. Stepping onto or off `FULL` rebuilds the open menu in
+  place, so the rows leave and return under the cursor instead of waiting
+  for the menu to be reopened.
+
+  It applies its settings when the row ARRIVES at `FULL`, not every frame:
+  holding them would make the zoom keys and the wheel dead while it was on.
+  Leaving it deliberately undoes nothing -- reverting would discard whatever
+  had been changed since.
+
+### Fixed
+
+- **The hit flash whited out the whole screen.** The engine draws it as a
+  full-screen white rectangle, which is a flash on a white battle field and
+  a whiteout of the map, the HUD and the text box over a world. It is now
+  dropped on the way past and put back where it was ever about: the two
+  Pokemon go solid white for those frames, silhouette and all, and nothing
+  else in the frame moves.
+
+- **A scripted battle cut straight in with no transition** (an ENGINE seam,
+  fixed in `src/script/Commands.lua` rather than in this mod): the rival in
+  Oak's lab, and every `start_battle` script, pushed the BattleState bare --
+  no flash, no wipe, the theme starting late -- where the original wipes
+  into scripted fights like any other. `start_battle` now routes through the
+  overworld's own `pushBattle`, which is also the path this mod wraps, so a
+  scripted fight gets its arena staged and the cast culled BEFORE the wipe
+  instead of catching up behind it. A battle scripted with no overworld
+  under it still starts bare, and no music plays twice (BattleState's own
+  start is a same-song no-op).
+
+- **A standing figure's shadow detached from its feet under a low sun.** The
+  shadow compare forgives `slack` world pixels so lit ground does not acne
+  against its own texels, and that same forgiveness lit the first `slack` of
+  every cast shadow -- so the shadow started a bias-width away from the feet,
+  further the lower the sun reached (the classic peter-panning, invisible at
+  the old fixed 45 degrees and plain at a day/night golden hour or under the
+  moon). Sprite cards -- characters, authored figures, flowers, battle mons
+  -- are now drawn into the shadow map snugged TOWARD the sun along their
+  own ray (`ShadowMap.snug`): moving along the ray changes nothing about
+  where a shadow falls, but storing the card shallower takes three quarters
+  of the forgiveness back for the shadow it throws -- and for nothing else:
+  no terrain moved, so the acne margin is untouched where it matters. The
+  obligation that comes with it: every snugged caster's LIT draw hands the
+  same snugged transform to its own shadow lookup (Voxel3D.draw's
+  `sunModel`), so stored and lookup agree exactly and the compare keeps its
+  full margin -- read un-snugged, the missing nine tenths showed up as
+  diagonal moire bands crawling across every sprite. The shadow root lands
+  back under the feet at every hour.
+
+### Changed
+
+- **Under `VOID FILL: TREES` the border wall is modelled trees or nothing.**
+  Only the first block past the map body gets carved into round trunks and
+  canopies; the two blocks past that were too far out to be worth the quads,
+  so they fell through to the mesher's plain box and came out as a flat-topped
+  slab of tree ART sitting beside the modelled forest -- a painted-on plateau,
+  and the more obvious the lower the camera got. Rather than pay to carve
+  hulls nobody walks near, the wall now simply STOPS where the carving does:
+  `Structures` does not build the ring past that distance (the same "nothing
+  out there" `BLACK` already produces), and the mesher drops any cell inside
+  it the 2x2 canopy grouping could not claim, so no strip of boxes survives at
+  a corner. `WATER` and every indoor border are untouched -- a flat sheet of
+  water is what water looks like from above anyway.
+
+- **The two HP boxes snap to the window's edges during a staged battle.** The
+  battle screen is 160x144 in the middle of the window and the world is the
+  whole of it, which left both HUD blocks huddled together in the middle of the
+  frame with map showing on either side of them -- a Game Boy screenshot pasted
+  over a diorama rather than the diorama's own furniture. The foe's block now
+  sits against the left edge and the player's against the right, on the same
+  frosted glass, with the same tiles at the same size on the same rows. The
+  pokeball rows and the safari ball count travel with the block whose rows they
+  share. On a window shaped like the GB screen there is nowhere to go and
+  nothing moves.
+
+  The engine draws them into the 160x144 canvas, which clips at its own edges,
+  so the layer is rendered to a texture and composited into the world image --
+  the one surface here that covers the whole window. A driver that cannot do
+  that falls back to the HUD in the frame rather than to no HUD.
+
+- **`BATTLE LAYOUT` is pinned to `OG` while battles are staged on the map**, and
+  the row comes off the OPTIONS menu with the rows `FULL` owns. The staged shot
+  is composed in the GB's own frame -- the arena camera is solved to put a cell
+  under each pic's feet, and the HUD rects and the intercepted background fill
+  are measured there too -- and `WIDE` re-lays that screen out on a 304x144
+  surface, moving every one of them. Set rather than worked around, on every
+  route in: the options row, hotkey `8`, the mod manager's page, `FULL`'s
+  preset, and a save that arrived with `WIDE` already on. Switching `3D-BTL`
+  off hands the row back with `WIDE` selectable again.
+
+- **Hotkey `3` walks the angle rungs only and steps over `FULL`.** The key is
+  a display-mode cycler -- it should change the camera and nothing else --
+  and `FULL` reaches in and rewrites four other settings. Landing on it
+  mid-walk would silently push the blur to maximum and flatten the horizon
+  with nothing on screen saying a keypress had done it. `FULL` stays on the
+  OPTIONS row, where a preset that changes other rows belongs.
+
+  A press FROM `FULL` goes to `50`. `FULL` is already the 35-degree camera,
+  so stepping to the rung of that name would look like the key had done
+  nothing. Matched by angle, so it follows `FULL` if that is ever retuned.
+
+- **The mode's four options are one block in the menu.** The engine splices
+  a pipeline row in beside TILT and lands a mod's own rows at the end of the
+  list, which had these four in two places with unrelated engine rows
+  between them. The settings now follow the pipeline rows directly.
+
+## 1.1.0
+
+### Added
+
+- **Battles happen on the map you were standing on.** The battle screen's
+  white field is replaced by the world: the mod finds the nearest patch of
+  open ground, points a placed over-the-shoulder camera at it, and draws the
+  fight over that. New **3D-BTL** row and hotkey `8`, on by default.
+
+  The arena is a 3x6 clearing of cells the player could walk on, with the
+  two mons three cells apart down the middle column and a one-cell apron all
+  round so the camera looks across floor rather than into a wall. Where no
+  map has room for that -- a corridor, a cave, a shop -- the search relaxes
+  to a 1x4 corridor with the apron given up, and where even that will not
+  fit the battle draws exactly as it always did.
+
+  Everything else in the frame is the engine's own. The mon pics, HUDs, HP
+  bars, move animations, faint slides and text box are drawn by BattleState,
+  in its order, at its coordinates -- the GB's own layout, with the player's
+  mon low and left and the enemy's high and right, which is why the camera
+  is placed east of the arena axis rather than the layout being moved to
+  suit the camera. What changes is what is behind them.
+
+  Three things carry the shot. The overworld's cast is culled before the
+  wipe, so it plays over an empty map and no bystander is standing in the
+  arena. The camera drifts on a slow orbit about a point between the two
+  mons, which moves the near ground and the far ground by different amounts
+  -- parallax, not a sliding backdrop. And a depth-of-field pass holds the
+  band of frame the two mons stand in sharp and softens the middle distance
+  and the foreground; both mons are in focus by construction, because they
+  are drawn as the battle screen's own pics after the pass has run.
+
+  **Nobody moves.** The arena is where the CAMERA goes. Nothing here writes
+  a cell, a facing, a flag or a warp, so a trainer's post-battle dialogue is
+  still talking to someone standing in front of them, and the blackout path,
+  sight lines and every script find the player exactly where they left them.
+
+  The two HUD blocks gain the backing the white field used to be. Gen 1
+  draws them as black glyphs straight onto the background with no box round
+  them, and black-on-grass is not readable; the backing is painted inside
+  `drawHUDs`, so it lands in the same target and takes the same zone colour
+  as the HUD it sits under, in both the colorized and flat pipelines.
+
+  Declines cleanly at every step it cannot take: no depth support, no open
+  ground, the row switched off, or a terrain mesh still building all end at
+  the battle screen the engine has always drawn.
 
 ### Changed
 

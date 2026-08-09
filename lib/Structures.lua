@@ -55,6 +55,14 @@ local Structures = {}
 -- must match ChunkMesher's ring (3 border blocks, in tiles)
 local RING = 12
 
+-- how far past the map body cells still get the hull. A route's ring is
+-- nearly as big as its body; modelling all of it costs hundreds of
+-- thousands of quads of border trees nobody walks near. Beyond this,
+-- pinned cells simply are not claimed and fall through to the mesher's
+-- plain box -- cheap distant scenery. (Declared up here rather than
+-- beside buildCylinders because forMap's grid resolve reads it too.)
+local ROUND_RING = 4
+
 -- object-mode gates
 local OBJECT_MAX_ROWS = 6          -- a prop is at most 48px of drawing
 local OBJECT_MAX_QUADS = 4096      -- safety cap per cluster
@@ -154,12 +162,34 @@ function Structures.forMap(map)
   local TileRenderer = require("src.render.TileRenderer")
   local borderId = TileRenderer.borderBlockFor(map)
   local borderBlk = borderId and tileset.blocks[borderId + 1] or nil
+  -- TREES fill stops at ROUND_RING instead of running the full RING.
+  -- Only that far out does a tree cell get carved into a hull; past it
+  -- the cells fall through to the mesher's plain box, and a slab of
+  -- flat-topped boxes beside the modelled wall reads as a painted-on
+  -- plateau -- the wall looking like it was cut off with scissors. So
+  -- the far ring is simply not built: beyond ROUND_RING tileLookup
+  -- answers nil, which is the same "nothing out there" BLACK already
+  -- produces and every pass below already copes with. The cut lands on
+  -- the carve boundary exactly -- the 2x2-cell canopy scan starts at
+  -- floor(-RING/2) and RING, ROUND_RING and the body are all multiples
+  -- of 4 tiles, so no group is left half-resolved at the edge.
+  --
+  -- WATER and the other tilesets' own borders keep the full ring: a flat
+  -- sheet of water is what water looks like from above anyway, and an
+  -- interior's border is black already.
+  local hullRingOnly = borderBlk and def.tileset == "OVERWORLD"
+                       and (TileRenderer.voidFill or "trees") == "trees"
   local tw2, th2 = tw, th
   local function tileLookup(tx, ty)
     if tx >= 0 and ty >= 0 and tx < tw2 and ty < th2 then
       return map:tileAt(tx, ty)
     end
     if not borderBlk then return nil end
+    if hullRingOnly and (tx < -ROUND_RING or ty < -ROUND_RING
+                         or tx >= tw2 + ROUND_RING
+                         or ty >= th2 + ROUND_RING) then
+      return nil
+    end
     return borderBlk[(ty % 4) * 4 + (tx % 4) + 1] or 0
   end
   local shapeAt, tileAt = {}, {}
@@ -192,8 +222,9 @@ function Structures.forMap(map)
   -- still overdraws a walker's feet even though characters stamp over
   -- terrain.)
   S = { shapeAt = shapeAt, tileAt = tileAt, outdoor = Map.isOutdoor(def),
+        hideBareRing = hullRingOnly or nil,
         runs = {}, skip = {}, ground = {}, doorFold = {}, objectQuads = {},
-        grassQuads = {}, flowerQuads = {}, roundStamps = {} }
+        grassQuads = {}, flowerQuads = {}, roundStamps = {}, figures = {} }
   Buildings.build(S, map, pixels(tileset), perRow)
 
   -- Fold doors into their buildings. A door cell is WALKABLE (the player
@@ -267,6 +298,14 @@ function Structures.forMap(map)
 
   -- ---- bookcases: pinned shelves collapsed to one cell of depth ----
   Structures.buildBookcases(S, map, x0, x1, y0, y1)
+
+  -- ---- figures: a person drawn INTO furniture, lifted off it ----
+  -- Before the region flood and the volume pass, so everything after this
+  -- reads the tiles the profile says are there once the figure is gone.
+  -- (Its own tiles are authored furniture or walkable floor either way, so
+  -- no pass below would have claimed them -- but the repaint is what those
+  -- passes should see, and this needs no pixel access to do it.)
+  Structures.buildFigures(S, map, x0, x1, y0, y1)
 
   -- ---- flood-fill regions of structural tiles ----
   local seen = {}
@@ -880,13 +919,6 @@ local function roundTemplate(S, map, data, cx, cy, groundTiles, N, capRows)
   return quads, bg
 end
 
--- how far past the map body cells still get the hull. A route's ring is
--- nearly as big as its body; modelling all of it costs hundreds of
--- thousands of quads of border trees nobody walks near. Beyond this,
--- pinned cells simply are not claimed and fall through to the mesher's
--- plain box -- cheap distant scenery.
-local ROUND_RING = 4
-
 -- Hull templates dedupe GLOBALLY per (tileset, four tiles, ground set):
 -- the same four-tile tree repeats for hundreds of cells on a map and
 -- across every route of its tileset, so the carve runs once per distinct
@@ -1214,6 +1246,9 @@ local function bookcaseRank(S, map, tx, northTy, frontTy, capTile)
 end
 
 function Structures.buildBookcases(S, map, x0, x1, y0, y1)
+  -- What to do with the rows a rank VACATES (see TileShape.bookcaseBackfill).
+  -- Read once: it is a property of the tileset, not of the column.
+  local backfill = TileShape.bookcaseBackfill(map.tileset.id)
   for tx = x0, x1 do
     local ty = y1
     while ty >= y0 do
@@ -1241,10 +1276,24 @@ function Structures.buildBookcases(S, map, x0, x1, y0, y1)
               capTile = S.tileAt[ck]
             end
           end
+          -- The box is one cell deep, so it covers only the run's southmost
+          -- rows; everything north of that is vacated.  By default a vacated
+          -- row is skipped and painted with synthesized ground -- right for a
+          -- shelf standing in a room.  `bookcase_backfill = "above"` hands it
+          -- the cell above the run instead, shape and art, so a wall cut into
+          -- a terrace has more terrace behind it rather than a trench.
+          local covered = math.min(2, front - top + 1)
+          local srcK = keyOf(tx, top - 1)
+          local src = backfill == "above" and S.shapeAt[srcK] or nil
           for cy = top, front do
             local tk = keyOf(tx, cy)
-            S.skip[tk] = true
-            S.ground[tk] = false
+            if src and cy <= front - covered then
+              S.shapeAt[tk] = src
+              S.tileAt[tk] = S.tileAt[srcK]
+            else
+              S.skip[tk] = true
+              S.ground[tk] = false
+            end
           end
           bookcaseRank(S, map, tx, top, front, capTile)
           front = top - 1
@@ -1700,18 +1749,44 @@ function Structures.extractObjects(S, map, region, data, perRow, force)
       local fs = S.shapeAt[keyOf(region.tiles[1][1], region.tiles[1][2])]
       strict = fs ~= nil and fs.class == "cutout"
     end
+    -- The rim vote reads the shades on the DRAWING'S OWN bounding box, so a
+    -- prop whose body reaches its own edge votes itself out. The Center's
+    -- potted plants are the case: the pot's olive base is drawn flush on the
+    -- bottom row of the block, so "dark" came back as background and every
+    -- dark pixel in the whole plant drained with it -- the pots rendered as
+    -- hollow black frames while the 2D art has solid olive bodies.
+    --
+    -- Where the vote misreads the art, the profile can name the background
+    -- shades outright (a tileset entry's prop_bg). Keyed BY TILE rather than
+    -- per tileset, because the answer is per drawing: the healing consoles'
+    -- screens really do stand on a dark wall band and really do need dark
+    -- voted out, and the PC really does need light kept.
     local bg = {}
-    for iy = 0, H - 1 do
-      for ix = 0, W - 1 do
-        local px, py = ix - 1, iy - 1
-        local edge = px == 0 or px == bw - 1 or py == 0 or py == bh - 1
-        local st = state[iy * W + ix]
-        if edge and (st == "dark" or st == "light" or st == "white") then
-          bg[st] = true
+    do
+      local named = TileShape.propBg(map.tileset.id)
+      if named then
+        for _, c in ipairs(region.tiles) do
+          local rule = named[S.tileAt[keyOf(c[1], c[2])]]
+          if rule then
+            for shadeName in pairs(rule) do bg[shadeName] = true end
+            break
+          end
         end
       end
     end
-    if not (bg.dark or bg.light or bg.white) then bg.white = true end
+    if not next(bg) then
+      for iy = 0, H - 1 do
+        for ix = 0, W - 1 do
+          local px, py = ix - 1, iy - 1
+          local edge = px == 0 or px == bw - 1 or py == 0 or py == bh - 1
+          local st = state[iy * W + ix]
+          if edge and (st == "dark" or st == "light" or st == "white") then
+            bg[st] = true
+          end
+        end
+      end
+      if not (bg.dark or bg.light or bg.white) then bg.white = true end
+    end
     for i, st in pairs(state) do
       if strict then
         if st == "dark" or st == "light" then
@@ -1943,8 +2018,13 @@ function Structures.buildObject(S, map, region, cluster,
     local bs = S.shapeAt[keyOf(cluster.minX, cluster.maxY + 1)]
     local blocked = not map:isWalkableCell(math.floor(cluster.minX / 2),
                                            math.floor(cluster.maxY / 2))
-    if blocked and bs and bs.authored and bs.art == "upright"
-       and (bs.h or 0) > 0 then
+    -- `bookcase` supports as well as `upright`.  A prop drawn above an
+    -- authored box stands ON it whatever art the box renders with, and a
+    -- stacked box is still a box: the Plateau's gate pilasters carry a
+    -- statue on 48 of their tops, and collapsing the pilaster to a stacked
+    -- run made every one of them fail this test and drop to ground level.
+    if blocked and bs and bs.authored and (bs.h or 0) > 0
+       and (bs.art == "upright" or bs.art == "bookcase") then
       baseY, support = bs.h, bs
     end
   end
@@ -2078,7 +2158,8 @@ function Structures.buildObject(S, map, region, cluster,
   end
   for _, c in ipairs(cluster.tiles) do
     local k = keyOf(c[1], c[2])
-    if support and support.class == "wall" then
+    if support and (support.class == "wall" or support.class == "cliff"
+                    or support.art == "bookcase") then
       -- a figure drawn above a FULL-HEIGHT block (the gym statue on its
       -- plinth) is a statue on a pillar with ONE cell of footprint: the
       -- block below already carries the whole base, so the drawn cell
@@ -2086,6 +2167,13 @@ function Structures.buildObject(S, map, region, cluster,
       -- the base backwards. Furniture supports (a monitor on its desk)
       -- keep the box-extension below -- their drawn cell is the
       -- furniture's own upper rows, and floor there would amputate it.
+      --
+      -- STRUCTURE, not height, decides which: `cliff` and `bookcase` are
+      -- full-height blocks like `wall` and belong here, while `desk` is
+      -- 24px and still furniture.  The Plateau's statues on stacked
+      -- pilasters found this -- taking the furniture branch turned each
+      -- statue's own two rows into a 32px box wearing the pilaster's art,
+      -- so every one of them stood inside a slab of its own plinth.
       S.skip[k] = true
       S.ground[k] = best
     elseif support then
@@ -2114,6 +2202,136 @@ function Structures.buildObject(S, map, region, cluster,
     end
   end
   return true
+end
+
+-- ---- figures: a person drawn INTO furniture, cut out and stood up ----
+
+-- One authored figure at one matched position.
+--
+-- The mask IS the classification: no flood, no shade segmentation, no
+-- validation gate.  Every automatic route in this file asks the art where
+-- the object ends, and a figure painted into its own furniture has no
+-- answer to give -- so the profile answers instead, and this only has to
+-- believe it.  Which also means figures build HEADLESS: unlike every
+-- other standee here, nothing below reads a pixel.
+--
+-- A figure is a SPRITE, not a prop.  It gets exactly the treatment
+-- SpriteBillboards gives a character: one flat plane of the drawing's own
+-- pixels, no thickness, standing at its feet and leaned back by the
+-- camera's pitch at draw time so it always reads face-on -- because that
+-- is what the artwork is.  A seated man drawn face-on is a 2D icon like
+-- every other Gen 1 figure; extruding him into a slab reconstructs a body
+-- nobody drew (the ten-voxel version read as a wedge of furniture, and
+-- even one voxel showed an edge the sprites never show).
+--
+-- So the quads are emitted in the card's OWN LOCAL SPACE -- x from the
+-- mask's west edge, y from his feet, all at z = 0 -- and the placement
+-- (`wx`, `wz`, `y`) rides along for VoxelScene to build the lean matrix
+-- from.  One quad per pixel rather than one alpha-keyed texture: the
+-- tileset atlas has no alpha to key on, and per-pixel quads cut the exact
+-- same silhouette straight out of the live atlas, so every palette bake
+-- (SGB, RED++ per-tile groups, a mod's own art) textures him for free.
+local function buildFigure(S, map, fig, tx, ty, perRow)
+  local bw, bh = fig.w * 8, fig.h * 8
+
+  local function at(lx, ly)
+    if lx < 0 or lx >= bw or ly < 0 or ly >= bh then return false end
+    return fig.mask[ly * bw + lx] or false
+  end
+
+  -- his feet and his west edge: the card's own origin
+  local lowY, minX = 0, bw - 1
+  for ly = 0, bh - 1 do
+    for lx = 0, bw - 1 do
+      if at(lx, ly) then
+        if ly > lowY then lowY = ly end
+        if lx < minX then minX = lx end
+      end
+    end
+  end
+
+  -- He stands ON the furniture he was drawn into -- the same lift a pinned
+  -- prop above a pinned box takes (see buildObject), and gated the same
+  -- way: a thing set down on furniture occupies a BLOCKED cell, while a
+  -- seat you merely walk up to is in a walkable one.
+  local baseY = 0
+  local bs = S.shapeAt[keyOf(tx, ty + fig.h)]
+  local blocked = not map:isWalkableCell(math.floor(tx / 2),
+                                         math.floor((ty + fig.h - 1) / 2))
+  if blocked and bs and bs.authored and bs.art == "upright"
+     and (bs.h or 0) > 0 then
+    baseY = bs.h
+  end
+
+  local atlasW = map.tileset.imageWidth or 128
+  local atlasH = map.tileset.imageHeight or 48
+  local quads = {}
+  for ly = 0, bh - 1 do
+    Budget.tick()
+    for lx = 0, bw - 1 do
+      if at(lx, ly) then
+        local tile = fig.tiles[math.floor(ly / 8) * fig.w
+                               + math.floor(lx / 8) + 1]
+        local u = ((tile % perRow) * 8 + lx % 8 + 0.5) / atlasW
+        local v = (math.floor(tile / perRow) * 8 + ly % 8 + 0.5) / atlasH
+        local x, y = lx - minX, lowY - ly
+        quads[#quads + 1] = { { x, y, 0 }, { x + 1, y, 0 },
+                              { x + 1, y + 1, 0 }, { x, y + 1, 0 },
+                              u = u, v = v, shade = 1 }
+      end
+    end
+  end
+
+  -- Where the card stands.  `wz` is the MIDDLE of the tile row his feet are
+  -- drawn in, which is the same convention a character card uses (its feet
+  -- plane sits at its cell's middle) -- so he sorts against the couch and
+  -- against a player walking past exactly the way an NPC standing there
+  -- would.
+  S.figures[#S.figures + 1] = {
+    quads = quads,
+    wx = tx * 8 + minX,
+    wz = ty * 8 + math.floor(lowY / 8) * 8 + 4,
+    y = baseY,
+  }
+
+  -- What each covered tile wears now that he is off it.  Only the ART
+  -- changes: the couch tiles keep their `counter` box (they ARE the
+  -- couch) and the floor tiles he overhung stay flat floor -- the
+  -- profile just names the version of each drawing without him in it,
+  -- so nothing has to be synthesized or repainted from a neighbour vote.
+  for i = 1, #fig.tiles do
+    local dx, dy = (i - 1) % fig.w, math.floor((i - 1) / fig.w)
+    S.tileAt[keyOf(tx + dx, ty + dy)] = fig.under[i]
+  end
+end
+
+-- Every authored figure, wherever the map draws it.
+--
+-- Matched by TILE PATTERN rather than by coordinates: one blockset entry
+-- places this couch once in each of the eleven Pokemon Centers (and the
+-- Celadon Hotel), so the pattern finds all of them without the profile
+-- naming a single map or cell.  The repaint above replaces the pattern's
+-- own tiles, so a match can never fire twice on the same drawing.
+function Structures.buildFigures(S, map, x0, x1, y0, y1)
+  local figures = TileShape.figures(map.tileset.id)
+  if not figures then return end
+  local perRow = map.tileset.tilesPerRow or 16
+  for _, fig in ipairs(figures) do
+    for ty = y0, y1 - fig.h + 1 do
+      for tx = x0, x1 - fig.w + 1 do
+        Budget.tick()
+        local hit = true
+        for i = 1, #fig.tiles do
+          local dx, dy = (i - 1) % fig.w, math.floor((i - 1) / fig.w)
+          if S.tileAt[keyOf(tx + dx, ty + dy)] ~= fig.tiles[i] then
+            hit = false
+            break
+          end
+        end
+        if hit then buildFigure(S, map, fig, tx, ty, perRow) end
+      end
+    end
+  end
 end
 
 -- ---- tall grass ----

@@ -270,7 +270,12 @@ local function readback(image)
   local prev = love.graphics.getCanvas()
   local ok, data = pcall(function()
     local w, h = image:getDimensions()
-    local canvas = love.graphics.newCanvas(w, h)
+    -- dpiscale = 1, or this is not a copy. On a highdpi surface (Android,
+    -- iOS -- see conf.lua) newCanvas takes the surface's scale by default,
+    -- so the atlas would be drawn into a texture 2.75x its size and read
+    -- back magnified -- and every tile coordinate below, which counts in
+    -- eights from the top-left, would land somewhere between two tiles.
+    local canvas = love.graphics.newCanvas(w, h, { dpiscale = 1 })
     love.graphics.setCanvas(canvas)
     love.graphics.clear(0, 0, 0, 0)
     -- straight copy: no blending against the cleared target, no tint from

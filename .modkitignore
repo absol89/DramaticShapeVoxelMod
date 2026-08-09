@@ -4,6 +4,8 @@
 # The SDK suite and the probes it grew out of. A shipped test that requires
 # an engine module reads as a private require against the archive
 # (CONTRIBUTING-mods.md "What the PR must contain", 2).
+tests/arena_pick.lua
+tests/battle_shots.lua
 tests/dramatic_shape_test.lua
 tests/voxel_anim_probe.lua
 tests/voxel_door_probe.lua
@@ -19,6 +21,7 @@ tests/voxel_void_probe.lua
 # ROM, read the local cache, and emit assets/voxels/*.lua; the carved models
 # are what a player installs, the carving is not.
 tools/build_voxels.py
+tools/contact_sheets.py
 tools/building_images.py
 tools/building_voxels.py
 tools/voxel-survey.md

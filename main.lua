@@ -77,6 +77,16 @@ local TiltShift = V.require("TiltShift")
 local ChunkMesher = V.require("ChunkMesher")
 local VoxelGrid = V.require("VoxelGrid")
 local WorldCurve = V.require("WorldCurve")
+local OverworldBattle = V.require("OverworldBattle")
+local BattleExit = V.require("BattleExit")
+local DayNight = V.require("DayNight")
+local DayTint = V.require("DayTint")
+
+-- Forward declaration: the voxel pipeline's update hook (registered below)
+-- calls this, and it is defined further down with the settings it drives.
+-- Declared rather than left global -- a mod writing to _G would leak into
+-- every other mod's namespace.
+local applyFull
 
 -- The last VOID FILL the terrain was meshed under; see the update hook.
 -- The scene canvas's size, in FRAMEBUFFER PIXELS.
@@ -144,7 +154,26 @@ mod.content.render_pipelines:register("voxel", {
   -- pump slice -- so stepping out of a door lands on terrain that is
   -- already there instead of a flat flash.
   update = function(dt, level)
+    -- FULL is a preset, so it is applied ON THE PRESS rather than held every
+    -- frame: it SETS the other rows and then leaves them alone. Holding them
+    -- would make the zoom keys and the wheel dead while the mode was on, and
+    -- would fight anyone who changed one deliberately.
+    applyFull(level)
     Voxel.update(dt, level)
+    -- the day/night clock, on the same always-running tick: Pipelines.update
+    -- runs whatever the level, so time passes with the mode off, through
+    -- battles and menus, and a CYCLE evening falls mid-fight exactly as it
+    -- would mid-walk
+    DayNight.update(dt)
+    -- The overworld battle rides this hook rather than owning a pipeline of
+    -- its own, because it owns no pass of the FRAME: it draws under a battle
+    -- screen the engine composites, which is not a stage the registry has.
+    -- What it needs is a tick that keeps running once the overworld stops
+    -- being the top state, and this is one -- Game:update calls
+    -- Pipelines.update unconditionally, so it survives the transition wipe
+    -- and the whole battle. Ahead of the active() gate below, because a 3D
+    -- battle does not require the free-roam mode to be switched on.
+    OverworldBattle.update(dt)
     -- VOID FILL picks the block the border ring is made of, and in this
     -- mode that ring is BAKED INTO THE MESH rather than drawn each frame.
     -- So the option has to reach the cache or nothing happens on screen
@@ -186,6 +215,7 @@ mod.content.render_pipelines:register("voxel", {
 
   invalidate = function()
     Voxel3D.invalidate()
+    OverworldBattle.invalidate()
     ChunkMesher.invalidate()   -- no map id = every cached mesh
   end,
 })
@@ -222,10 +252,105 @@ mod.content.render_pipelines:register("tiltshift", {
 -- instead -- see ModSetting for where they persist and how the two rows
 -- each ends up on stay in step.
 
+-- ------- the FULL preset
+--
+-- Everything the mode wants switched to at once. Applied when the VOXEL row
+-- ARRIVES at FULL and not again, so the player can still move the camera or
+-- the zoom afterwards -- it is a starting point, not a lock.
+--
+-- Leaving FULL deliberately does NOT undo any of it. A preset that reverted
+-- would throw away whatever the player had changed since, and "put it back
+-- how it was" is not a thing this can know.
+local fullWas = nil
+
+applyFull = function(level)
+  local isFull = Voxel.isFull(level)
+  local was = fullWas
+  fullWas = isFull
+  if not isFull or was == true or was == nil then return end
+
+  local Game = require("src.core.Game")
+  local Pipelines = require("src.render.Pipelines")
+  local Zoom = require("src.render.Zoom")
+  local opts = Game.save and Game.save.options
+  if not opts then return end
+
+  -- the miniature blur at its strongest: FULL is the diorama look, and the
+  -- tilt-shift is most of what makes it read as a model
+  Pipelines.setLevel("tiltshift", Pipelines.maxLevel("tiltshift"))
+  Pipelines.syncOptions(opts)
+  -- the horizon flat. The curve bends the world away from a walking player,
+  -- which fights a fixed diorama framing
+  WorldCurve.setting:setIndex(1, Game)
+  -- and the view fitted to the window
+  opts.zoom = 0
+  Zoom.applyOptions(opts)
+  -- battles on the map too: FULL means the whole mode, and a fight is where
+  -- half of it is spent. Set and then LET GO of -- unlike the rows above, both
+  -- battle rows stay on the menu under FULL (see the rows hook), so this is
+  -- where the preset puts them and not where they are held.
+  OverworldBattle.setting:setIndex(1, Game)
+  -- with both mons out there on it: BACK SPRITES keeps the player's own on the
+  -- menu, which is the one part of the old screen FULL is least about. Set the
+  -- same way, and changed back on the same row a keypress later.
+  OverworldBattle.backSetting:setIndex(1, Game)
+  -- and the battle screen the staged fight is composed for. WIDE re-lays that
+  -- screen out on a 304x144 surface, which moves every anchor the arena camera
+  -- is solved against (OverworldBattle.forceOG); FULL has just switched staged
+  -- fights on, so the layout follows them.
+  OverworldBattle.forceOG(Game)
+  -- and the sky on the clock on the wall: FULL pins DAYTIME to SYNC. Unlike
+  -- the rest of the preset this one IS held, not just set -- the row is off
+  -- the menu while FULL owns it (the rows hook below), so a value changed
+  -- under it could never be seen or changed back.
+  DayNight.forceSync(Game)
+  if Game.writeOptions then pcall(Game.writeOptions, Game) end
+end
+
+-- Whether a fight can be staged on the map, as far as the OPTIONS menu is
+-- concerned: the 3D-BTL row, and nothing else.
+--
+-- It used to answer yes under FULL as well, on the grounds that FULL owned
+-- that row and switched it on. FULL no longer owns it -- the row stays on the
+-- menu under FULL and can be switched off there (see the rows hook) -- so that
+-- clause would now claim staged battles for a preset the player had just
+-- turned them off inside, pinning BATTLE LAYOUT to OG for a fight that is
+-- never staged. The row is the only thing that decides, which is what every
+-- other reader of this setting already believed: OverworldBattle.begin and
+-- wantsFront both gate on enabled() alone.
+--
+-- Deliberately NOT gated on Voxel3D.available(): the engine offers a
+-- pipeline's row whether or not the hardware can run it (Pipelines.rows), so
+-- this mode's rows say ON on a machine without a depth buffer too, and a menu
+-- that claims 3D battles are on must not also offer the layout they cannot be
+-- drawn in.
+local function stagedBattles()
+  return OverworldBattle.enabled()
+end
+
 local SETTINGS = {
   { VoxelGrid.setting, "One-pixel wireframe along every voxel edge." },
   { WorldCurve.setting,
     "Bend the world down over the horizon, Animal Crossing style." },
+  -- `full` marks a row FULL does not take away. FULL owns the diorama's own
+  -- knobs; what a battle is drawn over, and how it is framed, are not that.
+  { OverworldBattle.setting,
+    "Fight on the map: the battle draws over the nearest clear ground, "
+    .. "shot over the shoulder with a slow parallax drift.",
+    full = true },
+  -- Only offered while a fight can actually be staged on the map: with 3D-BTL
+  -- off the engine draws the classic screen, which is this row's ON already,
+  -- and a row that no longer decides anything is worse than no row.
+  { OverworldBattle.backSetting,
+    "Keep your own Pokemon on the battle menu, seen from behind in its "
+    .. "original slot, instead of standing it on the map facing the foe. "
+    .. "The foe is still out there on its own tile.",
+    when = function() return stagedBattles() end, full = true },
+  { DayNight.setting,
+    "What time it is outdoors: pin the sky to DAY, NIGHT, DUSK or DAWN, "
+    .. "let CYCLE run it -- ten minutes of sun, ten of moon, with the "
+    .. "shadows, the sky and the light following -- or SYNC it to the "
+    .. "clock on the wall, so Kanto's evening falls when yours does." },
 }
 
 local schema = {}
@@ -236,17 +361,18 @@ mod.options:define(schema)
 
 -- ------- this mod's hotkeys
 --
---   3  VOXEL    cycle the camera ladder      (was 6)
+--   3  VOXEL    cycle the camera ladder      (was 6; skips FULL)
 --   5  V-GRID   toggle the wireframe         (new)
 --   6  T-SHIFT  cycle the blur ladder        (was 9)
 --   7  V-CURVE  cycle the horizon bend       (new)
+--   8  3D-BTL   toggle overworld battles     (new)
 --
 -- Only 6 arrives by the documented route. Game:keypressed answers the
 -- engine's own display keys FIRST and returns -- 2 COLORS, 3 TILT, 4 ZOOM,
 -- 5 GBC FX -- and only then offers the key to Pipelines.hotkey, expressly
 -- so "a pipeline can never shadow one" (Schemas, render_pipelines.hotkey).
--- 3 and 5 are two of those, and 7 belongs to a pair of plain mod settings
--- that own no pass and so have no registry to claim a key from at all.
+-- 3 and 5 are two of those, and 7 and 8 belong to plain mod settings that
+-- own no pass and so have no registry to claim a key from at all.
 --
 -- So this wraps Game:keypressed. It is the invasive option and it is the
 -- only one: polling the keyboard in update() would fire alongside the
@@ -254,9 +380,12 @@ mod.options:define(schema)
 -- AND the engine's TILT on the same press.
 --
 -- Consequences worth being explicit about: while this mod is enabled, TILT
--- (3) and GBC FX (5) are unreachable by key. Both are still reachable on
--- the OPTIONS menu, and TILT is the one this mode supersedes anyway -- the
--- registry already forces it off whenever a world pipeline takes the pass.
+-- (3) and GBC FX (5) are unreachable by key -- and unreachable on the OPTIONS
+-- menu too, where both rows are taken away and both values held at zero (see
+-- pinEngineFx). Nothing is being hidden that still does something: TILT is the
+-- flat fake of what this mode does for real, the registry already forces it
+-- off whenever a world pipeline takes the pass, and GBC FX is a full-screen
+-- present pass over the top of the diorama. Uninstalling puts both back.
 --
 -- Everything the engine does around a pipeline hotkey has to happen here
 -- too, so the work is DELEGATED rather than reimplemented: Pipelines.hotkey
@@ -268,6 +397,7 @@ local HOTKEYS = {
   ["6"] = "pipeline",           -- tiltshift, likewise
   ["5"] = VoxelGrid.setting,
   ["7"] = WorldCurve.setting,
+  ["8"] = OverworldBattle.setting,
 }
 
 do
@@ -283,7 +413,20 @@ do
     -- render mode. Only free-roam presses are ours to take.
     if claim and not (top and top.onKeyPressed) then
       if claim == "pipeline" then
-        if Pipelines.hotkey(key, top, self.overworld) then
+        -- 3 walks the ANGLE rungs and steps over FULL (Voxel.HOTKEY_ORDER),
+        -- so the registry's plain "advance one and wrap" is not what it
+        -- wants; 6 still is. The gate is the registry's own either way.
+        local stepped = false
+        if key == "3" then
+          if Pipelines.canToggle("voxel", top, self.overworld) then
+            Pipelines.setLevel("voxel",
+              Voxel.nextHotkeyLevel(Pipelines.level("voxel")))
+            stepped = true
+          end
+        else
+          stepped = Pipelines.hotkey(key, top, self.overworld) and true
+        end
+        if stepped then
           Pipelines.syncOptions(self.save.options)
           -- 3 is the key that used to turn TILT on and sits next to the one
           -- that used to turn GBC FX on, and this mod has taken both away.
@@ -304,11 +447,20 @@ do
           return
         end
       elseif Pipelines.canToggle("voxel", top, self.overworld) then
-        -- Both settings parameterise the voxel pass, so they answer to the
-        -- same free-roam gate it does -- borrowed from the registry rather
-        -- than restated, so a press mid-warp or mid-cutscene is refused for
-        -- the wireframe exactly when it would be for the mode itself.
+        -- All three answer to the voxel pass's own free-roam gate --
+        -- borrowed from the registry rather than restated, so a press
+        -- mid-warp or mid-cutscene is refused for the wireframe exactly when
+        -- it would be for the mode itself. Two of them parameterise that
+        -- pass; the third (3D-BTL) decides what a battle is drawn over, and
+        -- wants the same gate for a different reason: the answer is read
+        -- when the fight starts, so flipping it from inside one would be a
+        -- switch that appeared to do nothing.
         claim:cycle(self)
+        -- 8 is one of the two ways staged battles get switched on, and they
+        -- pin BATTLE LAYOUT to OG (see the rows hook). The other two keys
+        -- parameterise the pass and leave the layout alone; the guard answers
+        -- for all three, so nothing here has to know which key it was.
+        if stagedBattles() then OverworldBattle.forceOG(self) end
         return
       end
     end
@@ -316,15 +468,126 @@ do
   end
 end
 
+-- ------- the mode's rows, kept together
+--
+-- The engine splices a pipeline's row in beside TILT, because a display mode
+-- belongs with the other display modes; a mod's own ui.options.rows
+-- additions land at the END of the list. That left this mod's four rows in
+-- two places with unrelated engine rows between them, which reads as two
+-- unrelated features rather than one mode with settings.
+--
+-- So the plain settings are inserted directly after the last of this mod's
+-- PIPELINE rows instead of appended. Nothing else moves: the block lands
+-- where the engine already decided display modes go.
+local function insertGrouped(out, extra)
+  local anchor = nil
+  for i, row in ipairs(out) do
+    local id = type(row) == "table" and row.id
+    if id == "pipeline:voxel" or id == "pipeline:tiltshift" then anchor = i end
+  end
+  if not anchor then
+    for _, row in ipairs(extra) do out[#out + 1] = row end
+    return out
+  end
+  for i, row in ipairs(extra) do table.insert(out, anchor + i, row) end
+  return out
+end
+
+-- FULL owns the settings that describe the LOOK, so while it is selected those
+-- are taken off the menu rather than left to be changed under it -- including
+-- T-SHIFT, which is a pipeline row the engine put there. A row that no longer
+-- decides anything is worse than no row.
+--
+-- The battle rows are the exception and they stay; see the rows hook.
+local function dropRow(out, id)
+  for i = #out, 1, -1 do
+    if type(out[i]) == "table" and out[i].id == id then table.remove(out, i) end
+  end
+  return out
+end
+
+-- ------- TILT and GBC FX are gone while this mod is installed
+--
+-- Both fight the diorama, and both were already half-taken: the mode's own key
+-- (3) forces them off on every press, and the registry switches TILT off
+-- whenever a world pipeline takes the pass. What was left was two rows the
+-- player could set and watch get reverted -- TILT is the flat fake of what
+-- this mode does for real, and GBC FX is a full-screen present pass over the
+-- top of the whole thing.
+--
+-- So they come OFF the menu, and are HELD at zero rather than merely dropped.
+-- Hiding a live setting is a trap: a save written before the mod was installed
+-- can carry TILT 3, and a row that is not there is a row that cannot turn it
+-- back off. Pinned wherever the value could have arrived from -- the menu
+-- opening, a save being loaded or begun -- so there is no route by which one
+-- of them is on and unreachable.
+--
+-- Everything they did is still reachable: uninstall the mod and both rows are
+-- back, at whatever they were last set to.
+local function pinEngineFx(game)
+  game = game or require("src.core.Game")
+  local opts = game and game.save and game.save.options
+  local Tilt = require("src.render.Tilt")
+  local GBCFX = require("src.render.GBCFX")
+  local changed = false
+  if opts then
+    changed = (opts.tilt or 0) ~= 0 or (opts.gbcfx or 0) ~= 0
+    opts.tilt, opts.gbcfx = 0, 0
+  end
+  pcall(Tilt.setLevel, 0)
+  pcall(GBCFX.setLevel, 0)
+  if changed and game.writeOptions then pcall(game.writeOptions, game) end
+end
+
 -- call next() first and decorate what comes back, so every other mod's
 -- rows survive this one
 mod.hooks:wrap("ui.options.rows", function(next, game, rows)
   local out = next(game, rows)
   if type(out) ~= "table" then return out end
-  for _, entry in ipairs(SETTINGS) do
-    out[#out + 1] = entry[1]:row()
+  local Pipelines = require("src.render.Pipelines")
+  -- ahead of every branch below, including FULL's early return: these two are
+  -- off the menu whatever else this mod is or is not doing
+  pinEngineFx(game)
+  dropRow(out, "tilt")
+  dropRow(out, "gbcfx")
+  -- BATTLE LAYOUT is the ENGINE's row, and this is the one place the mod takes
+  -- one away. While a fight can be staged on the map, OG is the only layout it
+  -- can be composed in (OverworldBattle.forceOG), so the value is pinned there
+  -- and the row comes off the list on the same reasoning as the rows FULL owns:
+  -- a row that no longer decides anything is worse than no row. Nothing is
+  -- lost by switching 3D-BTL off -- the row is back, WIDE and all, on the same
+  -- keypress.
+  if stagedBattles() then
+    OverworldBattle.forceOG(game)
+    dropRow(out, "battleLayout")
   end
-  return out
+  local full = Voxel.isFull(Pipelines.level("voxel"))
+  if full then
+    -- FULL owns the rows that PARAMETERISE the diorama -- the wireframe, the
+    -- horizon bend, the blur, the hour -- so those come off the menu and
+    -- DAYTIME is held at SYNC while its row is unreachable.
+    DayNight.forceSync(game)
+    dropRow(out, "pipeline:tiltshift")
+  end
+  local extra = {}
+  for _, entry in ipairs(SETTINGS) do
+    -- Two things decide whether a row is offered.
+    --
+    -- FULL: a preset that owns the look, so the rows that describe the look go
+    -- with it. The BATTLE rows are not that -- 3D-BTL decides what a fight is
+    -- drawn OVER and BACK SPRITES how it is framed, and neither is a knob on
+    -- the diorama FULL is a preset for. FULL still SETS them on arrival (see
+    -- applyFull); it does not hold them, so leaving them on the menu is the
+    -- difference between a preset and a lock.
+    --
+    -- And a row whose own switch is off the table this frame (BACK SPRITES,
+    -- which needs a staged fight to be about) is left off with it. The mod
+    -- manager's page carries every one of them either way.
+    local offered = (entry.full or not full)
+                    and (not entry.when or entry.when())
+    if offered then extra[#extra + 1] = entry[1]:row() end
+  end
+  return insertGrouped(out, extra)
 end)
 
 -- The mod manager writes and persists on its own, so the only thing left
@@ -334,6 +597,15 @@ mod.events:on("mod.options_changed", function(payload)
   for _, entry in ipairs(SETTINGS) do
     if payload.key == entry[1].key then entry[1]:sync(payload.value) end
   end
+  -- 3D-BTL switched on from the manager's page pins BATTLE LAYOUT exactly as
+  -- the OPTIONS row does. The manager persists its own value; this is the one
+  -- that has to follow it.
+  if stagedBattles() then OverworldBattle.forceOG() end
+  -- and DAYTIME changed from the manager's page while FULL owns it snaps
+  -- straight back to SYNC -- the OPTIONS row is hidden, but the manager's is
+  -- not, and FULL's pin must hold against both
+  local Pipelines = require("src.render.Pipelines")
+  if Voxel.isFull(Pipelines.level("voxel")) then DayNight.forceSync() end
 end)
 
 -- ------- keeping the geometry in step with the world
@@ -416,7 +688,167 @@ mod.events:on("map.reloaded", function(payload)
   if mapId then ChunkMesher.invalidate(mapId) end
 end)
 
-mod.exports.version = "1.0.6"
+-- ------- rows come and go, so the menu has to notice
+--
+-- OptionsMenu builds its row list ONCE, when it is opened, and then reads
+-- that list every frame. So stepping the VOXEL row onto or off FULL changed
+-- which rows the hook would return but not which rows were on screen -- the
+-- settings FULL owns stayed visible until the menu was closed and reopened,
+-- and a player who stepped off FULL could not see the rows come back.
+--
+-- Rebuilt in place, and only on a step that changes the LIST: crossing FULL,
+-- or toggling 3D-BTL, which is the other row that owns one (BATTLE LAYOUT).
+-- Every other rung returns the same list, and rebuilding on all of them would
+-- rerun every mod's ui.options.rows hook once per keypress. The cursor is
+-- clamped rather than reset, so it stays on the row it was just used on
+-- instead of jumping to the top when the list below it shortens.
+do
+  local OptionsMenu = require("src.ui.OptionsMenu")
+  if not OptionsMenu.dramaticShapeFullHook then
+    local Pipelines = require("src.render.Pipelines")
+    local inner = OptionsMenu.update
+
+    local function idAt(menu, index)
+      local row = menu.rows and menu.rows[index or 1]
+      return type(row) == "table" and row.id or nil
+    end
+
+    function OptionsMenu:update(dt)
+      local before = Pipelines.level("voxel")
+      local hadBattles = OverworldBattle.enabled()
+      local wasOn = idAt(self, self.index)
+      inner(self, dt)
+      local after = Pipelines.level("voxel")
+      local crossedFull = after ~= before
+                          and (Voxel.isFull(before) or Voxel.isFull(after))
+      if crossedFull or OverworldBattle.enabled() ~= hadBattles then
+        local rebuilt = OptionsMenu.new(self.game)
+        self.rows = rebuilt.rows
+        -- Follow the row the cursor was ON rather than the slot it was in:
+        -- 3D-BTL takes BATTLE LAYOUT off the list ABOVE itself, which would
+        -- otherwise slide the cursor onto the row under the one just used.
+        for i = 1, #self.rows do
+          if wasOn and idAt(self, i) == wasOn then self.index = i; break end
+        end
+        local cancel = #self.rows + 1
+        if (self.index or 1) > cancel then self.index = cancel end
+      end
+    end
+
+    OptionsMenu.dramaticShapeFullHook = true
+  end
+end
+
+-- ------- battles on the map
+--
+-- The wraps this needs -- OverworldState:pushBattle, BattleState:draw and
+-- BattleState:drawHUDs -- all live in lib/OverworldBattle.lua, which is
+-- where the reasoning for each one is written down. Installed once, here,
+-- so this file keeps naming every engine seam the mod touches.
+OverworldBattle.install()
+
+-- The overworld's own pushBattle is the choke point for a wild encounter or
+-- a trainer, and it is wrapped. A battle that arrives some other way -- a
+-- link battle, a script pushing a BattleState directly -- reaches this
+-- instead, which stages the arena from wherever the player is standing.
+-- Nothing visible is lost by being late: the cull only has to beat the
+-- battle screen, and the wipe those battles skip is where it would have
+-- shown.
+mod.events:on("battle.started", function(payload)
+  OverworldBattle.ensure(payload and payload.battle)
+end)
+
+-- Both mons face the camera, so the player's side wants its FRONT pic where
+-- the battle screen would have used the back one. The engine's own
+-- pokemon.sprite hook is the seam for exactly this: it is asked for every
+-- battle pic with the side it is resolving, so swapping one side's answer
+-- needs no battle code at all -- and every path that builds a battler goes
+-- through it, including a Transform mid-fight.
+--
+-- next() first, so a sprite-replacing mod loaded before this one still gets
+-- the last word on WHICH art is used; this only changes which SIDE is asked
+-- for.
+mod.hooks:wrap("pokemon.sprite", function(next, path, ctx)
+  local out = next(path, ctx)
+  if not (ctx and ctx.kind == "battle" and ctx.side == "back") then
+    return out
+  end
+  if not OverworldBattle.wantsFront() then return out end
+  local def = ctx.data and ctx.data.pokemon and ctx.data.pokemon[ctx.species]
+  return (def and def.spriteFront) or out
+end)
+
+-- Every ending path emits this, including a battle skipped before it drew,
+-- so this is where the map's cast comes back.
+mod.events:on("battle.ended", function()
+  OverworldBattle.finish()
+end)
+
+-- ------- and the way back out
+--
+-- The engine wipes INTO a battle with one of the original's eight transitions
+-- and cuts straight OUT of it. That cut is between two very different cameras
+-- in this mode, so while voxel mode is on the battle fades out, closes behind
+-- the black, and the map fades up. The two seams it needs -- BattleState:finish
+-- and Renderer:endFrame -- and the reasoning for each live in lib/BattleExit.lua.
+--
+-- Declared as a transitions record rather than a constant in that file, so the
+-- fade is retunable in data exactly like the eight wipes it answers, and a total
+-- conversion can make it as long or as short as its own pacing wants.
+mod.content.transitions:register(BattleExit.ID, {
+  frames = BattleExit.FRAMES,
+})
+
+BattleExit.install()
+
+-- ------- and the hour on the flat world
+--
+-- The clock reaches the diorama through the voxel shader's own tint uniform,
+-- which the 2D tile path never runs -- so with the mode off, the same evening
+-- that fell on the diorama left the flat world at permanent noon. One clock,
+-- two worlds, one of them ignoring it. DayTint paints the same multiply over
+-- the composited flat world, between the world blit and the UI blit; the
+-- reasoning for that exact instant is in the file.
+DayTint.install()
+
+-- ------- what time it is
+--
+-- The cycle's clock rides the SAVE SLOT (save.modData, via mod.save): what
+-- time it is in Kanto is a fact about that journey, like where the player is
+-- standing. Written on the engine's save.writing event -- the moment before
+-- the bytes hit disk -- and read back whenever a save is opened or begun. A
+-- save with no clock in it starts at day; that is DayNight.restore's
+-- fallback, and also the DAYTIME row's own default.
+mod.events:on("save.writing", function()
+  DayNight.store()
+end)
+
+mod.events:on("save.loaded", function()
+  DayNight.restore()
+  -- a save written before this mod was installed can carry TILT or GBC FX
+  -- switched on, and their rows are not there to switch them back off (see
+  -- pinEngineFx). Answered here rather than only when the menu opens, so a
+  -- player who never opens it is not left playing under one.
+  pinEngineFx()
+end)
+
+mod.events:on("save.created", function()
+  DayNight.restore()
+  pinEngineFx()
+end)
+
+-- The engine's own time-of-day seam. OverworldState:timeOfDay() is an
+-- eternal "DAY" until a mod answers here; answering it hands the period to
+-- the map.palette hook (ctx.tod) and music.select, so a palette or music
+-- pack keyed to night works with this mod's clock for free. next() first: a
+-- mod loaded before this one that already moved the time keeps its answer.
+mod.hooks:wrap("world.tod", function(next, tod, ctx)
+  local out = next(tod, ctx)
+  if out ~= tod then return out end
+  return DayNight.tod()
+end)
+
+mod.exports.version = "1.3.1"
 -- exposed so a companion mod can pin its own tiles' shapes or read the
 -- camera without reaching into this mod's file layout
 mod.exports.lib = V

@@ -77,7 +77,44 @@ ShadowMap.HEIGHT = 160
 -- surface shadows itself in a moire of acne; too much and a shadow detaches
 -- from the foot of what casts it. The frustum is ~400 world pixels deep and
 -- the packed depth resolves under 0.01 of one, so there is room.
-ShadowMap.BIAS = 1.0
+--
+-- It cannot be ONE number, because what the comparison has to forgive is
+-- not fixed: the map stores one depth for a whole texel, so a lit surface
+-- reads its own depth wrong by however far it RAMPS across that texel --
+-- the texel's world size times the surface's slope in the light's frame.
+-- The texel swings from a third of a world pixel at the closest zoom to
+-- well over one at a maximised window on the widest, so a constant bias is
+-- generous at one end of the ladder and short at the other. Short shows up
+-- as diagonal bands of acne across big lit surfaces -- diagonal because
+-- the moire runs along neither the world grid nor the screen's, but along
+-- the depth ramp in the sun's own frame, and the sun sits southeast.
+--
+-- So: a floor for what does not scale (the packed depth's quantisation,
+-- and the two passes reaching the same world point by different matrices),
+-- plus a term in texels for what does.
+ShadowMap.BIAS = 0.5
+
+-- World pixels of slack per world pixel of texel, for the steepest LIT
+-- surface here: a roof pitched 45 degrees and turned away from the sun,
+-- whose depth ramps about 3.1 world pixels per texel crossed on EITHER of
+-- the light frame's two axes (a vertical wall, by comparison, manages 1.7,
+-- flat ground 0.7, and anything steeper than that roof has its back to the
+-- sun and never reads the map at all). The 2x2 filter's taps sit half a
+-- texel out on both axes at once, so the worst a tap can disagree by is
+-- half the ramp along each -- which is where the halving that turns 6.2
+-- into 3.1 comes from, and why it is the SUM of the two components rather
+-- than their magnitude.
+--
+-- Measured against the artefact rather than trusted: the probe
+-- (tests/voxel_acne_probe.lua) counts isolated shadowed pixels on lit
+-- surfaces, and the banding stops at slack ~2.4 world px on the widest
+-- rung -- where this lands 3.1 * 0.83 + 0.5.
+ShadowMap.SLOPE = 3.1
+
+-- The slack `fit` last worked out, in world pixels -- BIAS + SLOPE*texel.
+-- Read by probes; `ShadowMap.bias` is the same number as the [0,1] depth
+-- the map actually stores.
+ShadowMap.slack = ShadowMap.BIAS
 
 local SHADER = [[
   varying float vDepth;
@@ -316,9 +353,58 @@ local function fit(cx, cy, vw, vh)
   -- what the frustum ended up covering, for probes: the lateral extent in
   -- world pixels divided by RES is how fine a shadow edge can land
   ShadowMap.extent = { r - l, t - b, far - near }
+  -- the slack the comparison needs, against the coarser of the two texel
+  -- axes (the box is asymmetric, and one number has to cover both)
+  ShadowMap.slack = ShadowMap.BIAS
+                    + ShadowMap.SLOPE * math.max(w, h) / res
   -- the stored depth spans the frustum, so a world-pixel bias is that
   -- fraction of it
-  ShadowMap.bias = ShadowMap.BIAS / math.max(1, far - near)
+  ShadowMap.bias = ShadowMap.slack / math.max(1, far - near)
+end
+
+-- How much of the compare's forgiveness a snugged caster takes back, 0..1.
+-- Short of 1 on purpose: at exactly 1 the card's own fragments compare
+-- against their own stored depth on a float-equality knife edge and can
+-- speckle. The tenth left over is dozens of times the packed depth's
+-- quantization -- ample for that -- and leaves the contact gap around a
+-- quarter of a world pixel at any sun, which no zoom resolves.
+ShadowMap.SNUG = 0.9
+
+-- A CASTER snugged up the sun ray -- moved TOWARD the light -- before it is
+-- drawn into the map.
+--
+-- The depth compare forgives `slack` world pixels (BIAS + the SLOPE term)
+-- so lit surfaces do not acne against their own texels -- but that same
+-- forgiveness is what lets the ground right next to a standing figure read
+-- as lit: a receiver within `slack` of its blocker along the ray passes the
+-- test, so the first stretch of every shadow is forgiven away and on screen
+-- it starts that far from the feet, further the lower the sun. The classic
+-- peter-panning; unseen while the sun hung at a fixed 45 degrees, plain at
+-- a day/night golden hour or under the moon.
+--
+-- Moving the card ALONG ITS OWN RAY changes nothing about where its shadow
+-- falls -- every point stays on the same light ray -- but moving it toward
+-- the sun stores it SHALLOWER, so a ground point right at the foot is
+-- already `slack` deeper than the stored blocker and fails the lit test:
+-- the root lands back under the feet. Nothing else is touched -- no
+-- terrain moved, so the acne margin the slack exists for is intact where
+-- it matters. For sprite cards and other thin stand-ins only.
+--
+-- ONE OBLIGATION comes with it: the caster's LIT draw must hand this same
+-- snugged transform to its shadow lookup (Voxel3D.draw's `sunModel`).
+-- Stored and lookup then agree exactly, as they did before snugging, and
+-- the compare keeps its full acne margin. A caster stored snugged but read
+-- un-snugged is 0.9 of the margin short, and the loss shows up as diagonal
+-- moire bands crawling across the card.
+--
+-- Valid between begin() and the next begin(): `slack` and the sun hold
+-- still between redraws of the map, so a lit frame that reuses last
+-- frame's map computes the same displacement it was stored with.
+function ShadowMap.snug(model)
+  local f = sunDir()
+  local s = -ShadowMap.slack * ShadowMap.SNUG
+  return Mat4.mul(Mat4.translate(f[1] * s, f[2] * s, f[3] * s),
+                  model or IDENTITY)
 end
 
 -- Whether the map has to be redrawn for `sig` -- a caller-built stamp of

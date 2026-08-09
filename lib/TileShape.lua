@@ -54,6 +54,12 @@ local FALLBACK_HEIGHTS = {
   sign = 12,
   wall = 16,
   tree = 16,
+  -- masonry drawn TWO courses tall: the Indigo Plateau's rim and the
+  -- badge-check gates down Route 23 are drawn 32px, the same height as a
+  -- statue on its plinth, and read as a step in the terrain rather than a
+  -- room's wall.  Same fold as `wall`, twice the height -- and its own
+  -- class because `wall` is 16px for every interior in the game.
+  cliff = 32,
   roof = 28,
   cylinder = 16,
   -- big round scenery: a 2x2-CELL drawing carved as ONE 32px voxel hull
@@ -110,6 +116,7 @@ local ART = {
   ledge = "top",
   roof = "top",
   wall = "upright",
+  cliff = "upright",
   tree = "upright",
   fence = "upright",
   sign = "upright",
@@ -168,6 +175,8 @@ local ART = {
 
 local spec = nil          -- the loaded data file, or false when absent
 local cache = {}          -- tileset id -> resolved shape list
+local figCache = {}       -- tileset id -> parsed figure masks, or false
+local bgCache = {}        -- tileset id -> prop background shades, or false
 
 -- The shape profile ships with the mod (data/voxel_heights.lua) and is read
 -- through the mod's own file loader rather than package.path: a mod's
@@ -224,29 +233,42 @@ end
 -- class = "..." } } }`, evaluated per POSITION in TileShape.at, where
 -- the map and coordinates are in hand. First match wins; no match keeps
 -- the tile's ordinary pin.
+-- `when_below` is the mirror, and it exists because ABOVE is not always the
+-- side that tells the two uses apart.  The Plateau's $0D is the case: it is
+-- the gate wall's top band AND the base course under a column of rock face,
+-- and scanned over both maps the tile above is $03 for 64 of the first and
+-- 140 of the second -- no rule on `above` can split them.  What is BELOW
+-- does, exactly: the wall's own face $0F sits under the top band and under
+-- nothing else (336 vs 352, clean).
 local function authoredConditions(tilesetId, heights)
   local s = load()
   local entry = s and s.tilesets and s.tilesets[tilesetId]
-  local spec = entry and entry.when_above
-  if type(spec) ~= "table" then return nil end
+  if type(entry) ~= "table" then return nil end
   local out, any = {}, false
-  for tile, rules in pairs(spec) do
-    if type(tile) == "number" and type(rules) == "table" then
-      local list = {}
-      for _, rule in ipairs(rules) do
-        if type(rule) == "table" and heights[rule.class]
-           and type(rule.above) == "table" then
-          local set = {}
-          for _, t in ipairs(rule.above) do set[t] = true end
-          list[#list + 1] = { above = set, class = rule.class }
+
+  local function collect(spec, side)
+    if type(spec) ~= "table" then return end
+    for tile, rules in pairs(spec) do
+      if type(tile) == "number" and type(rules) == "table" then
+        local list = out[tile] or {}
+        for _, rule in ipairs(rules) do
+          if type(rule) == "table" and heights[rule.class]
+             and type(rule[side]) == "table" then
+            local set = {}
+            for _, t in ipairs(rule[side]) do set[t] = true end
+            list[#list + 1] = { side = side, set = set, class = rule.class }
+          end
         end
-      end
-      if #list > 0 then
-        out[tile] = list
-        any = true
+        if #list > 0 then
+          out[tile] = list
+          any = true
+        end
       end
     end
   end
+
+  collect(entry.when_above, "above")
+  collect(entry.when_below, "below")
   return any and out or nil
 end
 
@@ -348,9 +370,12 @@ function TileShape.at(map, shapes, tile, tx, ty)
   -- tile and the cell rules below (see authoredConditions)
   local rules = shapes.cond and shapes.cond[tile]
   if rules then
-    local above = map:tileAt(tx, ty - 1)
     for _, rule in ipairs(rules) do
-      if above and rule.above[above] then
+      -- NOTE map:tileAt border-EXTENDS: one row off an edge answers the
+      -- map's borderBlock, never nil.  A rule listing whatever that block
+      -- draws will fire along that whole edge (it did, on the Marts).
+      local n = map:tileAt(tx, rule.side == "above" and ty - 1 or ty + 1)
+      if n and rule.set[n] then
         -- shapes.condShape, NOT shapes.classes: the canonical class
         -- shapes are SHARED, and `wall` in particular is the very object
         -- rule 4 hands every unauthored solid tile. Marking that one
@@ -369,11 +394,158 @@ function TileShape.at(map, shapes, tile, tx, ty)
   return s
 end
 
+-- Hand-authored FIGURES for one tileset: a drawing painted INTO furniture,
+-- cut out by an explicit pixel mask and stood up on top of it.
+--
+-- Every other route in this file resolves a whole 8x8 TILE, which is
+-- exactly why none of them can reach a figure that shares its tiles with
+-- the thing it sits on -- and the detector's segmentation cannot either
+-- when the drawing has no background margin to flood from and wears the
+-- same shades as its furniture.  So the profile authors the silhouette
+-- pixel by pixel (see data/voxel_heights.lua):
+--
+--   figures = { { w      = <tiles across>,
+--                 tiles  = { ...w*h tile ids, row-major... },
+--                 under  = { ...w*h ids: what each tile wears once the
+--                            figure is lifted off it... },
+--                 pixels = { ...h*8 strings of w*8 chars, "." = not the
+--                            figure... } } }
+--
+-- No class: a figure is always a flat sprite card, drawn the way
+-- SpriteBillboards draws a character (see Structures.buildFigures).
+--
+-- Returned normalized: `mask` as a set keyed by ly * (w * 8) + lx, so
+-- Structures can read it as a bitmap without re-parsing per position.
+-- A malformed entry is dropped rather than half-applied -- a typo in a
+-- mask should leave the couch alone, not carve a hole in it.
+function TileShape.figures(tilesetId)
+  local hit = figCache[tilesetId]
+  if hit ~= nil then return hit or nil end
+
+  local s = load()
+  local entry = s and s.tilesets and s.tilesets[tilesetId]
+  local list = entry and entry.figures
+  local out = {}
+  if type(list) == "table" then
+    for _, f in ipairs(list) do
+      local ok = type(f) == "table" and type(f.w) == "number"
+                 and type(f.tiles) == "table" and type(f.under) == "table"
+                 and type(f.pixels) == "table"
+      local w = ok and math.floor(f.w) or 0
+      local h = (w >= 1) and (#f.tiles / w) or 0
+      ok = ok and w >= 1 and h >= 1 and h == math.floor(h)
+           and #f.under == #f.tiles and #f.pixels == h * 8
+      if ok then
+        for i = 1, h * 8 do
+          local row = f.pixels[i]
+          if type(row) ~= "string" or #row ~= w * 8 then
+            ok = false
+            break
+          end
+        end
+      end
+      if ok then
+        local mask, n = {}, 0
+        for ly = 0, h * 8 - 1 do
+          local row = f.pixels[ly + 1]
+          for lx = 0, w * 8 - 1 do
+            if row:sub(lx + 1, lx + 1) ~= "." then
+              mask[ly * (w * 8) + lx] = true
+              n = n + 1
+            end
+          end
+        end
+        if n > 0 then
+          out[#out + 1] = { w = w, h = h, n = n, mask = mask,
+                            tiles = f.tiles, under = f.under }
+        end
+      end
+    end
+  end
+
+  figCache[tilesetId] = (#out > 0) and out or false
+  return figCache[tilesetId] or nil
+end
+
+-- Which GB shades count as BACKGROUND for a pinned per-pixel prop, per tile
+-- (a tileset entry's prop_bg). Returns tile id -> set of shade names, or nil.
+--
+-- Structures normally votes on this by reading the shades that touch the
+-- drawing's own bounding box, which is right whenever the drawing has a
+-- margin of floor around it and wrong when it does not: a prop whose body
+-- reaches its own edge votes itself out. Naming the shades is the override,
+-- and it is keyed by TILE because the answer is per drawing rather than per
+-- tileset -- two props in one atlas can want opposite calls on the same
+-- shade (see the POKECENTER entry).
+--
+--   prop_bg = { { tiles = { ...ids... }, shades = { "light", "white" } } }
+--
+-- Only the four GB shade names exist; anything else is dropped, so a typo
+-- degrades to the ordinary vote rather than emptying the background.
+local SHADES = { black = true, dark = true, light = true, white = true }
+
+function TileShape.propBg(tilesetId)
+  local hit = bgCache[tilesetId]
+  if hit ~= nil then return hit or nil end
+
+  local s = load()
+  local entry = s and s.tilesets and s.tilesets[tilesetId]
+  local list = entry and entry.prop_bg
+  local out, any = {}, false
+  if type(list) == "table" then
+    for _, rule in ipairs(list) do
+      if type(rule) == "table" and type(rule.tiles) == "table"
+         and type(rule.shades) == "table" then
+        local set, n = {}, 0
+        for _, name in ipairs(rule.shades) do
+          if SHADES[name] then
+            set[name] = true
+            n = n + 1
+          end
+        end
+        if n > 0 then
+          for _, t in ipairs(rule.tiles) do
+            if type(t) == "number" then
+              out[t] = set
+              any = true
+            end
+          end
+        end
+      end
+    end
+  end
+
+  bgCache[tilesetId] = any and out or false
+  return bgCache[tilesetId] or nil
+end
+
+-- What a bookcase rank does with the rows it VACATES -- the ones behind the
+-- one-cell-deep box it collapses onto (a tileset entry's
+-- bookcase_backfill).  Returns the mode name, or nil for the default.
+--
+--   "above"   hand them the cell immediately above the run: its shape and
+--             its art.  A wall set INTO a terrace wants this -- the ground
+--             behind it is more terrace, not a trench.
+--   nil       skip them and paint the map's commonest ground underneath,
+--             which is right for a free-standing shelf against a wall.
+--
+-- Per tileset because it is a statement about what the drawing depicts, and
+-- the answer differs: the Mart's racks and Red's shelves stand in a room,
+-- the Plateau's gate walls are cut into a hillside.
+function TileShape.bookcaseBackfill(tilesetId)
+  local s = load()
+  local entry = s and s.tilesets and s.tilesets[tilesetId]
+  local mode = entry and entry.bookcase_backfill
+  return mode == "above" and mode or nil
+end
+
 -- Drop the cache: a mod that shadows data/voxel_heights.lua or a tileset
 -- record needs the next lookup to re-resolve (hot reload, mod toggle).
 function TileShape.invalidate()
   spec = nil
   cache = {}
+  figCache = {}
+  bgCache = {}
 end
 
 return TileShape
