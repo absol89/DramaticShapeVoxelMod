@@ -255,6 +255,12 @@ end
 -- used, so the contrast is guaranteed rather than hoped for: a dark panel
 -- gets darker under white text, a bright one brighter under black text.
 function BattleHud.panel(rect, box, dark, world)
+  -- FIX: Check if Modern UI Battle mode is active. If yes, abort drawing the frosted glass!
+  local Game = require("src.core.Game")
+  if Game and Game.save and Game.save.options and Game.save.options.modOptions then
+      local mOpts = Game.save.options.modOptions["gen1_modern_ui"]
+      if mOpts and mOpts.battleUiWip == true then return true end
+  end
   -- Fully transparent means absent, not a zero-alpha draw. Avoid touching the
   -- destination canvas or blend state at all; premultiplied driver paths can
   -- otherwise retain RGB from a transparent sample as a dim veil.
@@ -445,6 +451,23 @@ end
 local hudLayer = nil
 
 function BattleHud.layerTexture(w, h, dark, fn, inverted)
+  -- FIX: Check if Modern UI Battle mode is active. If yes, abort drawing classic text!
+  local Game = require("src.core.Game")
+  if Game and Game.save and Game.save.options and Game.save.options.modOptions then
+      local mOpts = Game.save.options.modOptions["gen1_modern_ui"]
+      if mOpts and mOpts.battleUiWip == true then
+          if not hudLayer or hudLayer:getWidth() ~= w or hudLayer:getHeight() ~= h then
+              hudLayer = canvasOf(w, h, "nearest")
+          end
+          local g = love.graphics
+          local prev = g.getCanvas()
+          g.setCanvas(hudLayer)
+          g.clear(0, 0, 0, 0)
+          if prev then g.setCanvas(prev) else g.setCanvas() end
+          return hudLayer
+      end
+  end
+
   if not hudLayer or hudLayer:getWidth() ~= w or hudLayer:getHeight() ~= h then
     hudLayer = canvasOf(w, h, "nearest")
     if not hudLayer then return nil end

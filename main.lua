@@ -1049,3 +1049,27 @@ mod.exports.version = "1.7.6"
 -- exposed so a companion mod can pin its own tiles' shapes or read the
 -- camera without reaching into this mod's file layout
 mod.exports.lib = V
+
+-- =====================================================================
+-- FIX: SILENCE VOXEL HUD WHEN MODERN UI BATTLE PRESENTER IS ACTIVE
+-- This wraps the Voxel Mod's own HUD hooks to prevent them from drawing
+-- the classic floating lifebars when Modern UI is handling the battle.
+-- =====================================================================
+local okBS, BattleState = pcall(require, "src.battle.BattleState")
+if okBS and BattleState then
+    local orig_drawHUDs = BattleState.drawHUDs
+    BattleState.drawHUDs = function(self, ...)
+        local modernMod = mod.find and mod.find("gen1_modern_ui")
+        local wipOn = modernMod and modernMod.options and modernMod.options:get("battleUiWip")
+        if wipOn then return end
+        if orig_drawHUDs then return orig_drawHUDs(self, ...) end
+    end
+
+    local orig_drawTextArea = BattleState.drawTextArea
+    BattleState.drawTextArea = function(self, ...)
+        local modernMod = mod.find and mod.find("gen1_modern_ui")
+        local wipOn = modernMod and modernMod.options and modernMod.options:get("battleUiWip")
+        if wipOn then return end
+        if orig_drawTextArea then return orig_drawTextArea(self, ...) end
+    end
+end
