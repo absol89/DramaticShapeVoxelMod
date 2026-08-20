@@ -14,6 +14,12 @@
 -- art. One quad wearing the real frame is both more faithful and cheaper:
 -- it needs no pixel access at all, only the sheet's dimensions.
 --
+-- Vanilla figures all read that dimension as a fixed 16, but a mod's
+-- registered sprite (furniture, decor placed as an overworld entity) can
+-- carry its own frameWidth/frameHeight the 2D path already honours -- see
+-- buildCard below. The card stays a flat drawing either way; only its
+-- size changes.
+--
 -- The card always faces SOUTH -- the direction the 2D game implies -- and
 -- only LEANS BACK, pivoting at its feet, by exactly the camera's pitch
 -- (VoxelScene's billboardMatrix), so at every tilt level it reads face-on
@@ -32,20 +38,35 @@ local SpriteBillboards = {}
 
 local meshes = {}
 
--- One flat 16x16 quad UV-mapped to a whole frame. A hair of inset keeps
--- the sampler inside this frame rather than picking up the neighbouring
--- one along the shared edge.
+-- One flat quad -- 16x16 for every vanilla figure, or the def's own
+-- frameWidth x frameHeight for a mod sprite registered bigger than that --
+-- UV-mapped to a whole frame. A hair of inset keeps the sampler inside
+-- this frame rather than picking up the neighbouring one along the shared
+-- edge.
+--
+-- Mat4.billboard and Mat4.caster both place the finished card by the
+-- closed form World = R * (Local - (8,0,0)) + (px+8, y, py+8): a fixed
+-- local shift of 8 (half the vanilla 16px width) pulls the card's own
+-- origin to its centre before the lean/yaw rotation R is applied, so it
+-- pivots there instead of at its left edge, and only then is it placed at
+-- the entity's tile centre. That local shift is fixed and shared by every
+-- entity, so a wider card bakes its OWN half-width in here
+-- (x0 = 8 - fw / 2) rather than asking the shared matrices to know each
+-- sprite's size -- for fw == 16 that is x0 = 0, the original quad.
 local function buildCard(def, frame)
   local ok, img = pcall(Assets.image, def.image)
   if not (ok and img) then return nil end
   local iw, ih = img:getDimensions()
-  local fy = frame * 16
-  if fy + 16 > ih then fy = 0 end
-  local u0, u1 = 0.02 / iw, (16 - 0.02) / iw
-  local v0, v1 = (fy + 0.05) / ih, (fy + 15.95) / ih
+  local fw = def.frameWidth or 16
+  local fh = def.frameHeight or 16
+  local fy = frame * fh
+  if fy + fh > ih then fy = 0 end
+  local u0, u1 = 0.02 / iw, (fw - 0.02) / iw
+  local v0, v1 = (fy + 0.05) / ih, (fy + fh - 0.05) / ih
+  local x0, x1 = 8 - fw / 2, 8 + fw / 2
   local verts = {
-    { 0, 0, 0, u0, v1, 1 }, { 16, 0, 0, u1, v1, 1 },
-    { 16, 16, 0, u1, v0, 1 }, { 0, 16, 0, u0, v0, 1 },
+    { x0, 0, 0, u0, v1, 1 }, { x1, 0, 0, u1, v1, 1 },
+    { x1, fh, 0, u1, v0, 1 }, { x0, fh, 0, u0, v0, 1 },
   }
   local indices = {}
   Voxel3D.pushQuad(indices, 0)
@@ -62,7 +83,12 @@ end
 -- ground whether or not anything hides it; and the sun must see the same
 -- outline the camera does, or a shadow stops matching what casts it.
 function SpriteBillboards.mesh(def, frame)
-  local key = def.image .. "#" .. frame
+  -- Size is part of the key too: two defs can point at the same sheet
+  -- with different frameWidth/frameHeight (a mod's derived variant of a
+  -- shared asset), and previously that could only alias because every
+  -- card was implicitly 16x16.
+  local key = def.image .. "#" .. frame .. "#"
+              .. (def.frameWidth or 16) .. "x" .. (def.frameHeight or 16)
   if meshes[key] == nil then
     local ok, m = pcall(buildCard, def, frame)
     meshes[key] = (ok and m) or false
