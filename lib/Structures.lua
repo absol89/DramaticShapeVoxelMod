@@ -49,6 +49,7 @@ local Map = require("src.world.Map")
 local Buildings = V.require("Buildings")
 local TileShape = V.require("TileShape")
 local Budget = V.require("BuildBudget")
+local CompanionAPI = V.require("VoxelCompanionAPI")
 
 local Structures = {}
 
@@ -2718,9 +2719,20 @@ function Structures.buildObject(S, map, region, cluster,
   -- geometry: each solid pixel is one voxel column deep enough to read as
   -- a body, standing at the cluster's south row, base on the ground plane
   local depth = OBJECT_DEPTH
+  local pinnedShape = force
+    and S.shapeAt[keyOf(cluster.tiles[1][1], cluster.tiles[1][2])] or nil
   if force then
-    local cs = S.shapeAt[keyOf(cluster.tiles[1][1], cluster.tiles[1][2])]
-    depth = (cs and PINNED_DEPTH[cs.class]) or PINNED_DEPTH.billboard
+    depth = (pinnedShape and PINNED_DEPTH[pinnedShape.class])
+      or PINNED_DEPTH.billboard
+  end
+  local visualObjectId = nil
+  if pinnedShape and pinnedShape.class == "signpost" then
+    local cellX, cellZ = math.floor(cluster.minX / 2), math.floor(cluster.minY / 2)
+    if math.floor(cluster.maxX / 2) == cellX
+        and math.floor(cluster.maxY / 2) == cellZ then
+      visualObjectId = CompanionAPI.visual_object_id("BATTLE_ART_VOXEL_FORK",
+        "signpost", map.id, cellX, cellZ)
+    end
   end
   local wx0 = cluster.minX * 8
 
@@ -2856,7 +2868,8 @@ function Structures.buildObject(S, map, region, cluster,
         local u = (srcU[i] + 0.5) / atlasW
         local v = (srcV[i] + 0.5) / atlasH
         local function quad(c1, c2, c3, c4, shade)
-          quads[#quads + 1] = { c1, c2, c3, c4, u = u, v = v, shade = shade }
+          quads[#quads + 1] = { c1, c2, c3, c4, u = u, v = v, shade = shade,
+            visualObjectId = visualObjectId }
         end
         quad({ x, y, z1 }, { x + 1, y, z1 }, { x + 1, y + 1, z1 },
              { x, y + 1, z1 }, OBJ_SHADE.front)

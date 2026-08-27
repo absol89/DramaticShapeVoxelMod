@@ -216,6 +216,7 @@ local fakeShapes = {
   [1] = { class = "wall", h = 8 },
   [2] = { class = "tree", h = 12 },
   [3] = { class = "water", h = 0 },
+  [4] = { class = "signpost", h = 16 },
 }
 
 local fakeTileShape = {
@@ -224,6 +225,14 @@ local fakeTileShape = {
 
 local fakeMapModule = {
   isOutdoor = function() return true end,
+}
+
+local visualRefreshes = {}
+local fakeChunkMesher = {
+  refreshVisualObjects = function(mapId)
+    visualRefreshes[#visualRefreshes + 1] = mapId
+    return true
+  end,
 }
 
 local fakeGame = { save = { version = "red" } }
@@ -250,6 +259,7 @@ local function namespace(mod)
     VoxelCompanionAPI = API,
     Mat4 = fakeMat4,
     TileShape = fakeTileShape,
+    ChunkMesher = fakeChunkMesher,
     VoxelState = fakeVoxelState,
     Voxel3D = fakeVoxel3D,
     DayNight = fakeDayNight,
@@ -372,6 +382,265 @@ local function wireCommand(kind, phase, sequence, fields)
   command.sortKey = command.sortKey or command.cacheKey
   command.material = command.material or "test:material"
   return command
+end
+
+do
+  local function signMap(id, signX, signZ)
+    local map = {
+      id = id,
+      widthCells = 2,
+      heightCells = 2,
+      def = { width = 1, height = 1, tileset = "OVERWORLD" },
+      tileset = { id = "OVERWORLD", image = "synthetic-atlas" },
+    }
+    function map:cellTile(x, z)
+      return x == signX and z == signZ and 4 or 0
+    end
+    function map:isWalkableCell(x, z) return not (x == signX and z == signZ) end
+    function map:isWaterCell() return false end
+    function map:isGrassCell() return false end
+    function map:warpAtCell() return nil end
+    function map:isWarpTileCell() return false end
+    return map
+  end
+
+  local current = signMap("PALLET_TOWN", 1, 0)
+  local neighbor = signMap("ROUTE_1", 0, 1)
+  local player = { id = "player", px = 0, py = 0, cellX = 0, cellY = 0,
+    facing = "down", gh = 0 }
+  local visualState = {
+    map = current,
+    player = player,
+    entities = { player },
+    neighbors = { { map = neighbor, ox = 64, oy = -32 } },
+  }
+
+  local ambiguousCount
+  local ambiguousHost = VoxelCompanion.new({ mod = cleanMod() })
+  assert(ambiguousHost.provider.register({
+    api = 1,
+    id = "test.visual-ambiguous-placement",
+    requires = { "world_snapshot" },
+    worldChanged = function(snapshot) ambiguousCount = #snapshot.visualObjects end,
+  }))
+  check(ambiguousHost:start(), "ambiguous-placement host starts")
+  check(ambiguousHost:update(0.016, {
+    map = current,
+    player = player,
+    entities = { player },
+    neighbors = { { map = current, ox = 64, oy = 0 } },
+  }), "duplicate map placement snapshot dispatches")
+  equal(ambiguousCount, 0,
+    "one stable ID with two rendered transforms is omitted fail closed")
+  check(ambiguousHost:dispose("ambiguous-placement-test"),
+    "ambiguous-placement host disposes cleanly")
+
+  local function visualSignature(objects)
+    local out = {}
+    for _, object in ipairs(objects or {}) do
+      local t, d = object.transform, object.dimensions
+      out[#out + 1] = table.concat({ object.id, object.map.role,
+        object.map.offsetX, object.map.offsetZ, object.cell.x, object.cell.z,
+        t.localPosition.x, t.localPosition.y, t.localPosition.z,
+        t.worldPosition.x, t.worldPosition.y, t.worldPosition.z,
+        t.rotation.yaw, t.rotation.pitch, t.rotation.roll,
+        object.pivot.kind, object.pivot.x, object.pivot.y, object.pivot.z,
+        d.width, d.height, d.depth, object.material.phase }, "|")
+    end
+    return table.concat(out, "\n")
+  end
+
+  local host = VoxelCompanion.new({ mod = cleanMod() })
+  local handle, callbackClaimed, callbackClaimError
+  local claimedIds, replacements, callbackModes = {}, {}, {}
+  local invalidations, disposals = 0, 0
+  handle = assert(host.provider.register({
+    api = 1,
+    id = "test.visual-owner",
+    requires = { "visual_object_overrides", "world_snapshot", "render_phases" },
+    worldChanged = function(snapshot)
+      claimedIds, replacements = {}, {}
+      for _, object in ipairs(snapshot.visualObjects or {}) do
+        claimedIds[#claimedIds + 1] = object.id
+        replacements[#replacements + 1] = {
+          id = object.id,
+          x = object.transform.worldPosition.x,
+          y = object.transform.worldPosition.y + object.dimensions.height * 0.5,
+          z = object.transform.worldPosition.z,
+          width = object.dimensions.width,
+          height = object.dimensions.height,
+          depth = object.dimensions.depth,
+        }
+      end
+      callbackClaimed, callbackClaimError = handle:claim_visual_objects(claimedIds)
+    end,
+    render = {
+      opaque_after_terrain = function(context)
+        local mode = context.camera.mode
+        callbackModes[mode] = callbackModes[mode] or {}
+        for index, object in ipairs(replacements) do
+          local accepted, drawError = context.draw.mesh(wireCommand(
+            "mesh", "opaque_after_terrain", 300 + index, {
+              cacheKey = "visual.replace:" .. tostring(index),
+              owner = "test.visual-owner",
+              sortKey = "visual-replacement:" .. tostring(index),
+              material = "test:visual-replacement",
+              geometry = {
+                primitive = "box", x = object.x, y = object.y, z = object.z,
+                width = object.width, height = object.height, depth = object.depth,
+              },
+            }), context)
+          if not accepted then error(drawError, 0) end
+          callbackModes[mode][object.id] = fakeVoxel3D.drawLog[#fakeVoxel3D.drawLog].model
+        end
+      end,
+    },
+    invalidate = function() invalidations = invalidations + 1 end,
+    dispose = function() disposals = disposals + 1 end,
+  }))
+  check(host:start(), "visual-object host starts")
+  visualRefreshes = {}
+  fakeCameraMode = "first_person"
+  check(host:update(0.016, visualState), "visual-object current/neighbor snapshot dispatches")
+  check(callbackClaimed, callbackClaimError or "known visual IDs are claimed")
+
+  local first = assert(host.world.snapshot())
+  equal(#first.visualObjects, 2,
+    "current and rendered-neighbor signposts receive public descriptors")
+  local byMap = {}
+  for _, object in ipairs(first.visualObjects) do byMap[object.map.id] = object end
+  local currentObject, neighborObject = byMap.PALLET_TOWN, byMap.ROUTE_1
+  check(currentObject and neighborObject, "both map identities are present")
+  equal(currentObject.map.role, "current", "current-map object keeps its role")
+  equal(neighborObject.map.role, "neighbor", "neighbor object keeps its role")
+  equal(currentObject.id,
+    "BATTLE_ART_VOXEL_FORK:signpost:PALLET_TOWN:1:0",
+    "current signpost ID is deterministic and safe")
+  equal(neighborObject.id,
+    "BATTLE_ART_VOXEL_FORK:signpost:ROUTE_1:0:1",
+    "neighbor signpost ID is deterministic and safe")
+  equal(currentObject.transform.localPosition.x, 24,
+    "current object local transform uses its cell")
+  equal(currentObject.transform.localPosition.z, 12,
+    "signpost pivot uses the exact two-unit host depth band")
+  equal(neighborObject.transform.localPosition.z, 28,
+    "neighbor local transform remains map-local")
+  equal(neighborObject.transform.worldPosition.x, 72,
+    "neighbor world transform includes the connection X offset")
+  equal(neighborObject.transform.worldPosition.z, -4,
+    "neighbor world transform includes the connection Z offset")
+  equal(currentObject.dimensions.depth, 2, "descriptor reports exact signpost depth")
+  equal(currentObject.material.phase, "opaque_after_terrain",
+    "descriptor reports the eligible replacement phase")
+  check(currentObject.material.castsShadow and currentObject.material.receivesShadow,
+    "descriptor reports host shadow material facts")
+  check(host:suppressesVisualObject(currentObject.id),
+    "a valid known-ID claim suppresses the current original")
+  check(host:suppressesVisualObject(neighborObject.id),
+    "a valid known-ID claim suppresses the neighbor original")
+
+  local originalX = host.world.snapshot().visualObjects[1].transform.worldPosition.x
+  first.visualObjects[1].transform.worldPosition.x = 9999
+  equal(host.world.snapshot().visualObjects[1].transform.worldPosition.x, originalX,
+    "visual descriptors are defensive data copies")
+
+  local firstSignature = visualSignature(host.world.snapshot().visualObjects)
+  check(host:render("opaque_after_terrain", visualState),
+    "first-person replacement uses the normal opaque render seam")
+  for _, object in ipairs(host.world.snapshot().visualObjects) do
+    local translation = findTagged(callbackModes.first_person[object.id], "translate")[1]
+    equal(translation[2], object.transform.worldPosition.x,
+      "first-person replacement uses descriptor world X")
+    equal(translation[3], object.transform.worldPosition.y + object.dimensions.height * 0.5,
+      "first-person replacement derives its center from the descriptor pivot")
+    equal(translation[4], object.transform.worldPosition.z,
+      "first-person replacement uses descriptor world Z")
+  end
+
+  fakeCameraMode = "third_person"
+  host:worldChanged("camera-mode-test")
+  check(host:update(0.016, visualState), "third-person visual snapshot dispatches")
+  equal(visualSignature(host.world.snapshot().visualObjects), firstSignature,
+    "first- and third-person use identical IDs and transforms")
+  check(host:render("opaque_after_terrain", visualState),
+    "third-person replacement uses the same opaque render seam")
+  for _, object in ipairs(host.world.snapshot().visualObjects) do
+    equal(treeSignature(callbackModes.third_person[object.id]),
+      treeSignature(callbackModes.first_person[object.id]),
+      "first- and third-person replacement matrices match for " .. object.id)
+  end
+
+  local duplicateOk, duplicateError = handle:claim_visual_objects({
+    currentObject.id, currentObject.id,
+  })
+  equal(duplicateOk, nil, "duplicate claims fail closed")
+  contains(duplicateError, "duplicate id", "duplicate claim explains the fault")
+  check(not host:suppressesVisualObject(currentObject.id)
+      and not host:suppressesVisualObject(neighborObject.id),
+    "a malformed replacement registration restores all originals for its owner")
+
+  local malformedOk, malformedError = handle:claim_visual_objects("not-an-array")
+  equal(malformedOk, nil, "malformed claim registration fails closed")
+  contains(malformedError, "must be an array",
+    "malformed claim registration explains the array contract")
+
+  local invalidIdOk, invalidIdError = handle:claim_visual_objects({ "bad/id" })
+  equal(invalidIdOk, nil, "malformed visual ID fails closed")
+  contains(invalidIdError, "safe ASCII identifier characters",
+    "malformed visual ID explains the safe-ID contract")
+
+  local noOpaque = assert(host.provider.register({
+    api = 1, id = "test.visual-no-opaque", update = function() end,
+  }))
+  local noOpaqueOk, noOpaqueError = noOpaque:claim_visual_objects({ currentObject.id })
+  equal(noOpaqueOk, nil, "claim without the eligible render path fails closed")
+  contains(noOpaqueError, "opaque_after_terrain",
+    "missing render path reports the eligibility rule")
+  check(not host:suppressesVisualObject(currentObject.id),
+    "ineligible registration never hides the original")
+
+  local unknownOk, unknownError = handle:claim_visual_objects({ "UNKNOWN:visual:object" })
+  equal(unknownOk, nil, "unknown visual ID fails closed")
+  contains(unknownError, "unknown visual object id", "unknown claim is diagnostic")
+  check(not host:suppressesVisualObject(currentObject.id),
+    "unknown registration leaves the known original visible")
+  check(handle:claim_visual_objects(claimedIds), "valid claims can be restored")
+
+  local contender = assert(host.provider.register({
+    api = 1,
+    id = "test.visual-contender",
+    render = { opaque_after_terrain = function() end },
+  }))
+  local conflictOk, conflictError = contender:claim_visual_objects({ currentObject.id })
+  equal(conflictOk, nil, "conflicting owner fails closed")
+  contains(conflictError, "ownership conflict", "conflict has a deterministic diagnostic")
+  check(not host:suppressesVisualObject(currentObject.id),
+    "conflicting ownership keeps the current original visible")
+  check(host:suppressesVisualObject(neighborObject.id),
+    "conflict invalidates only the contested visual object")
+  check(contender:dispose({}, "conflict-release"), "conflicting owner disposes")
+  check(host:suppressesVisualObject(currentObject.id),
+    "removing the contender deterministically restores the unique owner")
+
+  check(handle:invalidate({}, "visual-invalidate"), "owner invalidation succeeds")
+  check(not host:suppressesVisualObject(currentObject.id)
+      and not host:suppressesVisualObject(neighborObject.id),
+    "owner invalidation restores current and neighbor originals")
+  check(handle:invalidate({}, "visual-invalidate-repeat"),
+    "repeated owner invalidation is safe")
+  equal(invalidations, 2, "existing invalidation lifecycle remains authoritative")
+  check(handle:claim_visual_objects(claimedIds), "owner can reclaim known objects")
+  check(handle:dispose({}, "visual-dispose"), "visual owner disposes")
+  check(handle:dispose({}, "visual-dispose-repeat"), "repeated visual disposal is safe")
+  equal(disposals, 1, "existing disposal lifecycle releases owner resources once")
+  check(not host:suppressesVisualObject(currentObject.id)
+      and not host:suppressesVisualObject(neighborObject.id),
+    "owner disposal restores originals without touching another extension")
+  check(#visualRefreshes >= 2,
+    "ownership transitions invalidate only named visual-map terrain caches")
+  check(host:dispose("visual-object-test"), "visual-object host disposes cleanly")
+  fakeCameraMode = "first_person"
+  pushCount, popCount = 0, 0
 end
 
 do
@@ -633,7 +902,7 @@ equal(provider.host.id, "BATTLE_ART_VOXEL_FORK", "provider reports stable host i
 equal(provider.host.version, "1.9.7", "provider preserves upstream version")
 for _, capability in ipairs({
   "world_snapshot", "camera_delta", "render_phases", "quality_tier",
-  "integrity_status",
+  "integrity_status", "visual_object_overrides",
 }) do
   equal(provider.capabilities[capability], 1, "provider advertises " .. capability)
 end

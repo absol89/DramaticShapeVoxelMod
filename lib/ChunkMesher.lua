@@ -65,6 +65,28 @@ end
 
 local ChunkMesher = {}
 
+local function visualObjectVisible(id)
+  if id == nil then return true end
+  local companion = V.companion
+  if not (companion and type(companion.suppressesVisualObject) == "function") then
+    return true
+  end
+  local ok, suppressed = pcall(companion.suppressesVisualObject, companion, id)
+  return not (ok and suppressed == true)
+end
+
+local function visualOverridesActive(mapId)
+  local companion = V.companion
+  if not (companion and type(companion.hasVisualObjectOverrides) == "function") then
+    return false
+  end
+  local ok, active = pcall(companion.hasVisualObjectOverrides, companion, mapId)
+  return ok and active == true
+end
+
+-- Small host-test seam used by the ROM-free contract suite.
+ChunkMesher.visualObjectVisible = visualObjectVisible
+
 -- Which drawn row a FLAT-topped volume's top face wears at depth `ty`.
 --
 -- A structure is usually deeper than the art that draws it, so the rows
@@ -868,8 +890,9 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
     -- the edge keep-rules entirely: its eave legitimately overhangs the
     -- boundary plane into the neighbour's airspace, and no variant of
     -- the neighbour will ever draw that geometry
-    if q.own or outwardOnEdge(q, x0, z0, x1, z1)
-       or keepQuad(x0, z0, x1, z1) then
+    if visualObjectVisible(q.visualObjectId)
+       and (q.own or outwardOnEdge(q, x0, z0, x1, z1)
+            or keepQuad(x0, z0, x1, z1)) then
       push({ q[1], q[2], q[3], q[4] }, quadUV(q), groundShades(q, q.shade))
     end
   end
@@ -1239,7 +1262,11 @@ local function runJob(job)
   end
 
   local mesh, water
-  local cached = MeshDisk.loadTerrain(map, job.slot, job.masks)
+  -- Suppressed visual objects are session ownership state. Do not load or
+  -- write a persistent terrain record whose geometry would outlive that lease.
+  local volatileVisuals = visualOverridesActive(map.id)
+  local cached = not volatileVisuals
+    and MeshDisk.loadTerrain(map, job.slot, job.masks) or nil
   if cached then
     mesh = meshFromRaw(cached.terrain)
     water = meshFromRaw(cached.water)
@@ -1254,7 +1281,7 @@ local function runJob(job)
       if water and water.release then pcall(water.release, water) end
       return
     end
-    if terrainRaw and waterRaw then
+    if terrainRaw and waterRaw and not volatileVisuals then
       local savedTerrain, terrainError =
         MeshDisk.saveTerrain(map, job.slot, job.masks, terrainRaw, waterRaw)
       if not savedTerrain then
@@ -1522,6 +1549,28 @@ function ChunkMesher.refresh(mapId)
   c.stale = { aux = true,
               full = (c.full ~= nil) or nil,
               body = (c.body ~= nil) or nil }
+end
+
+-- Rebuild only terrain slots whose object-quads can change when a public
+-- visual-object lease starts or ends. Grass, flowers, figures, water facts,
+-- structure analysis, map data, and the persistent canonical cache are intact.
+function ChunkMesher.refreshVisualObjects(mapId)
+  if type(mapId) ~= "string" or mapId == "" then return false end
+  gen[mapId] = (gen[mapId] or 0) + 1
+  for i = #jobs, 1, -1 do
+    local job = jobs[i]
+    if job.id == mapId then
+      jobIndex[jobKey(job.id, job.slot)] = nil
+      table.remove(jobs, i)
+    end
+  end
+  local c = cache[mapId]
+  if c then
+    c.stale = c.stale or {}
+    c.stale.full = (c.full ~= nil) or nil
+    c.stale.body = (c.body ~= nil) or nil
+  end
+  return true
 end
 
 -- Evict everything outside `live` (a set of map ids): far maps' meshes

@@ -10,6 +10,7 @@ local V = ...
 local API = V.require("VoxelCompanionAPI")
 local Mat4 = V.require("Mat4")
 local TileShape = V.require("TileShape")
+local ChunkMesher = V.require("ChunkMesher")
 local Voxel = V.require("VoxelState")
 local Voxel3D = V.require("Voxel3D")
 local DayNight = V.require("DayNight")
@@ -24,6 +25,7 @@ local CAPABILITIES = {
   "render_phases",
   "quality_tier",
   "integrity_status",
+  "visual_object_overrides",
 }
 
 local WORLD_PHASES = {
@@ -35,6 +37,7 @@ local WORLD_PHASES = {
 local MAX_CELLS = 262144
 local MAX_ACTORS = 2048
 local MAX_NEIGHBORS = 8
+local MAX_VISUAL_OBJECTS = 4096
 local MAX_PACKET_ITEMS = 2048
 local MAX_DRAWS_PER_FRAME = 4096
 local MAX_WORLD_COORDINATE = 65536
@@ -201,6 +204,7 @@ local function copySnapshot(source)
   out.tags = copyTags(source.tags)
   out.player = shallowCopy(source.player)
   out.cells, out.actors, out.neighbors = {}, {}, {}
+  out.visualObjects = {}
   for index, cell in ipairs(source.cells or {}) do
     local copy = shallowCopy(cell)
     copy.tags = copyTags(cell.tags)
@@ -217,6 +221,15 @@ local function copySnapshot(source)
     local copy = shallowCopy(neighbor)
     copy.tags = copyTags(neighbor.tags)
     out.neighbors[index] = copy
+  end
+  local function copyPlain(value)
+    if type(value) ~= "table" then return value end
+    local copy = {}
+    for key, item in pairs(value) do copy[key] = copyPlain(item) end
+    return copy
+  end
+  for index, visual in ipairs(source.visualObjects or {}) do
+    out.visualObjects[index] = copyPlain(visual)
   end
   return out
 end
@@ -1134,6 +1147,73 @@ local function cellClass(map, shapes, x, z)
   return tile, shape and shape.class or "ground", shape and shape.h or 0
 end
 
+local function appendVisualObjects(map, role, offsetX, offsetZ, byId, counts, scan)
+  if type(map) ~= "table" or type(map.id) ~= "string" or not map.tileset then return end
+  local width = integer(map.widthCells, nil)
+    or integer(map.def and map.def.width, 0) * 2
+  local height = integer(map.heightCells, nil)
+    or integer(map.def and map.def.height, 0) * 2
+  if width < 1 or height < 1 or width * height > MAX_CELLS then return end
+  local shapes = TileShape.forMap(map)
+  local tilesetId = boundedText(map.tileset.id, "unknown", 64)
+  if not tilesetId:match("^[A-Za-z0-9._%-]+$") then tilesetId = "unknown" end
+  for z = 0, height - 1 do
+    for x = 0, width - 1 do
+      local _, class = cellClass(map, shapes, x, z)
+      if class == "signpost" then
+        scan.count = scan.count + 1
+        if scan.count > MAX_VISUAL_OBJECTS then return end
+        local id = API.visual_object_id("BATTLE_ART_VOXEL_FORK",
+          "signpost", map.id, x, z)
+        if id then
+          counts[id] = (counts[id] or 0) + 1
+          if counts[id] > 1 then
+            -- The public ID names map data, not one rendered placement. If the
+            -- same map/cell appears twice, no single replacement transform is
+            -- authoritative. Omit the descriptor so ownership fails closed.
+            byId[id] = nil
+          else
+            local localX, localY, localZ = x * 16 + 8, 0, z * 16 + 12
+            byId[id] = {
+              schemaVersion = 1,
+              id = id,
+              kind = "signpost",
+              tags = { "host_geometry", "signpost", "visual_object" },
+              map = {
+                id = map.id,
+                role = role,
+                offsetX = offsetX,
+                offsetZ = offsetZ,
+              },
+              cell = { x = x, z = z },
+              transform = {
+                localPosition = { x = localX, y = localY, z = localZ },
+                worldPosition = {
+                  x = localX + offsetX,
+                  y = localY,
+                  z = localZ + offsetZ,
+                },
+                rotation = { yaw = 0, pitch = 0, roll = 0 },
+                scale = { x = 1, y = 1, z = 1 },
+              },
+              pivot = { kind = "bottom_center", x = 0, y = 0, z = 0 },
+              dimensions = { width = 16, height = 16, depth = 2 },
+              material = {
+                id = "host:tileset:" .. tilesetId .. ":signpost",
+                phase = "opaque_after_terrain",
+                opaque = true,
+                alphaCutout = true,
+                castsShadow = true,
+                receivesShadow = true,
+              },
+            }
+          end
+        end
+      end
+    end
+  end
+end
+
 local function addWorldTags(tags, map)
   local def = map and map.def or {}
   local mapId = tostring(map and map.id or ""):upper()
@@ -1396,6 +1476,24 @@ local function snapshotFor(self)
     end
   end
 
+
+  local visualObjects, visualById, visualCounts = {}, {}, {}
+  local visualScan = { count = 0 }
+  appendVisualObjects(map, "current", 0, 0,
+    visualById, visualCounts, visualScan)
+  for index = 1, math.min(#(state.neighbors or {}), MAX_NEIGHBORS) do
+    local neighbor = state.neighbors[index]
+    if neighbor and neighbor.map then
+      appendVisualObjects(neighbor.map, "neighbor",
+        finite(neighbor.ox, 0), finite(neighbor.oy, 0),
+        visualById, visualCounts, visualScan)
+    end
+  end
+  for _, object in pairs(visualById) do
+    visualObjects[#visualObjects + 1] = object
+  end
+  table.sort(visualObjects, function(a, b) return a.id < b.id end)
+
   local mode = "diorama"
   if Voxel.isFirstPerson() then mode = "first_person"
   elseif Voxel.isThirdPerson() then mode = "third_person" end
@@ -1414,6 +1512,7 @@ local function snapshotFor(self)
     player = poseOf(state.player),
     actors = actors,
     neighbors = neighbors,
+    visualObjects = visualObjects,
     cells = cells,
     time = finite(DayNight.time(), 0),
     weather = "clear",
@@ -1527,6 +1626,13 @@ function VoxelCompanion.new(options)
       rememberDiagnostic(self, message)
       loggerCall(mod, "error", "Voxel Companion: " .. tostring(message))
     end,
+    visual_objects_changed = function(mapIds)
+      for _, mapId in ipairs(mapIds or {}) do
+        if type(ChunkMesher.refreshVisualObjects) == "function" then
+          ChunkMesher.refreshVisualObjects(mapId)
+        end
+      end
+    end,
   })
 
   local raw = self.dispatcher:provider()
@@ -1626,13 +1732,19 @@ function VoxelCompanion:update(dt, state)
       and self.clock >= self.nextSnapshotAttempt then
     local snapshot, snapshotError = self.world.snapshot()
     if snapshot then
-      local report, dispatchError = self.dispatcher:world_changed(snapshot)
-      if report then
-        self.worldPending = false
-        self.worldChangeReason = nil
-        self.lastSnapshotError = nil
+      local cataloged, catalogError = self.dispatcher:set_visual_objects(
+        snapshot.visualObjects or {})
+      if cataloged then
+        local report, dispatchError = self.dispatcher:world_changed(snapshot)
+        if report then
+          self.worldPending = false
+          self.worldChangeReason = nil
+          self.lastSnapshotError = nil
+        else
+          snapshotError = dispatchError
+        end
       else
-        snapshotError = dispatchError
+        snapshotError = catalogError
       end
     end
     if not snapshot or self.worldPending then
@@ -1663,6 +1775,15 @@ function VoxelCompanion:cameraDelta(state)
   if not self.started then return nil end
   local delta = self.dispatcher:modifyCamera(cameraContext(self))
   return delta
+end
+
+function VoxelCompanion:suppressesVisualObject(id)
+  return self.started and self.dispatcher:is_visual_object_suppressed(id) or false
+end
+
+function VoxelCompanion:hasVisualObjectOverrides(mapId)
+  return self.started
+    and self.dispatcher:visual_object_overrides_active(mapId) or false
 end
 
 function VoxelCompanion:render(phase, state)
@@ -1740,6 +1861,7 @@ VoxelCompanion.LIMITS = {
   cells = MAX_CELLS,
   actors = MAX_ACTORS,
   neighbors = MAX_NEIGHBORS,
+  visualObjects = MAX_VISUAL_OBJECTS,
   packetItems = MAX_PACKET_ITEMS,
   frameDraws = MAX_DRAWS_PER_FRAME,
   commandSignatures = MAX_COMMAND_SIGNATURES,

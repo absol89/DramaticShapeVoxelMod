@@ -17,6 +17,7 @@ API.CAPABILITIES = {
   SHADOW_PASS = "shadow_pass",
   BATTLE_PASS = "battle_pass",
   INTEGRITY_STATUS = "integrity_status",
+  VISUAL_OBJECT_OVERRIDES = "visual_object_overrides",
 }
 -- Short aliases name capability-backed attach facades. Materials and draw are
 -- normalized render services, not negotiated wire capabilities.
@@ -40,6 +41,7 @@ local STANDARD_CAPABILITY_SET = {
   shadow_pass = true,
   battle_pass = true,
   integrity_status = true,
+  visual_object_overrides = true,
 }
 
 API.PHASES = {
@@ -129,6 +131,8 @@ local MAX_ERROR_MESSAGE_LENGTH = 4096
 local MAX_DRAW_ITEMS = 8192
 local MAX_DRAW_TEXT_LENGTH = 512
 local MAX_DRAW_CACHE_KEY_LENGTH = 64
+local MAX_VISUAL_OBJECTS = 4096
+local MAX_VISUAL_CLAIMS = 4096
 
 API.DRAW_LIMITS = {
   cacheKeyBytes = MAX_DRAW_CACHE_KEY_LENGTH,
@@ -518,6 +522,170 @@ local function semantic_token(value, path, maximum)
     return nil, path .. " must be a semantic identifier, not an asset or path string"
   end
   return text
+end
+
+local function safe_visual_id(value, path)
+  local id, err = bounded_text(value, path, MAX_ID_LENGTH)
+  if not id then return nil, err end
+  if not id:match("^[A-Za-z0-9][A-Za-z0-9%._:%-]*$") then
+    return nil, path .. " must use safe ASCII identifier characters"
+  end
+  return id
+end
+
+-- Hosts and companions can derive the same stable identifier without exposing
+-- a mesh, atlas object, or another private renderer handle.
+function API.visual_object_id(host_id, kind, map_id, cell_x, cell_z)
+  for _, item in ipairs({ host_id, kind, map_id }) do
+    if type(item) ~= "string" or item == ""
+        or not item:match("^[A-Za-z0-9][A-Za-z0-9%._%-]*$") then
+      return nil, "visual object identity contains an unsafe segment"
+    end
+  end
+  if not is_integer(cell_x) or not is_integer(cell_z) then
+    return nil, "visual object cell coordinates must be integers"
+  end
+  local id = table.concat({ host_id, kind, map_id, cell_x, cell_z }, ":")
+  if #id > MAX_ID_LENGTH then return nil, "visual object id is too long" end
+  return id
+end
+
+local VISUAL_DESCRIPTOR_KEYS = {
+  schemaVersion = true, id = true, kind = true, tags = true, map = true,
+  cell = true, transform = true, pivot = true, dimensions = true,
+  material = true,
+}
+local VISUAL_MAP_KEYS = {
+  id = true, role = true, offsetX = true, offsetZ = true,
+}
+local VISUAL_CELL_KEYS = { x = true, z = true }
+local VISUAL_TRANSFORM_KEYS = {
+  localPosition = true, worldPosition = true, rotation = true, scale = true,
+}
+local VISUAL_PIVOT_KEYS = { kind = true, x = true, y = true, z = true }
+local VISUAL_DIMENSION_KEYS = { width = true, height = true, depth = true }
+local VISUAL_MATERIAL_KEYS = {
+  id = true, phase = true, opaque = true, alphaCutout = true,
+  castsShadow = true, receivesShadow = true,
+}
+
+local function validate_finite_fields(value, keys, path, positive)
+  if type(value) ~= "table" or getmetatable(value) ~= nil then
+    return nil, path .. " must be a plain table"
+  end
+  local ok, err = validate_known_keys(value, keys, path)
+  if not ok then return nil, err end
+  for key in pairs(keys) do
+    local number = value[key]
+    if not is_finite(number) or (positive and number <= 0) then
+      return nil, ("%s.%s must be a %snumber")
+        :format(path, key, positive and "positive " or "finite ")
+    end
+  end
+  return true
+end
+
+local function validate_visual_descriptor(value, path)
+  if type(value) ~= "table" or getmetatable(value) ~= nil then
+    return nil, path .. " must be a plain table"
+  end
+  local ok, err = validate_known_keys(value, VISUAL_DESCRIPTOR_KEYS, path)
+  if not ok then return nil, err end
+  if value.schemaVersion ~= 1 then return nil, path .. ".schemaVersion must be 1" end
+  local id
+  id, err = safe_visual_id(value.id, path .. ".id")
+  if not id then return nil, err end
+  local kind
+  kind, err = semantic_token(value.kind, path .. ".kind", 64)
+  if not kind then return nil, err end
+
+  local tag_count
+  tag_count, err = validate_dense_array(value.tags, path .. ".tags", 32)
+  if not tag_count then return nil, err end
+  local tags = {}
+  for index = 1, tag_count do
+    local tag
+    tag, err = semantic_token(value.tags[index],
+      ("%s.tags[%d]"):format(path, index), 64)
+    if not tag then return nil, err end
+    if tags[tag] then return nil, path .. ".tags contains a duplicate" end
+    tags[tag] = true
+  end
+
+  if type(value.map) ~= "table" or getmetatable(value.map) ~= nil then
+    return nil, path .. ".map must be a plain table"
+  end
+  ok, err = validate_known_keys(value.map, VISUAL_MAP_KEYS, path .. ".map")
+  if not ok then return nil, err end
+  local map_id
+  map_id, err = safe_visual_id(value.map.id, path .. ".map.id")
+  if not map_id then return nil, err end
+  if value.map.role ~= "current" and value.map.role ~= "neighbor" then
+    return nil, path .. ".map.role must be current or neighbor"
+  end
+  if not is_finite(value.map.offsetX) or not is_finite(value.map.offsetZ) then
+    return nil, path .. ".map offsets must be finite"
+  end
+
+  if type(value.cell) ~= "table" or getmetatable(value.cell) ~= nil then
+    return nil, path .. ".cell must be a plain table"
+  end
+  ok, err = validate_known_keys(value.cell, VISUAL_CELL_KEYS, path .. ".cell")
+  if not ok then return nil, err end
+  if not is_integer(value.cell.x) or not is_integer(value.cell.z) then
+    return nil, path .. ".cell coordinates must be integers"
+  end
+
+  if type(value.transform) ~= "table" or getmetatable(value.transform) ~= nil then
+    return nil, path .. ".transform must be a plain table"
+  end
+  ok, err = validate_known_keys(value.transform, VISUAL_TRANSFORM_KEYS,
+    path .. ".transform")
+  if not ok then return nil, err end
+  for _, field in ipairs({ "localPosition", "worldPosition", "rotation", "scale" }) do
+    ok, err = validate_finite_fields(value.transform[field],
+      field == "rotation" and ROTATION_KEYS or POSITION_KEYS,
+      path .. ".transform." .. field, field == "scale")
+    if not ok then return nil, err end
+  end
+
+  if type(value.pivot) ~= "table" or getmetatable(value.pivot) ~= nil then
+    return nil, path .. ".pivot must be a plain table"
+  end
+  ok, err = validate_known_keys(value.pivot, VISUAL_PIVOT_KEYS, path .. ".pivot")
+  if not ok then return nil, err end
+  if value.pivot.kind ~= "bottom_center" then
+    return nil, path .. ".pivot.kind must be bottom_center"
+  end
+  for _, key in ipairs({ "x", "y", "z" }) do
+    if not is_finite(value.pivot[key]) then
+      return nil, path .. ".pivot coordinates must be finite"
+    end
+  end
+
+  ok, err = validate_finite_fields(value.dimensions, VISUAL_DIMENSION_KEYS,
+    path .. ".dimensions", true)
+  if not ok then return nil, err end
+
+  if type(value.material) ~= "table" or getmetatable(value.material) ~= nil then
+    return nil, path .. ".material must be a plain table"
+  end
+  ok, err = validate_known_keys(value.material, VISUAL_MATERIAL_KEYS,
+    path .. ".material")
+  if not ok then return nil, err end
+  local material_id
+  material_id, err = semantic_token(value.material.id, path .. ".material.id", 128)
+  if not material_id then return nil, err end
+  if value.material.phase ~= "opaque_after_terrain" then
+    return nil, path .. ".material.phase must be opaque_after_terrain"
+  end
+  for _, key in ipairs({ "opaque", "alphaCutout", "castsShadow", "receivesShadow" }) do
+    if type(value.material[key]) ~= "boolean" then
+      return nil, path .. ".material." .. key .. " must be Boolean"
+    end
+  end
+
+  return clone_data(value, path)
 end
 
 local function validate_draw_cache_key(value)
@@ -1483,6 +1651,7 @@ function API.new(options)
     clock = true,
     max_errors = true,
     max_extensions = true,
+    visual_objects_changed = true,
   }
   local ok, err = validate_known_keys(options, allowed, "options")
   if not ok then error(err, 2) end
@@ -1500,6 +1669,10 @@ function API.new(options)
   end
   if options.clock ~= nil and type(options.clock) ~= "function" then
     error("options.clock must be a function", 2)
+  end
+  if options.visual_objects_changed ~= nil
+      and type(options.visual_objects_changed) ~= "function" then
+    error("options.visual_objects_changed must be a function", 2)
   end
   local max_errors = options.max_errors or 64
   if not is_integer(max_errors) or max_errors < 1 or max_errors > 4096 then
@@ -1539,6 +1712,7 @@ function API.new(options)
     _clock = options.clock or os.clock,
     _max_errors = max_errors,
     _max_extensions = max_extensions,
+    _visual_objects_changed = options.visual_objects_changed,
     _errors = {},
     _error_sequence = 0,
     _records = {},
@@ -1548,6 +1722,12 @@ function API.new(options)
     _attached = false,
     _state = "open",
     _dispatch_depth = 0,
+    _invoking_record = nil,
+    _invoking_stage = nil,
+    _visual_objects = {},
+    _visual_object_order = {},
+    _visual_owners = {},
+    _visual_conflicts = {},
   }, Dispatcher)
 end
 
@@ -1603,13 +1783,129 @@ function Dispatcher:_rebuild_order()
   self._order = order
 end
 
+function Dispatcher:_notify_visual_owner_changes(previous, current, previous_objects)
+  local changed_maps = {}
+  local ids = {}
+  for id in pairs(previous or {}) do ids[id] = true end
+  for id in pairs(current or {}) do ids[id] = true end
+  for id in pairs(ids) do
+    if (previous[id] ~= nil) ~= (current[id] ~= nil) then
+      local descriptor = self._visual_objects[id]
+        or (previous_objects and previous_objects[id])
+      local map_id = descriptor and descriptor.map and descriptor.map.id
+      if map_id then changed_maps[map_id] = true end
+    end
+  end
+  if not next(changed_maps) or not self._visual_objects_changed then return end
+  local maps = sorted_keys(changed_maps)
+  local ok, problem = pcall(self._visual_objects_changed, maps)
+  if not ok then self:_append_error(nil, "visual_objects_changed", problem) end
+end
+
+function Dispatcher:_rebuild_visual_owners(previous_objects)
+  local previous = self._visual_owners or {}
+  local contenders = {}
+  for _, record in ipairs(self._order) do
+    if record.active and not record.faulted and record.visual_claims then
+      for id in pairs(record.visual_claims) do
+        if self._visual_objects[id] then
+          local list = contenders[id]
+          if not list then list = {}; contenders[id] = list end
+          list[#list + 1] = record.id
+        end
+      end
+    end
+  end
+
+  local owners, conflicts = {}, {}
+  for id, list in pairs(contenders) do
+    table.sort(list)
+    if #list == 1 then owners[id] = list[1]
+    else conflicts[id] = list end
+  end
+  self._visual_owners = owners
+  self._visual_conflicts = conflicts
+  self:_notify_visual_owner_changes(previous, owners, previous_objects)
+end
+
+function Dispatcher:_clear_visual_claims(record)
+  if not record or record.visual_claims == nil then return false end
+  record.visual_claims = nil
+  self:_rebuild_visual_owners()
+  return true
+end
+
+-- Host-only catalog seam. Descriptors are validated and copied before they
+-- become claimable. A bad replacement catalog leaves the prior catalog live.
+function Dispatcher:set_visual_objects(descriptors)
+  if not self._capabilities.visual_object_overrides then
+    return nil, "visual object overrides are unavailable"
+  end
+  local count, err = validate_dense_array(descriptors, "visual objects",
+    MAX_VISUAL_OBJECTS)
+  if not count then return nil, err end
+  local by_id, order = {}, {}
+  for index = 1, count do
+    local descriptor
+    descriptor, err = validate_visual_descriptor(descriptors[index],
+      ("visual objects[%d]"):format(index))
+    if not descriptor then return nil, err end
+    if by_id[descriptor.id] then
+      return nil, "visual object catalog contains duplicate id " .. descriptor.id
+    end
+    by_id[descriptor.id] = descriptor
+    order[#order + 1] = descriptor
+  end
+  table.sort(order, function(a, b) return a.id < b.id end)
+
+  local previous_objects = self._visual_objects
+  self._visual_objects = by_id
+  self._visual_object_order = order
+  for _, record in ipairs(self._order) do
+    if record.visual_claims then
+      for id in pairs(record.visual_claims) do
+        if not by_id[id] then record.visual_claims[id] = nil end
+      end
+      if not next(record.visual_claims) then record.visual_claims = nil end
+    end
+  end
+  self:_rebuild_visual_owners(previous_objects)
+  return true
+end
+
+function Dispatcher:visual_objects()
+  local copy, err = clone_data(self._visual_object_order, "visual objects")
+  if not copy then return nil, err end
+  return copy
+end
+
+function Dispatcher:is_visual_object_suppressed(id)
+  return type(id) == "string" and self._visual_owners[id] ~= nil or false
+end
+
+function Dispatcher:visual_object_owner(id)
+  return type(id) == "string" and self._visual_owners[id] or nil
+end
+
+function Dispatcher:visual_object_overrides_active(map_id)
+  if type(map_id) ~= "string" then return false end
+  for id in pairs(self._visual_owners) do
+    local descriptor = self._visual_objects[id]
+    if descriptor and descriptor.map and descriptor.map.id == map_id then return true end
+  end
+  return false
+end
+
 function Dispatcher:_invoke(record, stage, handler, source, ...)
   local context, close = borrowed_view(source, stage .. " context")
   local extra = pack(...)
+  local previous_record, previous_stage = self._invoking_record, self._invoking_stage
+  self._invoking_record, self._invoking_stage = record, stage
   local function run()
     return pack(handler(context, unpack(extra, 1, extra.n)))
   end
   local ok, result = xpcall(run, traceback_error)
+  self._invoking_record, self._invoking_stage = previous_record, previous_stage
   local clean, mutation = close()
   if not ok then return nil, result end
   if not clean then return nil, mutation end
@@ -1619,6 +1915,7 @@ end
 function Dispatcher:_invoke_dispose(record, source, reason, keep_fault_state)
   if record.dispose_called then return true end
   record.dispose_called = true
+  self:_clear_visual_claims(record)
   record.active = false
   local handler = record.lifecycle.dispose
   if handler then
@@ -1646,6 +1943,7 @@ function Dispatcher:_fault(record, stage, message, source)
   local owns_guard = self._dispatch_depth == 0
   if owns_guard then self._dispatch_depth = 1 end
   record.active = false
+  self:_clear_visual_claims(record)
   record.faulted = true
   record.state = "faulted"
   record.fault = self:_append_error(record, stage, message)
@@ -1860,6 +2158,7 @@ function Dispatcher:register(spec, running_context)
       record.started = true
       record.active = true
       record.state = "active"
+      self:_rebuild_visual_owners()
     end
   end
   return handle
@@ -1912,6 +2211,7 @@ function Dispatcher:start(context)
   end
   self._dispatch_depth = self._dispatch_depth - 1
   self._state = "running"
+  self:_rebuild_visual_owners()
   return report
 end
 
@@ -2151,6 +2451,7 @@ function Dispatcher:invalidate(context, reason)
   return self:_run_dispatch("invalidate", function()
     local report = new_report("lifecycle", "invalidate")
     for _, record in ipairs(copy_array(self._order)) do
+      self:_clear_visual_claims(record)
       local handler = record.lifecycle.invalidate
       if handler then
         if not record.active then
@@ -2216,6 +2517,10 @@ function Dispatcher:dispose(context, reason)
   self._dispatch_depth = self._dispatch_depth - 1
   self._services = nil
   self._running_context = nil
+  self._visual_objects = {}
+  self._visual_object_order = {}
+  self._visual_owners = {}
+  self._visual_conflicts = {}
   self._records = {}
   self._order = {}
   self._state = "disposed"
@@ -2258,6 +2563,9 @@ function Dispatcher:status()
     attached = self._attached,
     capabilities = self:capabilities(),
     extensions = extensions,
+    visualObjects = #self._visual_object_order,
+    visualOverrides = #sorted_keys(self._visual_owners),
+    visualConflicts = #sorted_keys(self._visual_conflicts),
     errorCount = #self._errors,
   }
 end
@@ -2277,12 +2585,78 @@ function Handle:status()
     state = record.state,
     active = record.active,
     faulted = record.faulted,
+    visualClaims = record.visual_claims and #sorted_keys(record.visual_claims) or 0,
     fault = record.fault and {
       sequence = record.fault.sequence,
       stage = record.fault.stage,
       message = record.fault.message,
     } or nil,
   }
+end
+
+-- Optional visual-object override registration. The extension uses the normal
+-- opaque render callback and its borrowed draw facade for replacement work.
+-- This method registers only ownership of copied, currently known IDs.
+function Handle:claim_visual_objects(ids)
+  local dispatcher, record = self._dispatcher, self._record
+  if not dispatcher._capabilities.visual_object_overrides then
+    return nil, "visual object overrides are unavailable"
+  end
+  if record.state == "disposed" or record.faulted then
+    return nil, "extension cannot claim visual objects in its current state"
+  end
+  local in_own_world_callback = dispatcher._invoking_record == record
+    and type(dispatcher._invoking_stage) == "string"
+    and dispatcher._invoking_stage:match("%.map_changed$") ~= nil
+  if dispatcher._dispatch_depth > 0 and not in_own_world_callback then
+    dispatcher:_clear_visual_claims(record)
+    return nil, "visual object claims are allowed only outside dispatch or during the owner's worldChanged callback"
+  end
+  if type(record.phases.opaque_after_terrain) ~= "function" then
+    dispatcher:_clear_visual_claims(record)
+    return nil, "visual object claims require an opaque_after_terrain render handler"
+  end
+
+  local count, err = validate_dense_array(ids, "visual object claims",
+    MAX_VISUAL_CLAIMS)
+  if not count then
+    dispatcher:_clear_visual_claims(record)
+    return nil, err
+  end
+  local claims = {}
+  for index = 1, count do
+    local id
+    id, err = safe_visual_id(ids[index],
+      ("visual object claims[%d]"):format(index))
+    if not id then
+      dispatcher:_clear_visual_claims(record)
+      return nil, err
+    end
+    if claims[id] then
+      dispatcher:_clear_visual_claims(record)
+      return nil, "visual object claims contains duplicate id " .. id
+    end
+    if not dispatcher._visual_objects[id] then
+      dispatcher:_clear_visual_claims(record)
+      return nil, "unknown visual object id " .. id
+    end
+    claims[id] = true
+  end
+
+  record.visual_claims = next(claims) and claims or nil
+  dispatcher:_rebuild_visual_owners()
+  local conflicts = {}
+  for id in pairs(claims) do
+    local owners = dispatcher._visual_conflicts[id]
+    if owners then
+      conflicts[#conflicts + 1] = id .. " [" .. table.concat(owners, ",") .. "]"
+    end
+  end
+  table.sort(conflicts)
+  if #conflicts > 0 then
+    return nil, "visual object ownership conflict: " .. table.concat(conflicts, "; ")
+  end
+  return true
 end
 
 function Handle:invalidate(context, reason)
@@ -2295,6 +2669,7 @@ function Handle:invalidate(context, reason)
     context = {}
   end
   if type(context) ~= "table" then return nil, "invalidate context must be a table" end
+  dispatcher:_clear_visual_claims(record)
   local handler = record.lifecycle.invalidate
   if not handler then return true end
 

@@ -32,6 +32,7 @@ capabilities:
 - `render_phases`
 - `quality_tier`
 - `integrity_status`
+- `visual_object_overrides`
 
 It does not advertise `terrain_patch`, `shadow_pass`, or `battle_pass`. It also
 does not advertise `materials` or `draw`; those names are borrowed facades, not
@@ -60,8 +61,9 @@ The adapter uses only existing host-owned seams:
 6. `translucent_after_actors` runs after host actors, water, grass, and flowers
    and before the scene resolves.
 
-The adapter does not enter `ShadowMap` or `BattleScene`. It does not suppress,
-replace, or mutate base terrain.
+The adapter does not enter `ShadowMap` or `BattleScene`. It does not replace or
+mutate base terrain. The optional visual-object contract can suppress only the
+annotated visual quads of a claimed signpost.
 
 ## World snapshot
 
@@ -76,11 +78,79 @@ Hard limits are:
 - 262,144 cells
 - 2,048 actors
 - 8 neighbors
+- 4,096 visual objects or claims
 
 The public facade returns defensive plain-data copies. Snapshot construction is
 protected by one outer fault boundary. It does not use a protected call for
 each cell query. This keeps map-change work bounded without adding several
 protected calls per cell. Player movement does not rebuild the full map.
+
+### Visual-object override extension
+
+`visual_object_overrides` is one optional Battle Art extension to API v1. It
+adds `snapshot.visualObjects` and exactly one registration method on the
+existing extension handle:
+
+```lua
+local ok, err = handle:claim_visual_objects({ objectId, anotherObjectId })
+```
+
+It does not add a scene API, a mesh handle, or another draw path. A claimant
+must already have an `opaque_after_terrain` render handler. That handler renders
+the replacement with the existing borrowed `context.draw` facade. A companion
+can call the claim method during its own `worldChanged` callback, or outside a
+dispatcher callback. An empty array releases its claims.
+
+Each descriptor is defensive plain data with this shape:
+
+```lua
+{
+  schemaVersion = 1,
+  id = "BATTLE_ART_VOXEL_FORK:signpost:PALLET_TOWN:7:9",
+  kind = "signpost",
+  tags = { "host_geometry", "signpost", "visual_object" },
+  map = { id = "PALLET_TOWN", role = "current", offsetX = 0, offsetZ = 0 },
+  cell = { x = 7, z = 9 },
+  transform = {
+    localPosition = { x = 120, y = 0, z = 156 },
+    worldPosition = { x = 120, y = 0, z = 156 },
+    rotation = { yaw = 0, pitch = 0, roll = 0 },
+    scale = { x = 1, y = 1, z = 1 },
+  },
+  pivot = { kind = "bottom_center", x = 0, y = 0, z = 0 },
+  dimensions = { width = 16, height = 16, depth = 2 },
+  material = {
+    id = "host:tileset:OVERWORLD:signpost",
+    phase = "opaque_after_terrain",
+    opaque = true, alphaCutout = true,
+    castsShadow = true, receivesShadow = true,
+  },
+}
+```
+
+The position is the bottom-center pivot of the host signpost envelope. A box
+replacement therefore uses `worldPosition.x`, `worldPosition.z`, and
+`worldPosition.y + dimensions.height / 2`. Neighbor descriptors keep the same
+stable map-and-cell ID and local transform. Their world transform includes the
+connection offset. First-person and third-person use the same descriptor and
+the same opaque render seam.
+
+IDs contain safe ASCII only and are stable for host, kind, map, and cell. The
+host accepts claims only for IDs in the current copied catalog. Duplicate,
+unknown, malformed, or render-ineligible claims clear that extension's claims.
+If two live extensions request one ID, the object has no owner until the
+conflict is removed. Thus a conflict keeps the original visible instead of
+selecting a registration-order winner. Other non-conflicting objects keep their
+unique owners.
+
+Only a uniquely owned signpost's annotated visual quads are omitted. Ground,
+collision, interaction, map and game data, actors, and unrelated snapshot data
+do not change. Active overrides bypass persistent terrain records. Ownership
+changes refresh only the named map's full and body terrain slots; auxiliary
+grass, flowers, figures, structure analysis, and canonical disk records stay
+intact. Invalidate, fault cleanup, handle disposal, host disposal, or unload
+removes only the affected extension's claims. Existing lifecycle cleanup still
+owns extension resources, and repeated cleanup is safe.
 
 ### Semantic density-tag contract
 
@@ -250,6 +320,7 @@ Run the focused host test from the repository root:
 ```text
 luajit tests\companion_lifecycle_test.lua
 luajit tests\voxel_companion_api_v1_test.lua
+luajit tests\voxel_visual_object_filter_test.lua
 ```
 
 They cover delayed overworld readiness through the public core hook, descriptor
@@ -271,6 +342,12 @@ no-write rule, exact tree and boulder roles, walkable and unknown cylinder
 rejection, and bounded mountain seed, support, roof, door, and connection
 policies.
 
+The focused checks also cover stable signpost IDs and transforms, current and
+neighbor mapping, defensive descriptor copies, same-transform replacement,
+first-person and third-person integration, original-quad suppression,
+malformed and unknown claims, duplicate and conflicting ownership, and
+invalidate/dispose restoration.
+
 The canonical KFP dispatcher conformance command is:
 
 ```text
@@ -278,7 +355,8 @@ luajit tools\run_tests.lua companion
 ```
 
 At integration time, the lifecycle test passed 11 checks, the focused host
-test passed 2,636 checks, the canonical
+test passed 2,706 checks, the visual-object terrain filter passed 7 checks,
+the canonical
 companion selector passed 54 tests, and the complete KFP suite passed 227
 tests. The complete 23-command ROM-free draw fixture has canonical LF SHA-256
 `DE1DCA98A04AD9446B0AF4C13523DAB7F365BC7A76E70BC44B24F323D98A9BFA`.
