@@ -94,18 +94,26 @@ protected calls per cell. Player movement does not rebuild the full map.
 
 ### Visual-object override extension
 
-`visual_object_overrides` is one optional Battle Art extension to API v1. It
-adds `snapshot.visualObjects` and exactly one registration method on the
-existing extension handle:
+`visual_object_overrides` is one optional Battle Art extension to API v1. The
+provider advertises extension version `2`. It adds
+`snapshot.visualObjects`, one registration method on the existing extension
+handle, and one method on the callback-borrowed draw facade:
 
 ```lua
 local ok, err = handle:claim_visual_objects({ objectId, anotherObjectId })
+
+local drawn, drawErr = context.draw.visual_object(command, context)
 ```
 
-It does not add a scene API, a mesh handle, or another draw path. A claimant
-must already have an `opaque_after_terrain` render handler. That handler renders
-the replacement with the existing borrowed `context.draw` facade. A companion
-can call the claim method during its own `worldChanged` callback, or outside a
+Version `1` claims remain compatible. Version `2` adds the bounded declarative
+draw method. It does not add a scene API, mesh handle, renderer handle, texture,
+font, model resource, shader, or another render phase. A claimant must already
+have an `opaque_after_terrain` render handler. It can call the draw method only
+in that handler and only for an object that it uniquely owns. The method returns
+exactly `true`, or `false, error`. It does not retain the command.
+
+A companion can call the claim method during its own flat `worldChanged`
+callback, during the equivalent `phases.map_changed` callback, or outside a
 dispatcher callback. An empty array releases its claims.
 
 Each descriptor is defensive plain data with this shape:
@@ -135,12 +143,112 @@ Each descriptor is defensive plain data with this shape:
 }
 ```
 
-The position is the bottom-center pivot of the host signpost envelope. A box
-replacement therefore uses `worldPosition.x`, `worldPosition.z`, and
-`worldPosition.y + dimensions.height / 2`. Neighbor descriptors keep the same
+The position is the bottom-center pivot of the host signpost envelope. A legacy
+version 1 manual box draw uses `worldPosition.x`, `worldPosition.z`, and
+`worldPosition.y + dimensions.height / 2`. A version 2 command can use local
+position zero and `bottom_center`; the host applies the transform. Neighbor descriptors keep the same
 stable map-and-cell ID and local transform. Their world transform includes the
 connection offset. First-person and third-person use the same descriptor and
 the same opaque render seam.
+
+### Bounded replacement command
+
+The draw command is plain declarative data:
+
+```lua
+{
+  schemaVersion = 1,
+  kind = "visual_object_replacement",
+  objectId = descriptor.id,
+  geometry = {
+    {
+      shape = "box",
+      position = { x = 0, y = 0, z = 0 },
+      rotation = { yaw = 0, pitch = 0, roll = 0 },
+      scale = { x = 1, y = 1, z = 1 },
+      pivot = "bottom_center",
+      dimensions = { width = 16, height = 12, depth = 2 },
+      material = { color = { 0.55, 0.32, 0.16, 1 } },
+    },
+  },
+  text = {
+    {
+      value = "PALLET TOWN",
+      encoding = "ascii-5x7",
+      position = { x = 0, y = 4, z = 1.1 },
+      rotation = { yaw = 0, pitch = 0, roll = 0 },
+      scale = { x = 0.2, y = 0.2, z = 1 },
+      orientation = "object",
+      align = "center",
+      material = { color = { 1, 1, 1, 1 } },
+    },
+  },
+}
+```
+
+Both arrays are required. Either array can be empty, but the command must have
+at least one geometry or text item. One command accepts at most 64 geometry
+items, four text items, and 2,048 expanded host primitives.
+
+Geometry accepts only `box` and `plane`. A box has positive `width`, `height`,
+and `depth`. A plane has positive `width` and `height`, lies in its local X/Y
+plane, and uses only the `center` pivot. A box uses `center` or
+`bottom_center`. There are no vertices, indices, mesh data, textures, resource
+paths, or model references.
+
+All command positions are descriptor-local and each axis is from -256 through
+256. Rotation uses radians in yaw-Y, pitch-X, roll-Z order. Each rotation is
+from -2 pi through 2 pi. Scale is positive and no axis can exceed 64. Each raw
+dimension is positive and no greater than 256. Each scaled span is no greater
+than 256. The final conservative transformed bound cannot exceed 65,536 world
+units. The host applies:
+
+```text
+descriptor translation * yaw * pitch * roll * positive scale
+* item translation * yaw * pitch * roll * positive scale
+* item pivot * dimensions
+```
+
+The material has exactly one field: `color`. It has four finite RGBA channels
+from 0 through 1. Alpha must be 1 because replacements use the opaque phase.
+
+Text uses the host-owned fixed 5x7 glyph set. `encoding` must be
+`ascii-5x7`. A value is 1 through 64 bytes and accepts only uppercase `A-Z`,
+digits `0-9`, space, hyphen, period, colon, apostrophe, slash, and ampersand.
+Line breaks, control bytes, lowercase text, Unicode, all-space text, and
+external font or file references fail closed. Text uses a fixed one-unit pixel,
+one-unit gap, seven-unit height, and 0.125-unit local depth before its declared
+scale. `position` is the bottom text anchor. `align` is `left`, `center`, or
+`right`.
+
+`orientation = "object"` applies the full descriptor and text rotations.
+`orientation = "billboard_yaw"` keeps the fully transformed anchor and positive
+descriptor/text scale, faces the camera only around world Y, and permits a text
+yaw offset. Billboard pitch and roll must be zero. It does not retain the
+camera or context.
+
+Malformed tables, unknown fields, metatables, non-finite numbers, out-of-range
+transforms, non-positive scale, bad material data, unsupported glyphs, unknown
+IDs, unowned IDs, and calls outside the owner callback return `false, error`
+before they submit geometry. The public handle has no enumerable host,
+dispatcher, record, mesh, renderer, scene, texture, font, model, or shader
+state.
+
+### PokePath handoff
+
+PokePath must require `visual_object_overrides` and check that the provider
+value is at least `2` before it uses `draw.visual_object`. On every
+`worldChanged` or `phases.map_changed` callback, it must refresh its copied
+descriptor list and claim only the stable sign IDs that it will replace. It
+must use each descriptor ID as `objectId`; the host, not PokePath, applies the
+current or neighbor world transform.
+
+In `opaque_after_terrain`, PokePath can submit a small box-built Pallet sign and
+the bounded `PALLET TOWN` text shown above. It must inspect each Boolean draw
+result and treat a rejection as a failed replacement draw. It must submit an
+empty claim list when it no longer replaces the objects. It must not supply a
+PokePath asset, texture, font, mesh, model, shader, scene object, file path, or
+private engine value through this contract.
 
 IDs contain safe ASCII only and are stable for host, kind, map, and cell. The
 host accepts claims only for IDs in the current copied catalog. Every claim call
@@ -157,7 +265,7 @@ the same update; it does not rebuild terrain, blank unrelated geometry, or wait
 for a later pump. Annotated maps bypass older persistent terrain records because
 those records contain the sign quads. Auxiliary grass, flowers, figures, and
 structure analysis stay intact. Invalidate, fault cleanup, handle disposal,
-host disposal, or unload removes only the affected extension's claims. Existing
+host disposal, or hook uninstall removes only the affected extension's claims. Existing
 lifecycle cleanup still owns extension resources, and repeated cleanup is safe.
 
 The public provider does not advertise `shadow_pass`. Therefore, a replacement
@@ -203,7 +311,7 @@ consumes these normalized roles and does not inspect host or engine internals.
 
 ## Draw adapter and safety
 
-The draw facade implements the three v1 draw methods:
+The draw facade implements the three baseline v1 draw methods:
 
 - `mesh` for box, plane, centered world apron, panorama, cloud layer, and
   rainbow geometry
@@ -212,6 +320,10 @@ The draw facade implements the three v1 draw methods:
   mountain, and hood prototypes
 - `billboards` for bounded explicit camera-facing items and deterministic
   procedural stars
+
+When `visual_object_overrides` is version `2`, the same borrowed facade also
+has the optional `visual_object` method described above. It is not a new
+baseline v1 draw kind and does not change the frozen dispatcher.
 
 Extensions call each method with the canonical dot-call form
 `draw.<kind>(command, context)`. A draw returns exactly `true` when the host
@@ -335,6 +447,7 @@ Run the focused host test from the repository root:
 luajit tests\companion_lifecycle_test.lua
 luajit tests\voxel_companion_api_v1_test.lua
 luajit tests\voxel_visual_object_filter_test.lua
+luajit tests\battle_scene_visual_sidecar_test.lua
 ```
 
 They cover delayed overworld readiness through the public core hook, descriptor
@@ -358,8 +471,12 @@ policies.
 
 The focused checks also cover stable signpost IDs and transforms, current and
 neighbor mapping, two-companion nested mutation isolation, same-transform
-replacement, first-person and third-person integration, transactional malformed,
-unknown, duplicate, and conflicting claims, and invalidate/dispose restoration.
+replacement, full descriptor/local yaw-pitch-roll and positive-scale
+propagation, fixed-glyph readable text, object and camera-yaw orientation,
+first-person and third-person integration, no private-handle leakage,
+phase-table map changes, scene transitions, uninstall cleanup, transactional
+malformed, unknown, duplicate, and conflicting claims, and invalidate/dispose
+restoration.
 The ROM-free integration test uses a sign annotated by `Structures`, builds and
 reads real full/body `ChunkMesher` cache variants, checks immediate ownership
 transitions without a pump, and verifies the retained shadow caster.
@@ -370,9 +487,10 @@ The upstream KFP dispatcher conformance command is:
 luajit tools\run_tests.lua companion
 ```
 
-In this repository, the lifecycle test passes 11 checks, the focused host test
-passes 2,712 checks, and the ROM-free cache-transition integration test passes
-1,156 checks. The `tools/run_tests.lua` selector is not present here, so no KFP
+In this repository, the lifecycle test passes 22 checks, the focused host test
+passes 2,818 checks, the ROM-free cache-transition integration test passes
+3,386 checks, and the BattleScene sidecar test passes 25 checks. The
+`tools/run_tests.lua` selector is not present here, so no KFP
 selector or complete KFP-suite result is claimed for this change. The complete
 23-command ROM-free draw fixture keeps canonical LF SHA-256
 `DE1DCA98A04AD9446B0AF4C13523DAB7F365BC7A76E70BC44B24F323D98A9BFA`.

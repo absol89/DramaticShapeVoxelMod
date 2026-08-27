@@ -62,6 +62,14 @@ function Mat4.rotateX(a)
            0, 0, 0, 1 }
 end
 
+function Mat4.rotateZ(a)
+  local c, s = math.cos(a), math.sin(a)
+  return { c, -s, 0, 0,
+           s,  c, 0, 0,
+           0,  0, 1, 0,
+           0,  0, 0, 1 }
+end
+
 -- Right-handed perspective onto GL clip space (z in [-1, 1]).
 function Mat4.perspective(fovY, aspect, near, far)
   local f = 1 / math.tan(fovY / 2)

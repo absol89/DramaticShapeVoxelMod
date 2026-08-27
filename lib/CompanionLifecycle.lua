@@ -13,11 +13,12 @@ function CompanionLifecycle.install(mod, companion)
       and type(mod.hooks.wrap) == "function",
     "CompanionLifecycle needs the public mod hook facade")
   assert(type(companion) == "table"
-      and type(companion.updateFromGame) == "function",
+      and type(companion.updateFromGame) == "function"
+      and type(companion.dispose) == "function",
     "CompanionLifecycle needs a companion adapter")
 
   local reportedFault = false
-  return mod.hooks:wrap("core.update", function(next, game, dt)
+  local remove = mod.hooks:wrap("core.update", function(next, game, dt)
     local results = pack(next(game, dt))
     local ok, err = pcall(companion.updateFromGame, companion, dt, game)
     if not ok and not reportedFault then
@@ -28,6 +29,26 @@ function CompanionLifecycle.install(mod, companion)
     end
     return unpack(results, 1, results.n)
   end)
+  local hookRemoved, uninstalled = false, false
+  local removed
+  return function(...)
+    if uninstalled then return true end
+    if not hookRemoved then
+      removed = pack(remove(...))
+      hookRemoved = true
+    end
+    local called, result, disposeError = pcall(
+      companion.dispose, companion, "host_uninstall")
+    if not called or not result then
+      local err = called and disposeError or result
+      if mod.log and type(mod.log.error) == "function" then
+        mod.log:error("Voxel Companion uninstall cleanup failed: %s", tostring(err))
+      end
+      error(err, 0)
+    end
+    uninstalled = true
+    return unpack(removed, 1, removed.n)
+  end
 end
 
 return CompanionLifecycle

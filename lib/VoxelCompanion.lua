@@ -331,6 +331,18 @@ local function buildPlane()
   return Voxel3D.newMesh(vertices, indices)
 end
 
+local function buildVisualPlane()
+  local vertices = {
+    { -0.5, -0.5, 0, 0.5, 0.5, 1 },
+    {  0.5, -0.5, 0, 0.5, 0.5, 1 },
+    {  0.5,  0.5, 0, 0.5, 0.5, 1 },
+    { -0.5,  0.5, 0, 0.5, 0.5, 1 },
+  }
+  local indices = {}
+  Voxel3D.pushQuad(indices, 0)
+  return Voxel3D.newMesh(vertices, indices)
+end
+
 local function buildBillboard()
   local vertices = {
     { -0.5, 0, 0, 0.5, 0.5, 1 },
@@ -466,6 +478,46 @@ end
 local function transform(x, y, z, width, height, depth)
   return Mat4.mul(Mat4.translate(x, y, z),
                   Mat4.scale(width, height, depth))
+end
+
+local function rotationTransform(rotation)
+  return Mat4.mul(Mat4.rotateY(rotation.yaw),
+    Mat4.mul(Mat4.rotateX(rotation.pitch), Mat4.rotateZ(rotation.roll)))
+end
+
+local function descriptorTransform(descriptor)
+  local transform = descriptor.transform
+  local position, scale = transform.worldPosition, transform.scale
+  return Mat4.mul(Mat4.translate(position.x, position.y, position.z),
+    Mat4.mul(rotationTransform(transform.rotation),
+      Mat4.scale(scale.x, scale.y, scale.z)))
+end
+
+local function localTransform(item)
+  local position, scale = item.position, item.scale
+  return Mat4.mul(Mat4.translate(position.x, position.y, position.z),
+    Mat4.mul(rotationTransform(item.rotation),
+      Mat4.scale(scale.x, scale.y, scale.z)))
+end
+
+-- Apply T * Ry * Rx * Rz * S to one descriptor-local point. This matches the
+-- model composition above and gives yaw billboards their transformed anchor.
+local function descriptorPoint(descriptor, point)
+  local transform = descriptor.transform
+  local x = point.x * transform.scale.x
+  local y = point.y * transform.scale.y
+  local z = point.z * transform.scale.z
+  local roll = transform.rotation.roll
+  local cr, sr = math.cos(roll), math.sin(roll)
+  x, y = x * cr - y * sr, x * sr + y * cr
+  local pitch = transform.rotation.pitch
+  local cp, sp = math.cos(pitch), math.sin(pitch)
+  y, z = y * cp - z * sp, y * sp + z * cp
+  local yaw = transform.rotation.yaw
+  local cy, sy = math.cos(yaw), math.sin(yaw)
+  x, z = x * cy + z * sy, -x * sy + z * cy
+  local world = transform.worldPosition
+  return { x = world.x + x, y = world.y + y, z = world.z + z }
 end
 
 local function billboardTransform(item, width, height)
@@ -685,6 +737,7 @@ local function ensureMesh(self, kind)
   if self.meshes[kind] ~= nil then return self.meshes[kind] or nil end
   local mesh
   if kind == "plane" then mesh = buildPlane()
+  elseif kind == "visual_plane" then mesh = buildVisualPlane()
   elseif kind == "billboard" then mesh = buildBillboard()
   elseif kind == "panorama" then mesh = buildPanorama(false)
   elseif kind == "panorama_deep" then mesh = buildPanorama(true)
@@ -1048,6 +1101,103 @@ local function runDraw(callback)
   return true
 end
 
+local function replacementGeometryModel(descriptor, item)
+  local size = item.dimensions
+  local depth = item.shape == "plane" and 1 or size.depth
+  local pivotY = item.pivot == "bottom_center" and size.height * 0.5 or 0
+  local primitive = Mat4.mul(Mat4.translate(0, pivotY, 0),
+    Mat4.scale(size.width, size.height, depth))
+  return Mat4.mul(descriptorTransform(descriptor),
+    Mat4.mul(localTransform(item), primitive))
+end
+
+local function replacementTextTransform(descriptor, item)
+  if item.orientation == "object" then
+    return Mat4.mul(descriptorTransform(descriptor), localTransform(item))
+  end
+  local anchor = descriptorPoint(descriptor, item.position)
+  local eyeX, _, eyeZ = eyePosition()
+  local yaw = math.atan2(eyeX - anchor.x, eyeZ - anchor.z)
+    + item.rotation.yaw
+  local descriptorScale, scale = descriptor.transform.scale, item.scale
+  return Mat4.mul(Mat4.translate(anchor.x, anchor.y, anchor.z),
+    Mat4.mul(Mat4.rotateY(yaw), Mat4.scale(
+      descriptorScale.x * scale.x,
+      descriptorScale.y * scale.y,
+      descriptorScale.z * scale.z)))
+end
+
+local function drawReplacementText(self, descriptor, item, mesh, texture)
+  local base = replacementTextTransform(descriptor, item)
+  local textWidth = #item.value * 6 - 1
+  local startX = item.align == "center" and -textWidth * 0.5
+    or (item.align == "right" and -textWidth or 0)
+  setMaterial(item.material.color)
+  for characterIndex = 1, #item.value do
+    local rows = VisualObjects.glyph(item.value:sub(characterIndex, characterIndex))
+    for row = 1, 7 do
+      local bits = rows[row]
+      for column = 0, 4 do
+        if math.floor(bits / 2 ^ (4 - column)) % 2 == 1 then
+          local pixel = Mat4.mul(Mat4.translate(
+            startX + (characterIndex - 1) * 6 + column + 0.5,
+            7 - row + 0.5, 0), Mat4.scale(1, 1, 0.125))
+          drawVoxel(self, mesh, texture, Mat4.mul(base, pixel), false)
+        end
+      end
+    end
+  end
+end
+
+local function drawVisualObject(self, packet, context)
+  if type(context) ~= "table" then
+    return false, "visual object replacement needs the current borrowed render context"
+  end
+  if self.callbackDepth < 1 or not self.callbackRecord
+      or (self.callbackStage ~= "render.opaque_after_terrain"
+        and self.callbackStage ~= "phases.opaque_after_terrain") then
+    return false, "visual object replacement is allowed only in the owner's opaque_after_terrain callback"
+  end
+  if type(packet) ~= "table" or getmetatable(packet) ~= nil then
+    return false, "visual object replacement must be a plain table"
+  end
+  local descriptor, ownershipError = self.visuals:ownedDescriptor(
+    self.callbackRecord, rawget(packet, "objectId"))
+  if not descriptor then return false, ownershipError end
+  local command, primitiveCount = VisualObjects.validateReplacementCommand(
+    packet, descriptor)
+  if not command then return false, primitiveCount end
+  local budgeted, budgetError = useDrawBudget(self, primitiveCount)
+  if not budgeted then return false, budgetError end
+  local texture = ensureTexture(self)
+  local box = ensureMesh(self, "box")
+  local needsPlane = false
+  for _, item in ipairs(command.geometry) do
+    if item.shape == "plane" then needsPlane = true break end
+  end
+  local plane = needsPlane and ensureMesh(self, "visual_plane") or nil
+  if not texture or not box or (needsPlane and not plane) then
+    return false, "visual object replacement host geometry is unavailable"
+  end
+
+  return runDraw(function()
+    local ok, err = xpcall(function()
+      Voxel3D.glass(false)
+      for _, item in ipairs(command.geometry) do
+        setMaterial(item.material.color)
+        drawVoxel(self, item.shape == "plane" and plane or box, texture,
+          replacementGeometryModel(descriptor, item), false)
+      end
+      for _, item in ipairs(command.text) do
+        drawReplacementText(self, descriptor, item, box, texture)
+      end
+    end, function(message) return tostring(message) end)
+    pcall(Voxel3D.glass, true)
+    if not ok then error(err, 0) end
+    return true
+  end)
+end
+
 local function makeDrawFacade(self)
   return {
     mesh = function(packet, context)
@@ -1146,6 +1296,9 @@ local function makeDrawFacade(self)
         end
         return true
       end)
+    end,
+    visual_object = function(packet, context)
+      return drawVisualObject(self, packet, context)
     end,
   }
 end
@@ -1570,6 +1723,7 @@ local function updateFrame(self, dt)
 end
 
 local hasOpaqueHandler, wrapSpec, VisualHandle
+local VisualHandleState = setmetatable({}, { __mode = "k" })
 
 function VoxelCompanion.new(options)
   options = options or {}
@@ -1667,7 +1821,7 @@ function VoxelCompanion.new(options)
 
   local raw = self.dispatcher:provider()
   self.provider = raw
-  raw.capabilities.visual_object_overrides = 1
+  raw.capabilities.visual_object_overrides = 2
   local register = raw.register
   raw.register = function(spec)
     self.integrity = scanIntegrity(mod)
@@ -1689,7 +1843,10 @@ function VoxelCompanion.new(options)
       return nil, "battle_opaque requires unavailable battle_pass capability"
     end
     local existing = type(spec) == "table" and self.visualSources[spec] or nil
-    if existing and existing.raw:status().state ~= "disposed" then return existing end
+    local existingState = existing and VisualHandleState[existing] or nil
+    if existingState and existingState.raw:status().state ~= "disposed" then
+      return existing
+    end
     local id = type(spec) == "table" and spec.id or nil
     local record = self.visuals:addRecord(id, hasOpaqueHandler(spec))
     local wrapped = wrapSpec(self, spec, record)
@@ -1699,8 +1856,8 @@ function VoxelCompanion.new(options)
     local rawHandle, err = register(wrapped)
     if not rawHandle then self.visuals:remove(record); return nil, err end
     record.raw = rawHandle
-    local handle = setmetatable({ host = self, raw = rawHandle, record = record },
-      VisualHandle)
+    local handle = setmetatable({}, VisualHandle)
+    VisualHandleState[handle] = { host = self, raw = rawHandle, record = record }
     self.visualSources[spec] = handle
     return handle
   end
@@ -1894,12 +2051,16 @@ local function wrapCallbackTable(self, record, source, prefix, snapshotPhase)
       local callbackName, callback = name, handler
       out[callbackName] = function(...)
         local args = pack(...)
+        local stage = prefix .. "." .. callbackName
         if snapshotPhase and callbackName == "map_changed" then
           local snapshot, err = defensiveSnapshot(args[1])
           if not snapshot then error(err or "could not copy visual snapshot", 0) end
           args[1] = snapshot
+          -- The phase-table and flat callbacks are the same public lifecycle
+          -- event. Keep claim authorization identical for both spellings.
+          stage = "map_changed"
         end
-        return callExtension(self, record, prefix .. "." .. callbackName, callback,
+        return callExtension(self, record, stage, callback,
           unpackValues(args, 1, args.n))
       end
     end
@@ -1971,34 +2132,45 @@ end
 
 VisualHandle = {}
 VisualHandle.__index = VisualHandle
+VisualHandle.__metatable = "voxel-companion visual handle"
+
+local function visualHandleState(handle)
+  local state = VisualHandleState[handle]
+  if not state then error("invalid visual extension handle", 2) end
+  return state
+end
 
 function VisualHandle:id()
-  return self.raw:id()
+  return visualHandleState(self).raw:id()
 end
 
 function VisualHandle:is_active()
-  return self.raw:is_active()
+  return visualHandleState(self).raw:is_active()
 end
 
 function VisualHandle:status()
-  local status = self.raw:status()
-  status.visualClaims = self.host.visuals:status(self.record).visualClaims
+  local state = visualHandleState(self)
+  local status = state.raw:status()
+  status.visualClaims = state.host.visuals:status(state.record).visualClaims
   return status
 end
 
 function VisualHandle:claim_visual_objects(ids)
-  return self.host.visuals:claim(self.record, ids)
+  local state = visualHandleState(self)
+  return state.host.visuals:claim(state.record, ids)
 end
 
 function VisualHandle:invalidate(context, reason)
-  local ok, err = self.raw:invalidate(context, reason)
-  if ok then self.host.visuals:clear(self.record) end
+  local state = visualHandleState(self)
+  local ok, err = state.raw:invalidate(context, reason)
+  if ok then state.host.visuals:clear(state.record) end
   return ok, err
 end
 
 function VisualHandle:dispose(context, reason)
-  local ok, err = self.raw:dispose(context, reason)
-  if ok then self.host.visuals:remove(self.record) end
+  local state = visualHandleState(self)
+  local ok, err = state.raw:dispose(context, reason)
+  if ok then state.host.visuals:remove(state.record) end
   return ok, err
 end
 

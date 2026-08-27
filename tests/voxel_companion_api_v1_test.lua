@@ -196,6 +196,8 @@ local fakeMat4 = {
   translate = function(x, y, z) return { "translate", x, y, z } end,
   scale = function(x, y, z) return { "scale", x, y, z } end,
   rotateY = function(value) return { "rotateY", value } end,
+  rotateX = function(value) return { "rotateX", value } end,
+  rotateZ = function(value) return { "rotateZ", value } end,
 }
 
 local fakeCameraMode = "first_person"
@@ -505,7 +507,45 @@ do
   local host = VoxelCompanion.new({ mod = cleanMod() })
   local handle, callbackClaimed, callbackClaimError
   local claimedIds, replacements, callbackModes = {}, {}, {}
+  local callbackRejections = {}
   local invalidations, disposals = 0, 0
+
+  local function replacementCommand(object)
+    return {
+      schemaVersion = 1,
+      kind = "visual_object_replacement",
+      objectId = object.id,
+      geometry = {
+        {
+          shape = "box",
+          position = { x = 0, y = 0, z = 0 },
+          rotation = { yaw = 0, pitch = 0, roll = 0 },
+          scale = { x = 1, y = 1, z = 1 },
+          pivot = "bottom_center",
+          dimensions = {
+            width = object.dimensions.width,
+            height = object.dimensions.height,
+            depth = object.dimensions.depth,
+          },
+          material = { color = { 0.55, 0.32, 0.16, 1 } },
+        },
+      },
+      text = {
+        {
+          value = object.map.id:gsub("_", " "),
+          encoding = "ascii-5x7",
+          position = { x = 0, y = 6, z = 1.1 },
+          rotation = { yaw = 0, pitch = 0, roll = 0 },
+          scale = { x = 0.2, y = 0.2, z = 1 },
+          orientation = "object",
+          align = "center",
+          material = { color = { 1, 1, 1, 1 } },
+        },
+      },
+    }
+  end
+  local currentReplacementCommand = replacementCommand
+
   handle = assert(host.provider.register({
     api = 1,
     id = "test.visual-owner",
@@ -514,15 +554,7 @@ do
       claimedIds, replacements = {}, {}
       for _, object in ipairs(snapshot.visualObjects or {}) do
         claimedIds[#claimedIds + 1] = object.id
-        replacements[#replacements + 1] = {
-          id = object.id,
-          x = object.transform.worldPosition.x,
-          y = object.transform.worldPosition.y + object.dimensions.height * 0.5,
-          z = object.transform.worldPosition.z,
-          width = object.dimensions.width,
-          height = object.dimensions.height,
-          depth = object.dimensions.depth,
-        }
+        replacements[#replacements + 1] = object
       end
       callbackClaimed, callbackClaimError = handle:claim_visual_objects(claimedIds)
     end,
@@ -530,20 +562,29 @@ do
       opaque_after_terrain = function(context)
         local mode = context.camera.mode
         callbackModes[mode] = callbackModes[mode] or {}
-        for index, object in ipairs(replacements) do
-          local accepted, drawError = context.draw.mesh(wireCommand(
-            "mesh", "opaque_after_terrain", 300 + index, {
-              cacheKey = "visual.replace:" .. tostring(index),
-              owner = "test.visual-owner",
-              sortKey = "visual-replacement:" .. tostring(index),
-              material = "test:visual-replacement",
-              geometry = {
-                primitive = "box", x = object.x, y = object.y, z = object.z,
-                width = object.width, height = object.height, depth = object.depth,
-              },
-            }), context)
+        if not callbackRejections.checked and replacements[1] then
+          callbackRejections.checked = true
+          local before = #fakeVoxel3D.drawLog
+          local invalidTransform = replacementCommand(replacements[1])
+          invalidTransform.geometry[1].position.x = math.huge
+          callbackRejections.transform, callbackRejections.transformError =
+            context.draw.visual_object(invalidTransform, context)
+          local invalidText = replacementCommand(replacements[1])
+          invalidText.text[1].value = "Pallet Town"
+          callbackRejections.text, callbackRejections.textError =
+            context.draw.visual_object(invalidText, context)
+          local rawResource = replacementCommand(replacements[1])
+          rawResource.texture = { private = true }
+          callbackRejections.resource, callbackRejections.resourceError =
+            context.draw.visual_object(rawResource, context)
+          callbackRejections.draws = #fakeVoxel3D.drawLog - before
+        end
+        for _, object in ipairs(replacements) do
+          local drawStart = #fakeVoxel3D.drawLog
+          local accepted, drawError = context.draw.visual_object(
+            currentReplacementCommand(object), context)
           if not accepted then error(drawError, 0) end
-          callbackModes[mode][object.id] = fakeVoxel3D.drawLog[#fakeVoxel3D.drawLog].model
+          callbackModes[mode][object.id] = fakeVoxel3D.drawLog[drawStart + 1].model
         end
       end,
     },
@@ -563,6 +604,12 @@ do
   for _, object in ipairs(first.visualObjects) do byMap[object.map.id] = object end
   local currentObject, neighborObject = byMap.PALLET_TOWN, byMap.ROUTE_1
   check(currentObject and neighborObject, "both map identities are present")
+  equal(next(handle), nil, "public visual handle has no enumerable private state")
+  for _, field in ipairs({ "host", "raw", "record", "mesh", "renderer",
+                            "scene", "texture", "font", "shader" }) do
+    equal(rawget(handle, field), nil,
+      "public visual handle does not leak private field " .. field)
+  end
   equal(currentObject.map.role, "current", "current-map object keeps its role")
   equal(neighborObject.map.role, "neighbor", "neighbor object keeps its role")
   equal(currentObject.id,
@@ -591,6 +638,101 @@ do
   check(host:suppressesVisualObject(neighborObject.id),
     "a valid known-ID claim suppresses the neighbor original")
 
+  local validReplacement, primitiveCount =
+    VisualObjects.validateReplacementCommand(
+      replacementCommand(currentObject), currentObject)
+  check(validReplacement and primitiveCount > 1,
+    "bounded geometry and readable text command validates")
+  equal(validReplacement.text[1].value, "PALLET TOWN",
+    "validated text keeps its allowed ASCII lettering")
+  local billboardCommand = replacementCommand(currentObject)
+  billboardCommand.text[1].orientation = "billboard_yaw"
+  local validBillboard = VisualObjects.validateReplacementCommand(
+    billboardCommand, currentObject)
+  check(validBillboard, "upright camera-yaw text orientation validates")
+  local planeCommand = replacementCommand(currentObject)
+  planeCommand.text = {}
+  planeCommand.geometry[1].shape = "plane"
+  planeCommand.geometry[1].pivot = "center"
+  planeCommand.geometry[1].dimensions = { width = 8, height = 4 }
+  check(VisualObjects.validateReplacementCommand(planeCommand, currentObject),
+    "bounded host-owned plane geometry validates")
+
+  local descriptorGuard = VisualObjects.new()
+  check(descriptorGuard:setCatalog({ currentObject }),
+    "bounded descriptor guard accepts the current transform")
+  local badDescriptor = assert(VisualObjects.copy(currentObject))
+  badDescriptor.transform.worldPosition.x = math.huge
+  local badCatalog, badCatalogError = descriptorGuard:setCatalog({ badDescriptor })
+  equal(badCatalog, nil, "non-finite descriptor transform fails closed")
+  contains(badCatalogError, "finite", "non-finite descriptor has a diagnostic")
+  badDescriptor = assert(VisualObjects.copy(currentObject))
+  badDescriptor.transform.rotation.yaw = math.pi * 2 + 0.01
+  badCatalog, badCatalogError = descriptorGuard:setCatalog({ badDescriptor })
+  equal(badCatalog, nil, "out-of-range descriptor rotation fails closed")
+  contains(badCatalogError, "rotation bound",
+    "out-of-range descriptor rotation has a diagnostic")
+  badDescriptor = assert(VisualObjects.copy(currentObject))
+  badDescriptor.transform.scale.z = 0
+  badCatalog, badCatalogError = descriptorGuard:setCatalog({ badDescriptor })
+  equal(badCatalog, nil, "non-positive descriptor scale fails closed")
+  contains(badCatalogError, "must be positive",
+    "non-positive descriptor scale has a diagnostic")
+  equal(descriptorGuard:status().visualObjects, 1,
+    "rejected descriptor transforms preserve the accepted catalog")
+
+  local function rejectedCommand(change, fragment, message)
+    local command = replacementCommand(currentObject)
+    change(command)
+    local accepted, validationError =
+      VisualObjects.validateReplacementCommand(command, currentObject)
+    equal(accepted, nil, message .. " fails closed")
+    contains(validationError, fragment, message .. " has a bounded diagnostic")
+  end
+
+  rejectedCommand(function(command)
+    command.geometry[1].position.x = 0 / 0
+  end, "finite range", "non-finite geometry position")
+  rejectedCommand(function(command)
+    command.geometry[1].rotation.roll = math.pi * 2 + 0.01
+  end, "finite range", "out-of-range geometry rotation")
+  rejectedCommand(function(command)
+    command.geometry[1].scale.y = 0
+  end, "positive", "non-positive geometry scale")
+  rejectedCommand(function(command)
+    command.geometry[1].dimensions.width = 257
+  end, "finite range", "out-of-range geometry dimension")
+  rejectedCommand(function(command)
+    command.geometry[1].vertices = { { 0, 0, 0 } }
+  end, "unsupported field", "arbitrary geometry vertices")
+  rejectedCommand(function(command)
+    command.text[1].value = "Pallet Town"
+  end, "accepts only", "text outside the allowed glyph policy")
+  rejectedCommand(function(command)
+    command.text[1].value = string.rep("A", 65)
+  end, "1..64 ASCII bytes", "overlength text")
+  rejectedCommand(function(command)
+    command.text[1].encoding = "utf-8"
+  end, "ascii-5x7", "unsupported text encoding")
+  rejectedCommand(function(command)
+    command.text[1].orientation = "billboard_yaw"
+    command.text[1].rotation.pitch = 0.1
+  end, "zero pitch and roll", "tilted yaw billboard")
+  rejectedCommand(function(command)
+    command.text[1].material.color[4] = 0.5
+  end, "alpha must be 1", "translucent text material")
+  for _, field in ipairs({ "mesh", "renderer", "texture", "font", "scene",
+                            "model", "resource", "shader", "vertices" }) do
+    rejectedCommand(function(command) command[field] = {} end,
+      "unsupported field", "private/resource field " .. field)
+  end
+
+  local outsideDraw, outsideError = host.draw.visual_object(
+    replacementCommand(currentObject), {})
+  equal(outsideDraw, false, "visual command outside its borrowed callback fails closed")
+  contains(outsideError, "only in the owner's opaque_after_terrain callback",
+    "out-of-lifecycle visual command reports its lifecycle rule")
+
   local originalX = host.world.snapshot().visualObjects[1].transform.worldPosition.x
   first.visualObjects[1].transform.worldPosition.x = 9999
   equal(host.world.snapshot().visualObjects[1].transform.worldPosition.x, originalX,
@@ -599,14 +741,30 @@ do
   local firstSignature = visualSignature(host.world.snapshot().visualObjects)
   check(host:render("opaque_after_terrain", visualState),
     "first-person replacement uses the normal opaque render seam")
+  equal(callbackRejections.transform, false,
+    "invalid transform command fails closed at the borrowed draw boundary")
+  contains(callbackRejections.transformError, "finite range",
+    "invalid transform draw has a bounded diagnostic")
+  equal(callbackRejections.text, false,
+    "invalid text command fails closed at the borrowed draw boundary")
+  contains(callbackRejections.textError, "accepts only",
+    "invalid text draw has a bounded diagnostic")
+  equal(callbackRejections.resource, false,
+    "raw resource command fails closed at the borrowed draw boundary")
+  contains(callbackRejections.resourceError, "unsupported field",
+    "raw resource draw has a bounded diagnostic")
+  equal(callbackRejections.draws, 0,
+    "rejected visual commands submit no partial geometry")
   for _, object in ipairs(host.world.snapshot().visualObjects) do
-    local translation = findTagged(callbackModes.first_person[object.id], "translate")[1]
-    equal(translation[2], object.transform.worldPosition.x,
+    local translations = findTagged(callbackModes.first_person[object.id], "translate")
+    equal(translations[1][2], object.transform.worldPosition.x,
       "first-person replacement uses descriptor world X")
-    equal(translation[3], object.transform.worldPosition.y + object.dimensions.height * 0.5,
-      "first-person replacement derives its center from the descriptor pivot")
-    equal(translation[4], object.transform.worldPosition.z,
+    equal(translations[1][3], object.transform.worldPosition.y,
+      "first-person replacement uses descriptor world Y")
+    equal(translations[1][4], object.transform.worldPosition.z,
       "first-person replacement uses descriptor world Z")
+    equal(translations[3][3], object.dimensions.height * 0.5,
+      "first-person replacement derives its center from the declared pivot")
   end
 
   fakeCameraMode = "third_person"
@@ -621,6 +779,91 @@ do
       treeSignature(callbackModes.first_person[object.id]),
       "first- and third-person replacement matrices match for " .. object.id)
   end
+
+  local catalog = host.world.snapshot().visualObjects
+  local transformed = assert(VisualObjects.copy(currentObject))
+  transformed.transform.worldPosition = { x = 11, y = 12, z = 13 }
+  transformed.transform.rotation = { yaw = 0.2, pitch = -0.3, roll = 0.4 }
+  transformed.transform.scale = { x = 2, y = 3, z = 4 }
+  check(host.visuals:setCatalog({ transformed }),
+    "bounded transformed descriptor becomes the current catalog")
+  check(handle:claim_visual_objects({ transformed.id }),
+    "owner claims the transformed descriptor")
+  replacements = { transformed }
+  currentReplacementCommand = function(object)
+    local command = replacementCommand(object)
+    command.text = {}
+    local geometry = command.geometry[1]
+    geometry.position = { x = 1, y = 2, z = 3 }
+    geometry.rotation = { yaw = 0.5, pitch = -0.6, roll = 0.7 }
+    geometry.scale = { x = 0.8, y = 0.9, z = 1.1 }
+    geometry.dimensions = { width = 4, height = 5, depth = 6 }
+    return command
+  end
+  check(host:render("opaque_after_terrain", visualState),
+    "full descriptor and local transform render")
+  local fullModel = callbackModes.third_person[transformed.id]
+  local fullTranslations = findTagged(fullModel, "translate")
+  equal(treeSignature(fullTranslations[1]), treeSignature({ "translate", 11, 12, 13 }),
+    "descriptor world translation propagates without reconstruction")
+  equal(treeSignature(fullTranslations[2]), treeSignature({ "translate", 1, 2, 3 }),
+    "replacement local translation propagates")
+  equal(findTagged(fullModel, "rotateY")[1][2], 0.2,
+    "descriptor yaw propagates")
+  equal(findTagged(fullModel, "rotateX")[1][2], -0.3,
+    "descriptor pitch propagates")
+  equal(findTagged(fullModel, "rotateZ")[1][2], 0.4,
+    "descriptor roll propagates")
+  equal(findTagged(fullModel, "rotateY")[2][2], 0.5,
+    "replacement yaw propagates")
+  equal(findTagged(fullModel, "rotateX")[2][2], -0.6,
+    "replacement pitch propagates")
+  equal(findTagged(fullModel, "rotateZ")[2][2], 0.7,
+    "replacement roll propagates")
+  local fullScales = findTagged(fullModel, "scale")
+  equal(treeSignature(fullScales[1]), treeSignature({ "scale", 2, 3, 4 }),
+    "positive descriptor scale propagates")
+  equal(treeSignature(fullScales[2]), treeSignature({ "scale", 0.8, 0.9, 1.1 }),
+    "positive replacement scale propagates")
+  equal(treeSignature(fullScales[3]), treeSignature({ "scale", 4, 5, 6 }),
+    "replacement dimensions propagate")
+
+  currentReplacementCommand = function(object)
+    local command = replacementCommand(object)
+    command.geometry = {}
+    local text = command.text[1]
+    text.value = "A"
+    text.position = { x = 1, y = 2, z = 3 }
+    text.rotation = { yaw = 0.25, pitch = 0, roll = 0 }
+    text.scale = { x = 0.5, y = 0.5, z = 1 }
+    text.orientation = "billboard_yaw"
+    return command
+  end
+  check(host:render("opaque_after_terrain", visualState),
+    "camera-yaw text renders at the transformed descriptor anchor")
+  local billboardModel = callbackModes.third_person[transformed.id]
+  local bx, by, bz = 2, 6, 12
+  local cr, sr = math.cos(0.4), math.sin(0.4)
+  bx, by = bx * cr - by * sr, bx * sr + by * cr
+  local cp, sp = math.cos(-0.3), math.sin(-0.3)
+  by, bz = by * cp - bz * sp, by * sp + bz * cp
+  local cy, sy = math.cos(0.2), math.sin(0.2)
+  bx, bz = bx * cy + bz * sy, -bx * sy + bz * cy
+  local billboardTranslation = findTagged(billboardModel, "translate")[1]
+  equal(billboardTranslation[2], 11 + bx,
+    "billboard anchor applies descriptor yaw, pitch, roll, and scale to X")
+  equal(billboardTranslation[3], 12 + by,
+    "billboard anchor applies descriptor yaw, pitch, roll, and scale to Y")
+  equal(billboardTranslation[4], 13 + bz,
+    "billboard anchor applies descriptor yaw, pitch, roll, and scale to Z")
+  equal(treeSignature(findTagged(billboardModel, "scale")[1]),
+    treeSignature({ "scale", 1, 1.5, 4 }),
+    "billboard keeps positive descriptor and text scale")
+
+  check(host.visuals:setCatalog(catalog), "normal visual catalog is restored")
+  check(handle:claim_visual_objects(claimedIds), "normal claims are restored")
+  replacements = catalog
+  currentReplacementCommand = replacementCommand
 
   local duplicateOk, duplicateError = handle:claim_visual_objects({
     currentObject.id, currentObject.id,
@@ -690,6 +933,46 @@ do
       and not host:suppressesVisualObject(neighborObject.id),
     "owner disposal restores originals without touching another extension")
   check(host:dispose("visual-object-test"), "visual-object host disposes cleanly")
+
+  local phaseHost = VoxelCompanion.new({ mod = cleanMod() })
+  local phaseHandle, phaseClaimed, phaseError, phaseMapId
+  phaseHandle = assert(phaseHost.provider.register({
+    api = 1,
+    id = "test.visual-phase-map-change",
+    requires = { "visual_object_overrides", "world_snapshot", "render_phases" },
+    phases = {
+      map_changed = function(snapshot)
+        phaseMapId = snapshot.id
+        local ids = {}
+        for _, object in ipairs(snapshot.visualObjects) do ids[#ids + 1] = object.id end
+        phaseClaimed, phaseError = phaseHandle:claim_visual_objects(ids)
+      end,
+      opaque_after_terrain = function() end,
+    },
+  }))
+  local phaseState = {
+    map = current, player = player, entities = { player }, neighbors = {},
+  }
+  check(phaseHost:start(), "phase-table map-change host starts")
+  check(phaseHost:update(0.016, phaseState),
+    "phase-table map-change snapshot dispatches")
+  check(phaseClaimed, phaseError or "phase-table callback can claim")
+  equal(phaseMapId, "PALLET_TOWN",
+    "phase-table callback receives the defensive current snapshot")
+  check(phaseHost:suppressesVisualObject(currentObject.id),
+    "phase-table callback activates the current-map claim")
+  phaseState.map = neighbor
+  check(phaseHost:update(0.016, phaseState), "map scene transition dispatches")
+  check(phaseClaimed, phaseError or "transition claim succeeds")
+  equal(phaseMapId, "ROUTE_1", "map scene transition publishes the new identity")
+  check(not phaseHost:suppressesVisualObject(currentObject.id),
+    "scene transition releases the stale object claim")
+  check(phaseHost:suppressesVisualObject(neighborObject.id),
+    "scene transition claims the new object at its stable transform")
+  check(phaseHost:dispose("phase-table-map-change-test"),
+    "phase-table map-change host disposes cleanly")
+  check(not phaseHost:suppressesVisualObject(neighborObject.id),
+    "host disposal restores the scene-transition original")
   fakeCameraMode = "first_person"
   pushCount, popCount = 0, 0
 end
@@ -953,10 +1236,12 @@ equal(provider.host.id, "BATTLE_ART_VOXEL_FORK", "provider reports stable host i
 equal(provider.host.version, "1.9.7", "provider preserves upstream version")
 for _, capability in ipairs({
   "world_snapshot", "camera_delta", "render_phases", "quality_tier",
-  "integrity_status", "visual_object_overrides",
+  "integrity_status",
 }) do
   equal(provider.capabilities[capability], 1, "provider advertises " .. capability)
 end
+equal(provider.capabilities.visual_object_overrides, 2,
+  "provider advertises the bounded visual-object draw extension version")
 for _, capability in ipairs({
   "terrain_patch", "shadow_pass", "battle_pass", "materials", "draw",
 }) do

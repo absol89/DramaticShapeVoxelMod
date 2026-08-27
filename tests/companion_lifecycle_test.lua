@@ -23,7 +23,7 @@ local mod = {
   hooks = {
     wrap = function(_, name, callback)
       wrappedName, wrapped = name, callback
-      return function() end
+      return function() return true end
     end,
   },
   log = {
@@ -38,9 +38,15 @@ local companion = {
   updateFromGame = function(_, dt, game)
     calls[#calls + 1] = { dt = dt, game = game, ready = game.overworld ~= nil }
   end,
+  dispose = function(_, reason)
+    calls.disposed = (calls.disposed or 0) + 1
+    calls.disposeReason = reason
+    return true
+  end,
 }
 
-check(type(Lifecycle.install(mod, companion)) == "function",
+local uninstall = Lifecycle.install(mod, companion)
+check(type(uninstall) == "function",
   "install returns the public hook removal handle")
 equal(wrappedName, "core.update", "lifecycle binds only to public core.update")
 
@@ -69,5 +75,43 @@ companion.updateFromGame = function() error("synthetic lifecycle fault", 0) end
 wrapped(function() end, game, 0.016)
 wrapped(function() end, game, 0.016)
 equal(#messages, 1, "a repeated lifecycle fault is logged once")
+
+check(uninstall(), "uninstall removes the public hook")
+equal(calls.disposed, 1, "uninstall disposes the companion exactly once")
+equal(calls.disposeReason, "host_uninstall",
+  "uninstall uses the canonical cleanup reason")
+check(uninstall(), "repeated uninstall is safe")
+equal(calls.disposed, 1, "repeated uninstall does not dispose twice")
+
+local removeAttempts, disposeAttempts = 0, 0
+local retryMod = {
+  hooks = {
+    wrap = function()
+      return function()
+        removeAttempts = removeAttempts + 1
+        return true
+      end
+    end,
+  },
+  log = { error = function() end },
+}
+local failDispose = true
+local retryCompanion = {
+  updateFromGame = function() end,
+  dispose = function()
+    disposeAttempts = disposeAttempts + 1
+    if failDispose then return nil, "synthetic cleanup refusal" end
+    return true
+  end,
+}
+local retryUninstall = Lifecycle.install(retryMod, retryCompanion)
+local firstCleanup = pcall(retryUninstall)
+equal(firstCleanup, false, "failed uninstall cleanup is reported")
+equal(removeAttempts, 1, "failed cleanup removes the hook once")
+equal(disposeAttempts, 1, "failed cleanup attempts disposal once")
+failDispose = false
+check(retryUninstall(), "uninstall cleanup can resume after a failure")
+equal(removeAttempts, 1, "cleanup retry does not remove the hook twice")
+equal(disposeAttempts, 2, "cleanup retry runs disposal again")
 
 io.write(('%d checks passed (Voxel Companion core lifecycle)\n'):format(checks))
