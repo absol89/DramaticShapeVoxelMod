@@ -141,15 +141,21 @@ end
 -- not standing in it. Both maps are kept live so neither the arena's mesh nor
 -- the one waiting to be walked back onto is evicted mid-battle.
 local function prefetchArena(state, host)
-  if host == state.map then return VoxelScene.prefetch(state) end
+  if host == state.map then
+    local terrain, neighbors, water, neighborWater, _, visuals,
+      neighborVisuals = VoxelScene.prefetch(state)
+    return terrain, neighbors, water, neighborWater, visuals, neighborVisuals
+  end
   local live = { [host.id] = true, [state.map.id] = true }
   for _, nb in ipairs(state.neighbors or {}) do live[nb.map.id] = true end
   ChunkMesher.setLive(live)
   TerrainAtlas.setLive(live)
   ChunkMesher.request(host, false, nil, true)
-  local terrain, water = ChunkMesher.pair(host, false)
-  if not terrain then terrain, water = ChunkMesher.pair(host, true) end
-  return terrain, {}, water, {}
+  local terrain, water, _, visuals = ChunkMesher.pair(host, false)
+  if not terrain then
+    terrain, water, _, visuals = ChunkMesher.pair(host, true)
+  end
+  return terrain, {}, water, {}, visuals, {}
 end
 
 -- ------- the sun
@@ -234,7 +240,8 @@ BattleScene.monCards = monCards
 -- -- goes in the signature; the terrain half of the answer would otherwise
 -- keep a stale pass alive and freeze the shadows in whatever pose they were
 -- first drawn in.
-local function shadowSignature(state, arena, terrain, nbMesh, token)
+local function shadowSignature(state, arena, terrain, nbMesh, visuals,
+                               nbVisuals, token, neighborCount)
   local host = arena.map or state.map
   local parts = { "battle", host.id, arena.x, arena.y, arena.shape,
                   tostring(terrain), tostring(token or 0),
@@ -246,21 +253,42 @@ local function shadowSignature(state, arena, terrain, nbMesh, token)
                   -- from somewhere new must be re-cast from there
                   math.floor(ShadowMap.KX * 128),
                   math.floor(ShadowMap.KZ * 128) }
-  for i = 1, #nbMesh do parts[#parts + 1] = tostring(nbMesh[i]) end
+  for _, visual in ipairs(visuals or {}) do
+    parts[#parts + 1] = tostring(visual.mesh)
+  end
+  for i = 1, neighborCount or #nbMesh do
+    parts[#parts + 1] = tostring(nbMesh[i])
+    for _, visual in ipairs((nbVisuals and nbVisuals[i]) or {}) do
+      parts[#parts + 1] = tostring(visual.mesh)
+    end
+  end
   return table.concat(parts, ",")
 end
 
 local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
                            atlasFor, cards, models, token, host, neighbors,
-                           water, nbWater)
+                           water, nbWater, visuals, nbVisuals)
   if not ShadowMap.available() then return end
-  local sig = shadowSignature(state, arena, terrain, nbMesh, token)
+  local sig = shadowSignature(state, arena, terrain, nbMesh, visuals,
+                              nbVisuals, token, #neighbors)
   if not ShadowMap.stale(sig) then return end
   if not ShadowMap.begin(cx, cy, vw, vh) then return end
 
   ShadowMap.draw(terrain, atlasFor(host), nil)
   for i, nb in ipairs(neighbors) do
     ShadowMap.draw(nbMesh[i], atlasFor(nb.map), Mat4.translate(nb.ox, 0, nb.oy))
+  end
+  -- Visual-object claims belong only to the overworld companion pass. A
+  -- companion has no staged-battle renderer, so every original sign sidecar
+  -- remains both a caster here and visible in the color pass below.
+  for _, visual in ipairs(visuals or {}) do
+    ShadowMap.draw(visual.mesh, atlasFor(host), nil)
+  end
+  for i, nb in ipairs(neighbors) do
+    for _, visual in ipairs((nbVisuals and nbVisuals[i]) or {}) do
+      ShadowMap.draw(visual.mesh, atlasFor(nb.map),
+                     Mat4.translate(nb.ox, 0, nb.oy))
+    end
   end
   -- the water surface is its own reflective pass now (see Water) and so is
   -- no longer inside the terrain mesh; the sun still has to see it, or the
@@ -424,9 +452,10 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
   -- A flat plate does not wait for or touch voxel meshes. The world arena
   -- still shares free-roam's request/evict bookkeeping and warms nothing
   -- extra; illustrated plates can therefore enter immediately on a cold map.
-  local terrain, nbMesh, water, nbWater
+  local terrain, nbMesh, water, nbWater, visuals, nbVisuals
   if not flatFill then
-    terrain, nbMesh, water, nbWater = prefetchArena(state, host)
+    terrain, nbMesh, water, nbWater, visuals, nbVisuals =
+      prefetchArena(state, host)
     if not terrain then return nil end
   end
 
@@ -501,7 +530,8 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     ShadowMap.discard()
   else
     castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh, atlasFor,
-                cards, stadium, token, host, neighbors, water, nbWater)
+                cards, stadium, token, host, neighbors, water, nbWater,
+                visuals, nbVisuals)
   end
 
   -- An opaque void either way. Outdoors the camera is low enough that the
@@ -567,6 +597,15 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     for i, nb in ipairs(neighbors) do
       Voxel3D.draw(nbMesh[i], atlasFor(nb.map),
                    Mat4.translate(nb.ox, 0, nb.oy))
+    end
+    for _, visual in ipairs(visuals or {}) do
+      Voxel3D.draw(visual.mesh, atlasFor(host), nil)
+    end
+    for i, nb in ipairs(neighbors) do
+      for _, visual in ipairs((nbVisuals and nbVisuals[i]) or {}) do
+        Voxel3D.draw(visual.mesh, atlasFor(nb.map),
+                     Mat4.translate(nb.ox, 0, nb.oy))
+      end
     end
     -- and the water over it -- PLAIN, always: the flat animated tiles, never
     -- the reflective pass, whatever the WATER row says. The reflection is

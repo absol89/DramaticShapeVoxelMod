@@ -229,6 +229,18 @@ local fakeMapModule = {
 }
 
 local fakeChunkMesher = {}
+function fakeChunkMesher.visualObjectAnnotated(map, id)
+  for z = 0, (map.heightCells or 0) - 1 do
+    for x = 0, (map.widthCells or 0) - 1 do
+      if map:cellTile(x, z) == 4
+          and VisualObjects.id("BATTLE_ART_VOXEL_FORK", "signpost",
+            map.id, x, z) == id then
+        return true
+      end
+    end
+  end
+  return false
+end
 
 local fakeGame = { save = { version = "red" } }
 package.loaded["src.world.Map"] = fakeMapModule

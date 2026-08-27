@@ -1156,6 +1156,13 @@ local function cellClass(map, shapes, x, z)
   return tile, shape and shape.class or "ground", shape and shape.h or 0
 end
 
+local function annotatedVisualObject(map, id)
+  local inspect = ChunkMesher.visualObjectAnnotated
+  if type(inspect) ~= "function" then return false end
+  local ok, annotated = pcall(inspect, map, id)
+  return ok and annotated == true
+end
+
 local function appendVisualObjects(map, role, offsetX, offsetZ, byId, counts, scan)
   if type(map) ~= "table" or type(map.id) ~= "string" or not map.tileset then return end
   local width = integer(map.widthCells, nil)
@@ -1174,7 +1181,7 @@ local function appendVisualObjects(map, role, offsetX, offsetZ, byId, counts, sc
         if scan.count > MAX_VISUAL_OBJECTS then return end
         local id = VisualObjects.id("BATTLE_ART_VOXEL_FORK",
           "signpost", map.id, x, z)
-        if id then
+        if id and annotatedVisualObject(map, id) then
           counts[id] = (counts[id] or 0) + 1
           if counts[id] > 1 then
             -- The public ID names map data, not one rendered placement. If the

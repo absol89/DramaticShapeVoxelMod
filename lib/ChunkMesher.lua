@@ -78,6 +78,20 @@ end
 -- Small host-test seam used by the ROM-free contract suite.
 ChunkMesher.visualObjectVisible = visualObjectVisible
 
+-- True only when Structures produced geometry that this mesher can route to
+-- the named sidecar. Catalog callers use this instead of assuming that a
+-- sign-class map cell survived object extraction as one suppressible mesh.
+-- Analysis faults fail closed: the ordinary terrain path remains untouched.
+function ChunkMesher.visualObjectAnnotated(map, id)
+  if type(map) ~= "table" or type(id) ~= "string" then return false end
+  local ok, analysis = pcall(Structures.forMap, map)
+  if not ok or type(analysis) ~= "table" then return false end
+  for _, quad in ipairs(analysis.objectQuads or {}) do
+    if quad.visualObjectId == id then return true end
+  end
+  return false
+end
+
 -- Which drawn row a FLAT-topped volume's top face wears at depth `ty`.
 --
 -- A structure is usually deeper than the art that draws it, so the rows

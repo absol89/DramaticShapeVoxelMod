@@ -286,4 +286,146 @@ equal(#(disposedShadows or {}), 1,
   "disposal keeps the original shadow behavior")
 check(host:dispose("integration-host-dispose"), "the integration host disposes")
 
+local function touchingMap(id, horizontal)
+  local map = {
+    id = id,
+    widthCells = 2,
+    heightCells = 2,
+    def = { width = 1, height = 1, tileset = "OVERWORLD" },
+    tileset = {
+      id = "OVERWORLD", image = "synthetic-atlas", tilesPerRow = 16,
+      imageWidth = 128, imageHeight = 48,
+    },
+  }
+  function map:tileAt() return 0 end
+  function map:cellTile(x, z)
+    if horizontal then return (z == 0 and (x == 0 or x == 1)) and 4 or 0 end
+    return (x == 0 and (z == 0 or z == 1)) and 4 or 0
+  end
+  function map:isWalkableCell(x, z) return self:cellTile(x, z) ~= 4 end
+  function map:isWaterCell() return false end
+  function map:isGrassCell() return false end
+  function map:warpAtCell() return nil end
+  function map:isWarpTileCell() return false end
+
+  local sign = { class = "signpost", authored = true, art = "upright", h = 16 }
+  local S = {
+    shapeAt = {}, tileAt = {}, outdoor = true,
+    runs = {}, skip = {}, ground = {}, doorFold = {}, objectQuads = {},
+    grassQuads = {}, flowerQuads = {}, roundStamps = {}, figures = {},
+  }
+  local maxX, maxZ = horizontal and 3 or 1, horizontal and 1 or 3
+  local tiles = {}
+  for z = 0, maxZ do
+    for x = 0, maxX do
+      tiles[#tiles + 1] = { x, z }
+      S.shapeAt[keyOf(x, z)] = sign
+      S.tileAt[keyOf(x, z)] = 0
+    end
+  end
+  local region = {
+    minX = 0, maxX = maxX, minY = 0, maxY = maxZ, tiles = tiles,
+  }
+  Structures.extractObjects(S, map, region,
+    { getPixel = function() return 0, 0, 0, 1 end }, 16, true)
+  check(#S.objectQuads > 0, id .. " keeps extracted original geometry")
+  for _, quad in ipairs(S.objectQuads) do
+    equal(quad.visualObjectId, nil,
+      id .. " crossing cluster is not advertised as suppressible")
+  end
+  analyses[id] = S
+  return map
+end
+
+local function checkOmittedTouchingMap(map, cells, label)
+  local terrain = assert(ChunkMesher.get(map, false))
+  local pairedTerrain, _, visuals, shadows = ChunkMesher.pair(map, false)
+  equal(pairedTerrain, terrain, label .. " original stays in base terrain")
+  equal(#(visuals or {}), 0, label .. " has no color sidecar")
+  equal(#(shadows or {}), 0, label .. " has no shadow sidecar")
+
+  local omittedIds = {}
+  for _, cell in ipairs(cells) do
+    omittedIds[#omittedIds + 1] = assert(VisualObjects.id(
+      "BATTLE_ART_VOXEL_FORK", "signpost", map.id, cell[1], cell[2]))
+  end
+  local omittedCount, claimResult, claimError
+  local omittedHost = VoxelCompanion.new({ mod = cleanMod() })
+  local handle
+  handle = assert(omittedHost.provider.register({
+    api = 1,
+    id = "integration.omitted." .. label,
+    requires = { "visual_object_overrides", "world_snapshot" },
+    worldChanged = function(snapshot)
+      omittedCount = #snapshot.visualObjects
+      claimResult, claimError = handle:claim_visual_objects(omittedIds)
+    end,
+    render = { opaque_after_terrain = function() end },
+  }))
+  namespace.companion = omittedHost
+  check(omittedHost:start(), label .. " host starts")
+  check(omittedHost:update(0.016, {
+    map = map, player = player, entities = { player }, neighbors = {},
+  }), label .. " snapshot dispatches")
+  equal(omittedCount, 0, label .. " descriptors are omitted")
+  equal(claimResult, nil, label .. " omitted IDs cannot be claimed")
+  contains(claimError, "unknown visual object id",
+    label .. " omitted claim fails closed")
+  for _, id in ipairs(omittedIds) do
+    check(not omittedHost:suppressesVisualObject(id),
+      label .. " omitted ID gains no owner")
+  end
+  local afterTerrain, _, afterVisuals = ChunkMesher.pair(map, false)
+  equal(afterTerrain, terrain, label .. " failed claim keeps original terrain")
+  equal(#(afterVisuals or {}), 0,
+    label .. " failed claim does not invent a replacement sidecar")
+  check(omittedHost:dispose(label .. "-dispose"), label .. " host disposes")
+end
+
+checkOmittedTouchingMap(touchingMap("TOUCH_HORIZONTAL", true),
+  { { 0, 0 }, { 1, 0 } }, "horizontal-touch")
+checkOmittedTouchingMap(touchingMap("TOUCH_VERTICAL", false),
+  { { 0, 0 }, { 0, 1 } }, "vertical-touch")
+
+do
+  local originalAnalysis = Structures.forMap
+  Structures.forMap = function(map)
+    if map == current then error("synthetic annotation build failure", 0) end
+    return originalAnalysis(map)
+  end
+  local omittedCount, claimResult, claimError
+  local failedHost = VoxelCompanion.new({ mod = cleanMod() })
+  local handle
+  handle = assert(failedHost.provider.register({
+    api = 1,
+    id = "integration.annotation-failure",
+    requires = { "visual_object_overrides", "world_snapshot" },
+    worldChanged = function(snapshot)
+      omittedCount = #snapshot.visualObjects
+      claimResult, claimError = handle:claim_visual_objects({ currentId })
+    end,
+    render = { opaque_after_terrain = function() end },
+  }))
+  namespace.companion = failedHost
+  check(failedHost:start(), "annotation-failure host starts")
+  check(failedHost:update(0.016, {
+    map = current, player = player, entities = { player }, neighbors = {},
+  }), "annotation-failure snapshot dispatches")
+  equal(omittedCount, 0, "annotation failure omits the public descriptor")
+  equal(claimResult, nil, "annotation failure rejects the omitted ID")
+  contains(claimError, "unknown visual object id",
+    "annotation failure rejects ownership fail closed")
+  check(not failedHost:suppressesVisualObject(currentId),
+    "annotation failure creates no owner")
+  local terrain, _, visible, shadows = ChunkMesher.pair(current, false)
+  equal(terrain, beforeTerrain, "annotation failure keeps cached terrain")
+  equal(#(visible or {}), 1,
+    "annotation failure keeps the isolated original color visible")
+  equal(#(shadows or {}), 1,
+    "annotation failure keeps the isolated original shadow visible")
+  check(failedHost:dispose("annotation-failure-dispose"),
+    "annotation-failure host disposes")
+  Structures.forMap = originalAnalysis
+end
+
 print(("%d checks passed (visual-object cache transition integration)"):format(checks))
