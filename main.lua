@@ -126,7 +126,15 @@ V.companion = Companion
 -- engine's public per-frame hook to retry after the real overworld update and
 -- to observe later map/revision changes. This must not depend on a render
 -- pipeline being active: KFP can attach while Battle Art's voxel mode is off.
-CompanionLifecycle.install(mod, Companion)
+local uninstallCompanion = CompanionLifecycle.install(mod, Companion)
+
+-- `core.quit_to_launcher` is the engine's native mod-unload boundary. Retain
+-- the exact disposer returned above and run it before this loader is replaced,
+-- so claims, adapter GPU resources, and the update hook cannot survive unload.
+mod.hooks:wrap("core.quit_to_launcher", function(next)
+  uninstallCompanion()
+  return next()
+end)
 
 -- `mods.loaded` is the first point at which every content mod has finished
 -- patching the registries and the last point before a save can mutate live map
