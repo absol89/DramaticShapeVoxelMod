@@ -17,6 +17,10 @@
 - Frozen Voxel Companion API reference dispatcher: byte-exact SHA-256
   `6FDED9C804298AB064DB61B908382BE7C9A74AD29D611444C33E1BCC53A33D26`.
 
+`lib/VoxelCompanionAPI.lua` remains the exact frozen Git artifact. Battle Art's
+optional visual-object capability is implemented by `lib/VoxelVisualObjects.lua`
+and the adapter wrapper in `lib/VoxelCompanion.lua`.
+
 The integration does not change the upstream mod identifier, manifest version,
 load priority, permissions, conflicts, or package layout. The existing package
 scripts include all files under `lib`, so they include the adapter and vendored
@@ -61,9 +65,10 @@ The adapter uses only existing host-owned seams:
 6. `translucent_after_actors` runs after host actors, water, grass, and flowers
    and before the scene resolves.
 
-The adapter does not enter `ShadowMap` or `BattleScene`. It does not replace or
-mutate base terrain. The optional visual-object contract can suppress only the
-annotated visual quads of a claimed signpost.
+The adapter does not add a companion shadow or battle callback. It does not
+mutate map, game, collision, or interaction data. The terrain cache routes only
+annotated sign quads into small host-owned sidecars. The existing terrain and
+shadow passes draw those sidecars.
 
 ## World snapshot
 
@@ -80,7 +85,9 @@ Hard limits are:
 - 8 neighbors
 - 4,096 visual objects or claims
 
-The public facade returns defensive plain-data copies. Snapshot construction is
+The public facade returns defensive plain-data copies. Each companion callback
+gets its own copied visual descriptors, so nested writes by one companion cannot
+change a later callback or the host catalog. Snapshot construction is
 protected by one outer fault boundary. It does not use a protected call for
 each cell query. This keeps map-change work bounded without adding several
 protected calls per cell. Player movement does not rebuild the full map.
@@ -136,21 +143,28 @@ connection offset. First-person and third-person use the same descriptor and
 the same opaque render seam.
 
 IDs contain safe ASCII only and are stable for host, kind, map, and cell. The
-host accepts claims only for IDs in the current copied catalog. Duplicate,
-unknown, malformed, or render-ineligible claims clear that extension's claims.
-If two live extensions request one ID, the object has no owner until the
-conflict is removed. Thus a conflict keeps the original visible instead of
-selecting a registration-order winner. Other non-conflicting objects keep their
+host accepts claims only for IDs in the current copied catalog. Every claim call
+is transactional. A duplicate, unknown, malformed, render-ineligible, or
+conflicting call changes no accepted claim and no current or future owner. A
+rejected contender is never pending. Other non-conflicting objects keep their
 unique owners.
 
-Only a uniquely owned signpost's annotated visual quads are omitted. Ground,
-collision, interaction, map and game data, actors, and unrelated snapshot data
-do not change. Active overrides bypass persistent terrain records. Ownership
-changes refresh only the named map's full and body terrain slots; auxiliary
-grass, flowers, figures, structure analysis, and canonical disk records stay
-intact. Invalidate, fault cleanup, handle disposal, host disposal, or unload
-removes only the affected extension's claims. Existing lifecycle cleanup still
-owns extension resources, and repeated cleanup is safe.
+Only a uniquely owned signpost's color sidecar is omitted. Ground, collision,
+interaction, map and game data, actors, and unrelated snapshot data do not
+change. Full and body terrain variants cache the base terrain and their matching
+per-object sidecars together. An ownership change selects the ready sidecar in
+the same update; it does not rebuild terrain, blank unrelated geometry, or wait
+for a later pump. Annotated maps bypass older persistent terrain records because
+those records contain the sign quads. Auxiliary grass, flowers, figures, and
+structure analysis stay intact. Invalidate, fault cleanup, handle disposal,
+host disposal, or unload removes only the affected extension's claims. Existing
+lifecycle cleanup still owns extension resources, and repeated cleanup is safe.
+
+The public provider does not advertise `shadow_pass`. Therefore, a replacement
+cannot submit its own caster. While a claim is active, the original sign sidecar
+continues in the existing host shadow pass but is omitted from the color pass.
+This preserves the advertised `castsShadow = true` behavior without a new public
+shadow API. The descriptor's shadow flag describes this retained host caster.
 
 ### Semantic density-tag contract
 
@@ -343,24 +357,26 @@ rejection, and bounded mountain seed, support, roof, door, and connection
 policies.
 
 The focused checks also cover stable signpost IDs and transforms, current and
-neighbor mapping, defensive descriptor copies, same-transform replacement,
-first-person and third-person integration, original-quad suppression,
-malformed and unknown claims, duplicate and conflicting ownership, and
-invalidate/dispose restoration.
+neighbor mapping, two-companion nested mutation isolation, same-transform
+replacement, first-person and third-person integration, transactional malformed,
+unknown, duplicate, and conflicting claims, and invalidate/dispose restoration.
+The ROM-free integration test uses a sign annotated by `Structures`, builds and
+reads real full/body `ChunkMesher` cache variants, checks immediate ownership
+transitions without a pump, and verifies the retained shadow caster.
 
-The canonical KFP dispatcher conformance command is:
+The upstream KFP dispatcher conformance command is:
 
 ```text
 luajit tools\run_tests.lua companion
 ```
 
-At integration time, the lifecycle test passed 11 checks, the focused host
-test passed 2,706 checks, the visual-object terrain filter passed 7 checks,
-the canonical
-companion selector passed 54 tests, and the complete KFP suite passed 227
-tests. The complete 23-command ROM-free draw fixture has canonical LF SHA-256
+In this repository, the lifecycle test passes 11 checks, the focused host test
+passes 2,712 checks, and the ROM-free cache-transition integration test passes
+1,156 checks. The `tools/run_tests.lua` selector is not present here, so no KFP
+selector or complete KFP-suite result is claimed for this change. The complete
+23-command ROM-free draw fixture keeps canonical LF SHA-256
 `DE1DCA98A04AD9446B0AF4C13523DAB7F365BC7A76E70BC44B24F323D98A9BFA`.
-All changed Lua files also compiled with LuaJIT. The large upstream
+The changed Lua files compile with LuaJIT. The large upstream
 `tests/battle_art_voxel_fork_test.lua` cannot compile as one LuaJIT chunk
 because its main function already exceeds LuaJIT's 200-local limit. This is an
 upstream test-harness limit, not a companion adapter failure.

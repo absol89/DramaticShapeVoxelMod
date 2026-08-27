@@ -8,6 +8,7 @@
 local V = ...
 
 local API = V.require("VoxelCompanionAPI")
+local VisualObjects = V.require("VoxelVisualObjects")
 local Mat4 = V.require("Mat4")
 local TileShape = V.require("TileShape")
 local ChunkMesher = V.require("ChunkMesher")
@@ -26,6 +27,14 @@ local CAPABILITIES = {
   "quality_tier",
   "integrity_status",
   "visual_object_overrides",
+}
+
+local DISPATCH_CAPABILITIES = {
+  "world_snapshot",
+  "camera_delta",
+  "render_phases",
+  "quality_tier",
+  "integrity_status",
 }
 
 local WORLD_PHASES = {
@@ -1163,7 +1172,7 @@ local function appendVisualObjects(map, role, offsetX, offsetZ, byId, counts, sc
       if class == "signpost" then
         scan.count = scan.count + 1
         if scan.count > MAX_VISUAL_OBJECTS then return end
-        local id = API.visual_object_id("BATTLE_ART_VOXEL_FORK",
+        local id = VisualObjects.id("BATTLE_ART_VOXEL_FORK",
           "signpost", map.id, x, z)
         if id then
           counts[id] = (counts[id] or 0) + 1
@@ -1553,6 +1562,8 @@ local function updateFrame(self, dt)
   }
 end
 
+local hasOpaqueHandler, wrapSpec, VisualHandle
+
 function VoxelCompanion.new(options)
   options = options or {}
   local mod = options.mod or V.mod
@@ -1585,7 +1596,26 @@ function VoxelCompanion.new(options)
     frameIndex = 0,
     nextSnapshotAttempt = 0,
     lastSnapshotError = nil,
+    callbackDepth = 0,
+    callbackRecord = nil,
+    callbackStage = nil,
+    visualSources = {},
   }, VoxelCompanion)
+
+  self.visuals = VisualObjects.new({
+    claimAllowed = function(record)
+      local status = record.raw and record.raw:status() or nil
+      if not status or status.state == "disposed" or status.faulted then
+        return nil, "extension cannot claim visual objects in its current state"
+      end
+      if self.callbackDepth > 0
+          and not (self.callbackRecord == record
+            and self.callbackStage == "map_changed") then
+        return nil, "visual object claims are allowed only outside dispatch or during the owner's worldChanged callback"
+      end
+      return true
+    end,
+  })
 
   self.draw = makeDrawFacade(self)
   self.materials = {
@@ -1618,7 +1648,7 @@ function VoxelCompanion.new(options)
   self.dispatcher = API.new({
     host_id = "BATTLE_ART_VOXEL_FORK",
     host_version = "1.9.7",
-    capabilities = CAPABILITIES,
+    capabilities = DISPATCH_CAPABILITIES,
     max_extensions = 32,
     max_errors = 64,
     logger = function(event)
@@ -1626,17 +1656,11 @@ function VoxelCompanion.new(options)
       rememberDiagnostic(self, message)
       loggerCall(mod, "error", "Voxel Companion: " .. tostring(message))
     end,
-    visual_objects_changed = function(mapIds)
-      for _, mapId in ipairs(mapIds or {}) do
-        if type(ChunkMesher.refreshVisualObjects) == "function" then
-          ChunkMesher.refreshVisualObjects(mapId)
-        end
-      end
-    end,
   })
 
   local raw = self.dispatcher:provider()
   self.provider = raw
+  raw.capabilities.visual_object_overrides = 1
   local register = raw.register
   raw.register = function(spec)
     self.integrity = scanIntegrity(mod)
@@ -1657,9 +1681,21 @@ function VoxelCompanion.new(options)
         or (type(render) == "table" and render.battle_opaque ~= nil) then
       return nil, "battle_opaque requires unavailable battle_pass capability"
     end
-    -- Use the reference provider closure. It joins an already-running host
-    -- with the dispatcher's retained activation context.
-    return register(spec)
+    local existing = type(spec) == "table" and self.visualSources[spec] or nil
+    if existing and existing.raw:status().state ~= "disposed" then return existing end
+    local id = type(spec) == "table" and spec.id or nil
+    local record = self.visuals:addRecord(id, hasOpaqueHandler(spec))
+    local wrapped = wrapSpec(self, spec, record)
+    -- Use the byte-frozen reference provider closure. The wrapper removes only
+    -- this host extension's capability token and adds the optional claim method
+    -- to the returned handle.
+    local rawHandle, err = register(wrapped)
+    if not rawHandle then self.visuals:remove(record); return nil, err end
+    record.raw = rawHandle
+    local handle = setmetatable({ host = self, raw = rawHandle, record = record },
+      VisualHandle)
+    self.visualSources[spec] = handle
+    return handle
   end
   return self
 end
@@ -1732,7 +1768,7 @@ function VoxelCompanion:update(dt, state)
       and self.clock >= self.nextSnapshotAttempt then
     local snapshot, snapshotError = self.world.snapshot()
     if snapshot then
-      local cataloged, catalogError = self.dispatcher:set_visual_objects(
+      local cataloged, catalogError = self.visuals:setCatalog(
         snapshot.visualObjects or {})
       if cataloged then
         local report, dispatchError = self.dispatcher:world_changed(snapshot)
@@ -1777,13 +1813,190 @@ function VoxelCompanion:cameraDelta(state)
   return delta
 end
 
-function VoxelCompanion:suppressesVisualObject(id)
-  return self.started and self.dispatcher:is_visual_object_suppressed(id) or false
+local function pack(...)
+  return { n = select("#", ...), ... }
 end
 
-function VoxelCompanion:hasVisualObjectOverrides(mapId)
-  return self.started
-    and self.dispatcher:visual_object_overrides_active(mapId) or false
+local unpackValues = table.unpack or unpack
+
+local function callExtension(self, record, stage, handler, ...)
+  local previousRecord, previousStage = self.callbackRecord, self.callbackStage
+  local previousDepth = self.callbackDepth or 0
+  self.callbackRecord, self.callbackStage = record, stage
+  self.callbackDepth = previousDepth + 1
+  local args = pack(...)
+  local ok, result = xpcall(function()
+    return pack(handler(unpackValues(args, 1, args.n)))
+  end, function(problem) return problem end)
+  self.callbackRecord, self.callbackStage = previousRecord, previousStage
+  self.callbackDepth = previousDepth
+  if not ok then error(result, 0) end
+  return unpackValues(result, 1, result.n)
+end
+
+local function copyTable(source)
+  local out = {}
+  for key, value in pairs(source or {}) do out[key] = value end
+  return out
+end
+
+local function defensiveSnapshot(source)
+  local plain = {}
+  for _, key in ipairs({
+    "id", "revision", "game", "width", "height", "cellSize",
+    "paletteRevision", "tilesetRevision", "atlasRevision", "mode", "tags",
+    "player", "actors", "neighbors", "visualObjects", "cells", "time",
+    "weather",
+  }) do
+    plain[key] = source[key]
+  end
+  return copySnapshot(plain)
+end
+
+local function filterVisualCapability(source)
+  if type(source) ~= "table" then return source end
+  local out, write = {}, 0
+  for index = 1, #source do
+    if source[index] ~= "visual_object_overrides" then
+      write = write + 1
+      out[write] = source[index]
+    end
+  end
+  for key, value in pairs(source) do
+    if type(key) ~= "number" or key < 1 or key > #source
+        or key ~= math.floor(key) then
+      out[key] = value
+    end
+  end
+  return out
+end
+
+hasOpaqueHandler = function(spec)
+  return type(spec) == "table"
+    and ((type(spec.render) == "table"
+          and type(spec.render.opaque_after_terrain) == "function")
+      or (type(spec.phases) == "table"
+          and type(spec.phases.opaque_after_terrain) == "function"))
+end
+
+local function wrapCallbackTable(self, record, source, prefix, snapshotPhase)
+  if type(source) ~= "table" then return source end
+  local out = copyTable(source)
+  for name, handler in pairs(source) do
+    if type(handler) == "function" then
+      local callbackName, callback = name, handler
+      out[callbackName] = function(...)
+        local args = pack(...)
+        if snapshotPhase and callbackName == "map_changed" then
+          local snapshot, err = defensiveSnapshot(args[1])
+          if not snapshot then error(err or "could not copy visual snapshot", 0) end
+          args[1] = snapshot
+        end
+        return callExtension(self, record, prefix .. "." .. callbackName, callback,
+          unpackValues(args, 1, args.n))
+      end
+    end
+  end
+  return out
+end
+
+wrapSpec = function(self, spec, record)
+  if type(spec) ~= "table" then return spec end
+  local out = copyTable(spec)
+  out.requires = filterVisualCapability(spec.requires)
+  out.optional = filterVisualCapability(spec.optional)
+  out.lifecycle = wrapCallbackTable(self, record, spec.lifecycle, "lifecycle")
+  out.phases = wrapCallbackTable(self, record, spec.phases, "phases", true)
+  out.render = wrapCallbackTable(self, record, spec.render, "render")
+
+  for _, name in ipairs({ "attach", "update", "modifyCamera", "terrainPatch",
+                           "invalidate", "dispose" }) do
+    local handler = spec[name]
+    if type(handler) == "function" then
+      local callbackName, callback = name, handler
+      out[callbackName] = function(...)
+        if callbackName == "invalidate" or callbackName == "dispose" then
+          self.visuals:clear(record)
+        end
+        return callExtension(self, record, callbackName, callback, ...)
+      end
+    end
+  end
+  if type(spec.worldChanged) == "function" then
+    local handler = spec.worldChanged
+    out.worldChanged = function(snapshot, ...)
+      local defensive, err = defensiveSnapshot(snapshot)
+      if not defensive then error(err or "could not copy visual snapshot", 0) end
+      return callExtension(self, record, "map_changed", handler, defensive, ...)
+    end
+  end
+  if type(spec.camera) == "function" then
+    local handler = spec.camera
+    out.camera = function(...)
+      return callExtension(self, record, "camera", handler, ...)
+    end
+  end
+  if type(spec.terrain) == "function" then
+    local handler = spec.terrain
+    out.terrain = function(...)
+      return callExtension(self, record, "terrain", handler, ...)
+    end
+  end
+
+  local hasDispose = type(spec.dispose) == "function"
+    or (type(spec.lifecycle) == "table"
+        and type(spec.lifecycle.dispose) == "function")
+  if not hasDispose then
+    out.lifecycle = out.lifecycle or {}
+    out.lifecycle.dispose = function()
+      self.visuals:clear(record)
+    end
+  elseif type(spec.lifecycle) == "table"
+      and type(spec.lifecycle.dispose) == "function" then
+    local handler = spec.lifecycle.dispose
+    out.lifecycle.dispose = function(...)
+      self.visuals:clear(record)
+      return callExtension(self, record, "lifecycle.dispose", handler, ...)
+    end
+  end
+  return out
+end
+
+VisualHandle = {}
+VisualHandle.__index = VisualHandle
+
+function VisualHandle:id()
+  return self.raw:id()
+end
+
+function VisualHandle:is_active()
+  return self.raw:is_active()
+end
+
+function VisualHandle:status()
+  local status = self.raw:status()
+  status.visualClaims = self.host.visuals:status(self.record).visualClaims
+  return status
+end
+
+function VisualHandle:claim_visual_objects(ids)
+  return self.host.visuals:claim(self.record, ids)
+end
+
+function VisualHandle:invalidate(context, reason)
+  local ok, err = self.raw:invalidate(context, reason)
+  if ok then self.host.visuals:clear(self.record) end
+  return ok, err
+end
+
+function VisualHandle:dispose(context, reason)
+  local ok, err = self.raw:dispose(context, reason)
+  if ok then self.host.visuals:remove(self.record) end
+  return ok, err
+end
+
+function VoxelCompanion:suppressesVisualObject(id)
+  return self.started and self.visuals:isSuppressed(id) or false
 end
 
 function VoxelCompanion:render(phase, state)
@@ -1810,6 +2023,7 @@ end
 
 function VoxelCompanion:invalidate(reason)
   self:worldChanged(reason or "host_invalidated")
+  self.visuals:clearAll()
   for key, mesh in pairs(self.meshes) do
     if mesh and mesh.release then pcall(mesh.release, mesh) end
     self.meshes[key] = nil
@@ -1832,6 +2046,8 @@ function VoxelCompanion:dispose(reason)
   if self.started then
     result, err = self.dispatcher:dispose(self:_context(), reason or "host_dispose")
   end
+  self.visuals:dispose()
+  self.visualSources = {}
   self.started = false
   self.attached = false
   self.startContext = nil
@@ -1848,6 +2064,12 @@ end
 
 function VoxelCompanion:status()
   local status = self.dispatcher:status()
+  local visualStatus = self.visuals:status()
+  status.capabilities[#status.capabilities + 1] = "visual_object_overrides"
+  table.sort(status.capabilities)
+  status.visualObjects = visualStatus.visualObjects
+  status.visualOverrides = visualStatus.visualOverrides
+  status.visualConflicts = visualStatus.visualConflicts
   status.integrity = copyIntegrity(self.integrity)
   status.revision = self.revision
   status.diagnostics = {}

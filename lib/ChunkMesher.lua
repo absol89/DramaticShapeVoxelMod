@@ -75,15 +75,6 @@ local function visualObjectVisible(id)
   return not (ok and suppressed == true)
 end
 
-local function visualOverridesActive(mapId)
-  local companion = V.companion
-  if not (companion and type(companion.hasVisualObjectOverrides) == "function") then
-    return false
-  end
-  local ok, active = pcall(companion.hasVisualObjectOverrides, companion, mapId)
-  return ok and active == true
-end
-
 -- Small host-test seam used by the ROM-free contract suite.
 ChunkMesher.visualObjectVisible = visualObjectVisible
 
@@ -406,7 +397,7 @@ end
 --
 -- Omitted, water stays in the terrain mesh exactly as it always did, which
 -- is what the headless geometry() below and the sun's own pass both want.
-local function runGeometry(map, bodyOnly, masks, sink, waterSink)
+local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local push = sink.push
   local waterPush = waterSink and waterSink.push or nil
   local tileset = map.tileset
@@ -890,10 +881,19 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
     -- the edge keep-rules entirely: its eave legitimately overhangs the
     -- boundary plane into the neighbour's airspace, and no variant of
     -- the neighbour will ever draw that geometry
-    if visualObjectVisible(q.visualObjectId)
-       and (q.own or outwardOnEdge(q, x0, z0, x1, z1)
-            or keepQuad(x0, z0, x1, z1)) then
-      push({ q[1], q[2], q[3], q[4] }, quadUV(q), groundShades(q, q.shade))
+    if q.own or outwardOnEdge(q, x0, z0, x1, z1)
+        or keepQuad(x0, z0, x1, z1) then
+      local target = push
+      if q.visualObjectId and visualSinks then
+        local visualSink = visualSinks[q.visualObjectId]
+        if not visualSink then
+          visualSink = newSink()
+          visualSinks[q.visualObjectId] = visualSink
+        end
+        target = visualSink.push
+      end
+      target({ q[1], q[2], q[3], q[4] }, quadUV(q),
+        groundShades(q, q.shade))
     end
   end
 
@@ -982,11 +982,20 @@ end
 -- terrain one -- the shape the reflective pass needs (see Water). Without
 -- it the water is inside the terrain mesh, which is the historical
 -- contract and what every other caller still wants.
-function ChunkMesher.build(map, bodyOnly, masks, split)
+function ChunkMesher.build(map, bodyOnly, masks, split, separateVisuals)
   local sink = newSink()
   local waterSink = split and newSink() or nil
-  runGeometry(map, bodyOnly, masks, sink, waterSink)
-  return sink.finish(), waterSink and waterSink.finish() or nil
+  local visualSinks = separateVisuals and {} or nil
+  runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
+  local visuals = nil
+  if visualSinks then
+    visuals = {}
+    for id, visualSink in pairs(visualSinks) do
+      local mesh = visualSink.finish()
+      if mesh then visuals[id] = mesh end
+    end
+  end
+  return sink.finish(), waterSink and waterSink.finish() or nil, visuals
 end
 
 local function quadsMesh(quads)
@@ -1148,6 +1157,29 @@ local function swapSlot(c, slot, mesh)
   c[slot] = mesh
 end
 
+local function releaseVisualMeshes(list)
+  for _, mesh in pairs(type(list) == "table" and list or {}) do
+    if mesh and mesh.release then pcall(mesh.release, mesh) end
+  end
+end
+
+local function visualSlot(slot)
+  return slot .. "Visuals"
+end
+
+local function swapVisualSlot(c, slot, visuals)
+  local name = visualSlot(slot)
+  if c[name] ~= visuals then releaseVisualMeshes(c[name]) end
+  c[name] = visuals
+end
+
+local function mapHasVisualObjects(map)
+  for _, quad in ipairs(Structures.forMap(map).objectQuads or {}) do
+    if quad.visualObjectId then return true end
+  end
+  return false
+end
+
 -- ------------------------------------------------------------- the cache
 
 local function entry(id)
@@ -1174,6 +1206,9 @@ local function releaseEntry(c)
     if mesh and mesh.release then pcall(mesh.release, mesh) end
     c[slot] = nil
   end
+  releaseVisualMeshes(c.fullVisuals)
+  releaseVisualMeshes(c.bodyVisuals)
+  c.fullVisuals, c.bodyVisuals = nil, nil
   releaseFigures(c.figures)
   c.figures = nil
   c.stale = nil
@@ -1261,27 +1296,38 @@ local function runJob(job)
     if c.stale then c.stale.aux = nil end
   end
 
-  local mesh, water
-  -- Suppressed visual objects are session ownership state. Do not load or
-  -- write a persistent terrain record whose geometry would outlive that lease.
-  local volatileVisuals = visualOverridesActive(map.id)
-  local cached = not volatileVisuals
+  local mesh, water, visualMeshes
+  -- Annotated originals are small session meshes beside the canonical terrain.
+  -- Older persistent terrain records contain those quads, so annotated maps do
+  -- not read or write that record. Other maps keep the existing disk cache.
+  local annotatedVisuals = mapHasVisualObjects(map)
+  local cached = not annotatedVisuals
     and MeshDisk.loadTerrain(map, job.slot, job.masks) or nil
   if cached then
     mesh = meshFromRaw(cached.terrain)
     water = meshFromRaw(cached.water)
   else
     local sink, waterSink = newSink(), newSink()
-    runGeometry(map, job.slot == "body", job.masks, sink, waterSink)
+    local visualSinks = annotatedVisuals and {} or nil
+    runGeometry(map, job.slot == "body", job.masks, sink, waterSink,
+      visualSinks)
     local terrainRaw = sink.raw and sink.raw() or nil
     local waterRaw = waterSink.raw and waterSink.raw() or nil
     mesh, water = sink.finish(), waterSink.finish()
+    if visualSinks then
+      visualMeshes = {}
+      for id, visualSink in pairs(visualSinks) do
+        local visualMesh = visualSink.finish()
+        if visualMesh then visualMeshes[id] = visualMesh end
+      end
+    end
     if not current() then
       if mesh and mesh.release then pcall(mesh.release, mesh) end
       if water and water.release then pcall(water.release, water) end
+      releaseVisualMeshes(visualMeshes)
       return
     end
-    if terrainRaw and waterRaw and not volatileVisuals then
+    if terrainRaw and waterRaw and not annotatedVisuals then
       local savedTerrain, terrainError =
         MeshDisk.saveTerrain(map, job.slot, job.masks, terrainRaw, waterRaw)
       if not savedTerrain then
@@ -1293,10 +1339,12 @@ local function runJob(job)
   if not current() then
     if mesh and mesh.release then pcall(mesh.release, mesh) end
     if water and water.release then pcall(water.release, water) end
+    releaseVisualMeshes(visualMeshes)
     return
   end
   swapSlot(c, job.slot, mesh or false)
   swapSlot(c, waterSlot(job.slot), water or false)
+  swapVisualSlot(c, job.slot, visualMeshes)
   if c.stale then
     c.stale[job.slot] = nil
     if not (c.stale.full or c.stale.body or c.stale.aux) then
@@ -1458,14 +1506,15 @@ function ChunkMesher.get(map, bodyOnly, masks)
     if c.stale then c.stale.aux = nil end
   end
   if c[slot] == nil or (c.stale and c.stale[slot]) then
-    local ok, mesh, water = pcall(ChunkMesher.build, map, bodyOnly, masks,
-                                  true)
+    local ok, mesh, water, visuals = pcall(ChunkMesher.build, map, bodyOnly,
+      masks, true, mapHasVisualObjects(map))
     if not ok then
       print("[warn] voxel mesh build failed for " .. tostring(map.id)
             .. ": " .. tostring(mesh))
     end
     swapSlot(c, slot, (ok and mesh) or false)
     swapSlot(c, waterSlot(slot), (ok and water) or false)
+    swapVisualSlot(c, slot, (ok and visuals) or nil)
     if c.stale then
       c.stale[slot] = nil
       if not (c.stale.full or c.stale.body or c.stale.aux) then
@@ -1498,7 +1547,20 @@ function ChunkMesher.pair(map, bodyOnly)
   local c = cache[map.id]
   if not c then return nil, nil end
   local slot = bodyOnly and "body" or "full"
-  return c[slot] or nil, c[waterSlot(slot)] or nil
+  local list = c[visualSlot(slot)]
+  local visible, shadow = nil, nil
+  if type(list) == "table" then
+    local ids = {}
+    for id in pairs(list) do ids[#ids + 1] = id end
+    table.sort(ids)
+    visible, shadow = {}, {}
+    for _, id in ipairs(ids) do
+      local record = { id = id, mesh = list[id] }
+      shadow[#shadow + 1] = record
+      if visualObjectVisible(id) then visible[#visible + 1] = record end
+    end
+  end
+  return c[slot] or nil, c[waterSlot(slot)] or nil, visible, shadow
 end
 
 function ChunkMesher.grass(map)
@@ -1549,28 +1611,6 @@ function ChunkMesher.refresh(mapId)
   c.stale = { aux = true,
               full = (c.full ~= nil) or nil,
               body = (c.body ~= nil) or nil }
-end
-
--- Rebuild only terrain slots whose object-quads can change when a public
--- visual-object lease starts or ends. Grass, flowers, figures, water facts,
--- structure analysis, map data, and the persistent canonical cache are intact.
-function ChunkMesher.refreshVisualObjects(mapId)
-  if type(mapId) ~= "string" or mapId == "" then return false end
-  gen[mapId] = (gen[mapId] or 0) + 1
-  for i = #jobs, 1, -1 do
-    local job = jobs[i]
-    if job.id == mapId then
-      jobIndex[jobKey(job.id, job.slot)] = nil
-      table.remove(jobs, i)
-    end
-  end
-  local c = cache[mapId]
-  if c then
-    c.stale = c.stale or {}
-    c.stale.full = (c.full ~= nil) or nil
-    c.stale.body = (c.body ~= nil) or nil
-  end
-  return true
 end
 
 -- Evict everything outside `live` (a set of map ids): far maps' meshes

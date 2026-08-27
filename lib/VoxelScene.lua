@@ -407,7 +407,7 @@ end
 -- update + render). Keep stable masks/live metadata and reuse the output arrays.
 local neighborhood = { map = nil, count = 0, rows = {} }
 local cachedMasks = {}
-local nbMeshBuf, nbWaterBuf = {}, {}
+local nbMeshBuf, nbWaterBuf, nbVisualShadowBuf = {}, {}, {}
 local lastCompleteCanvas, lastCompleteW, lastCompleteH = nil, 0, 0
 local lastCompleteMapId = nil
 
@@ -486,9 +486,9 @@ function VoxelScene.prefetch(state)
   -- cut out of that build's own geometry (ChunkMesher.pair), so the two
   -- always come from the same slot and a lake is never drawn twice or left
   -- as a hole.
-  local terrain, water = ChunkMesher.pair(state.map, false)
+  local terrain, water, _, visualShadows = ChunkMesher.pair(state.map, false)
   if not terrain then
-    terrain, water = ChunkMesher.pair(state.map, true)
+    terrain, water, _, visualShadows = ChunkMesher.pair(state.map, true)
   end
   -- A cold WARP destination has never been a connected neighbour, so it has
   -- no body slot waiting for it. Queue that smaller useful-first mesh before
@@ -503,20 +503,25 @@ function VoxelScene.prefetch(state)
   for i, nb in ipairs(nbs) do
     if RenderDistance.neighbor(nb, state.player) then
       ChunkMesher.request(nb.map, true)
-      nbMeshBuf[i], nbWaterBuf[i] = ChunkMesher.pair(nb.map, true)
+      nbMeshBuf[i], nbWaterBuf[i], _, nbVisualShadowBuf[i] =
+        ChunkMesher.pair(nb.map, true)
       if not nbMeshBuf[i] then
-        nbMeshBuf[i], nbWaterBuf[i] = ChunkMesher.pair(nb.map, false)
+        nbMeshBuf[i], nbWaterBuf[i], _, nbVisualShadowBuf[i] =
+          ChunkMesher.pair(nb.map, false)
       end
     else
       nbMeshBuf[i], nbWaterBuf[i] = nil, nil
+      nbVisualShadowBuf[i] = nil
     end
     -- if not nbMeshBuf[i] then ready = false end
   end
   for i = #nbs + 1, #nbMeshBuf do
     nbMeshBuf[i], nbWaterBuf[i] = nil, nil
+    nbVisualShadowBuf[i] = nil
   end
   Voxel.ready = ready
-  return terrain, nbMeshBuf, water, nbWaterBuf, ready
+  return terrain, nbMeshBuf, water, nbWaterBuf, ready,
+    visualShadows, nbVisualShadowBuf
 end
 
 local function heldFrame(w, h, mapId)
@@ -878,8 +883,8 @@ end
 
 -- The sun pass: render the scene once from the light, so the main pass can
 -- ask any fragment whether the sun reached it. Every caster the main pass
--- draws goes in -- the terrain mesh, which is where buildings, trees,
--- ledges, signs and every prop live, plus one UPRIGHT card per character
+-- draws goes in -- the terrain mesh, its sign sidecars, and one UPRIGHT card
+-- per character
 -- (Voxel3D.casterMatrix; the leaning slab is a trick for the camera, not
 -- for the sun) -- so shadows land on walls, roofs, ledges and passing NPCs
 -- as readily as on the floor.
@@ -888,17 +893,25 @@ end
 -- left out on purpose: thousands of tufts would cast a speckle no bigger
 -- than the pixels it lands on, at the cost of the mesh being drawn twice.
 local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
-                           atlasFor, water, nbWater)
+                           atlasFor, water, nbWater, visualShadows,
+                           nbVisualShadows)
   if not ShadowMap.available() then return end
   local sig = shadowSignature(state, terrain, nbMesh, posed, cx, cy, vw, vh)
   if not ShadowMap.stale(sig) then return end
   if not ShadowMap.begin(cx, cy, vw, vh) then return end
 
   ShadowMap.draw(terrain, atlasFor(state.map), nil)
+  for _, visual in ipairs(visualShadows or {}) do
+    ShadowMap.draw(visual.mesh, atlasFor(state.map), nil)
+  end
   for i, nb in ipairs(state.neighbors or {}) do
     if RenderDistance.neighbor(nb, state.player) then
       ShadowMap.draw(nbMesh[i], atlasFor(nb.map),
                      Mat4.translate(nb.ox, 0, nb.oy))
+      for _, visual in ipairs((nbVisualShadows and nbVisualShadows[i]) or {}) do
+        ShadowMap.draw(visual.mesh, atlasFor(nb.map),
+                       Mat4.translate(nb.ox, 0, nb.oy))
+      end
     end
   end
   -- The water surface, which the terrain mesh no longer carries (it is its
@@ -988,7 +1001,8 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- still falls back to the engine's 2D path; an in-flight healthy build stays
   -- black so flat tiles are never exposed immediately before the voxels land.
   -- Voxel.ready also holds the camera tween at flat until terrain exists.
-  local terrain, nbMesh, water, nbWater, neighborhoodReady =
+  local terrain, nbMesh, water, nbWater, neighborhoodReady,
+    visualShadows, nbVisualShadows =
     VoxelScene.prefetch(state)
   if not neighborhoodReady then
     -- The FULL mesh already suppresses its ring beneath every connected map.
@@ -1093,7 +1107,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
 
   local shCx, shCy = FirstPerson.shadowCenter(cx, cy, vh)
   castShadows(state, terrain, nbMesh, posed, shCx, shCy, vw, vh, atlasFor,
-              water, nbWater)
+              water, nbWater, visualShadows, nbVisualShadows)
 
   if not Voxel3D.beginScene(w, h, cx, cy, vw, vh, skyFor(state.map)) then
     Voxel3D.setCompanionCameraDelta(nil)
@@ -1112,10 +1126,26 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- Drawn before terrain, depth alone decides where it remains visible.
   WorldUnderlay.draw(state, cx, cy, underlayColor)
   Voxel3D.draw(terrain, atlasFor(state.map), nil)
+  local drawnVisuals, drawnNeighborVisuals = {}, {}
+  for _, visual in ipairs(visualShadows or {}) do
+    if ChunkMesher.visualObjectVisible(visual.id) then
+      Voxel3D.draw(visual.mesh, atlasFor(state.map), nil)
+      drawnVisuals[visual.id] = true
+    end
+  end
   for i, nb in ipairs(state.neighbors or {}) do
     if RenderDistance.neighbor(nb, state.player) then
       Voxel3D.draw(nbMesh[i], atlasFor(nb.map),
                    Mat4.translate(nb.ox, 0, nb.oy))
+      local drawn = {}
+      drawnNeighborVisuals[i] = drawn
+      for _, visual in ipairs((nbVisualShadows and nbVisualShadows[i]) or {}) do
+        if ChunkMesher.visualObjectVisible(visual.id) then
+          Voxel3D.draw(visual.mesh, atlasFor(nb.map),
+                       Mat4.translate(nb.ox, 0, nb.oy))
+          drawn[visual.id] = true
+        end
+      end
     end
   end
 
@@ -1128,6 +1158,28 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- complete, while actors, water, and translucent work have not drawn.
   if companion and type(companion.render) == "function" then
     pcall(companion.render, companion, "opaque_after_terrain", state)
+  end
+
+  -- A render fault can dispose an owner inside the companion call above. The
+  -- ordinary terrain draw point has passed, so restore any newly released
+  -- original now instead of leaving a one-frame hole or waiting for a pump.
+  for _, visual in ipairs(visualShadows or {}) do
+    if not drawnVisuals[visual.id]
+        and ChunkMesher.visualObjectVisible(visual.id) then
+      Voxel3D.draw(visual.mesh, atlasFor(state.map), nil)
+    end
+  end
+  for i, nb in ipairs(state.neighbors or {}) do
+    if RenderDistance.neighbor(nb, state.player) then
+      local drawn = drawnNeighborVisuals[i] or {}
+      for _, visual in ipairs((nbVisualShadows and nbVisualShadows[i]) or {}) do
+        if not drawn[visual.id]
+            and ChunkMesher.visualObjectVisible(visual.id) then
+          Voxel3D.draw(visual.mesh, atlasFor(nb.map),
+                       Mat4.translate(nb.ox, 0, nb.oy))
+        end
+      end
+    end
   end
 
   -- Without a shadow map (headless, or a driver that could not make the

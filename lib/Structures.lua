@@ -49,7 +49,7 @@ local Map = require("src.world.Map")
 local Buildings = V.require("Buildings")
 local TileShape = V.require("TileShape")
 local Budget = V.require("BuildBudget")
-local CompanionAPI = V.require("VoxelCompanionAPI")
+local VisualObjects = V.require("VoxelVisualObjects")
 
 local Structures = {}
 
@@ -2730,7 +2730,7 @@ function Structures.buildObject(S, map, region, cluster,
     local cellX, cellZ = math.floor(cluster.minX / 2), math.floor(cluster.minY / 2)
     if math.floor(cluster.maxX / 2) == cellX
         and math.floor(cluster.maxY / 2) == cellZ then
-      visualObjectId = CompanionAPI.visual_object_id("BATTLE_ART_VOXEL_FORK",
+      visualObjectId = VisualObjects.id("BATTLE_ART_VOXEL_FORK",
         "signpost", map.id, cellX, cellZ)
     end
   end

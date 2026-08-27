@@ -40,6 +40,7 @@ end
 
 local API = assert(loadfile("lib/VoxelCompanionAPI.lua"))()
 equal(API.VERSION, 1, "vendored dispatcher reports API v1")
+local VisualObjects = assert(loadfile("lib/VoxelVisualObjects.lua"))()
 local DrawFixture = assert(loadfile("tests/fixtures/voxel_companion_draw_v1.lua"))()
 
 local function newRunningDispatcher()
@@ -227,13 +228,7 @@ local fakeMapModule = {
   isOutdoor = function() return true end,
 }
 
-local visualRefreshes = {}
-local fakeChunkMesher = {
-  refreshVisualObjects = function(mapId)
-    visualRefreshes[#visualRefreshes + 1] = mapId
-    return true
-  end,
-}
+local fakeChunkMesher = {}
 
 local fakeGame = { save = { version = "red" } }
 package.loaded["src.world.Map"] = fakeMapModule
@@ -257,6 +252,7 @@ end
 local function namespace(mod)
   local modules = {
     VoxelCompanionAPI = API,
+    VoxelVisualObjects = VisualObjects,
     Mat4 = fakeMat4,
     TileShape = fakeTileShape,
     ChunkMesher = fakeChunkMesher,
@@ -414,6 +410,50 @@ do
     entities = { player },
     neighbors = { { map = neighbor, ox = 64, oy = -32 } },
   }
+
+  local mutationHost = VoxelCompanion.new({ mod = cleanMod() })
+  local observedAfterMutation
+  assert(mutationHost.provider.register({
+    api = 1,
+    id = "test.visual-mutator",
+    priority = -10,
+    requires = { "world_snapshot" },
+    worldChanged = function(snapshot)
+      local descriptor = snapshot.visualObjects[1]
+      descriptor.id = "MUTATED"
+      descriptor.tags[1] = "mutated-tag"
+      descriptor.transform.worldPosition.x = 9999
+    end,
+  }))
+  assert(mutationHost.provider.register({
+    api = 1,
+    id = "test.visual-observer",
+    priority = 10,
+    requires = { "world_snapshot" },
+    worldChanged = function(snapshot)
+      local descriptor = snapshot.visualObjects[1]
+      observedAfterMutation = {
+        id = descriptor.id,
+        tag = descriptor.tags[1],
+        x = descriptor.transform.worldPosition.x,
+      }
+    end,
+  }))
+  check(mutationHost:start(), "two-companion mutation host starts")
+  check(mutationHost:update(0.016, visualState),
+    "two-companion mutation snapshot dispatches")
+  equal(observedAfterMutation.id,
+    "BATTLE_ART_VOXEL_FORK:signpost:PALLET_TOWN:1:0",
+    "one companion cannot mutate the next companion's visual ID")
+  equal(observedAfterMutation.tag, "host_geometry",
+    "one companion cannot mutate the next companion's visual tags")
+  equal(observedAfterMutation.x, 24,
+    "one companion cannot mutate the next companion's visual transform")
+  equal(mutationHost.world.snapshot().visualObjects[1].id,
+    "BATTLE_ART_VOXEL_FORK:signpost:PALLET_TOWN:1:0",
+    "companion mutation cannot change the host visual catalog")
+  check(mutationHost:dispose("two-companion-mutation-test"),
+    "two-companion mutation host disposes cleanly")
 
   local ambiguousCount
   local ambiguousHost = VoxelCompanion.new({ mod = cleanMod() })
@@ -575,19 +615,24 @@ do
   })
   equal(duplicateOk, nil, "duplicate claims fail closed")
   contains(duplicateError, "duplicate id", "duplicate claim explains the fault")
-  check(not host:suppressesVisualObject(currentObject.id)
-      and not host:suppressesVisualObject(neighborObject.id),
-    "a malformed replacement registration restores all originals for its owner")
+  check(host:suppressesVisualObject(currentObject.id)
+      and host:suppressesVisualObject(neighborObject.id),
+    "a rejected duplicate changes no accepted claim")
 
   local malformedOk, malformedError = handle:claim_visual_objects("not-an-array")
   equal(malformedOk, nil, "malformed claim registration fails closed")
   contains(malformedError, "must be an array",
     "malformed claim registration explains the array contract")
+  check(host:suppressesVisualObject(currentObject.id)
+      and host:suppressesVisualObject(neighborObject.id),
+    "a rejected malformed call changes no accepted claim")
 
   local invalidIdOk, invalidIdError = handle:claim_visual_objects({ "bad/id" })
   equal(invalidIdOk, nil, "malformed visual ID fails closed")
   contains(invalidIdError, "safe ASCII identifier characters",
     "malformed visual ID explains the safe-ID contract")
+  check(host:suppressesVisualObject(currentObject.id),
+    "a rejected unsafe ID changes no accepted claim")
 
   local noOpaque = assert(host.provider.register({
     api = 1, id = "test.visual-no-opaque", update = function() end,
@@ -596,15 +641,14 @@ do
   equal(noOpaqueOk, nil, "claim without the eligible render path fails closed")
   contains(noOpaqueError, "opaque_after_terrain",
     "missing render path reports the eligibility rule")
-  check(not host:suppressesVisualObject(currentObject.id),
-    "ineligible registration never hides the original")
+  check(host:suppressesVisualObject(currentObject.id),
+    "ineligible registration cannot change the accepted owner")
 
   local unknownOk, unknownError = handle:claim_visual_objects({ "UNKNOWN:visual:object" })
   equal(unknownOk, nil, "unknown visual ID fails closed")
   contains(unknownError, "unknown visual object id", "unknown claim is diagnostic")
-  check(not host:suppressesVisualObject(currentObject.id),
-    "unknown registration leaves the known original visible")
-  check(handle:claim_visual_objects(claimedIds), "valid claims can be restored")
+  check(host:suppressesVisualObject(currentObject.id),
+    "unknown registration leaves the accepted owner unchanged")
 
   local contender = assert(host.provider.register({
     api = 1,
@@ -614,18 +658,15 @@ do
   local conflictOk, conflictError = contender:claim_visual_objects({ currentObject.id })
   equal(conflictOk, nil, "conflicting owner fails closed")
   contains(conflictError, "ownership conflict", "conflict has a deterministic diagnostic")
-  check(not host:suppressesVisualObject(currentObject.id),
-    "conflicting ownership keeps the current original visible")
-  check(host:suppressesVisualObject(neighborObject.id),
-    "conflict invalidates only the contested visual object")
-  check(contender:dispose({}, "conflict-release"), "conflicting owner disposes")
   check(host:suppressesVisualObject(currentObject.id),
-    "removing the contender deterministically restores the unique owner")
-
+    "conflict rejection preserves the accepted owner")
+  check(host:suppressesVisualObject(neighborObject.id),
+    "conflict rejection preserves unrelated accepted ownership")
   check(handle:invalidate({}, "visual-invalidate"), "owner invalidation succeeds")
   check(not host:suppressesVisualObject(currentObject.id)
       and not host:suppressesVisualObject(neighborObject.id),
-    "owner invalidation restores current and neighbor originals")
+    "owner invalidation restores originals with no rejected pending owner")
+  check(contender:dispose({}, "conflict-release"), "rejected contender disposes")
   check(handle:invalidate({}, "visual-invalidate-repeat"),
     "repeated owner invalidation is safe")
   equal(invalidations, 2, "existing invalidation lifecycle remains authoritative")
@@ -636,8 +677,6 @@ do
   check(not host:suppressesVisualObject(currentObject.id)
       and not host:suppressesVisualObject(neighborObject.id),
     "owner disposal restores originals without touching another extension")
-  check(#visualRefreshes >= 2,
-    "ownership transitions invalidate only named visual-map terrain caches")
   check(host:dispose("visual-object-test"), "visual-object host disposes cleanly")
   fakeCameraMode = "first_person"
   pushCount, popCount = 0, 0
