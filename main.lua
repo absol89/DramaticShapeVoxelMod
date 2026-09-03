@@ -1285,7 +1285,9 @@ do
       local before = self:blockAt(bx, by)
       setBlock(self, bx, by, block)
       if self.id and self:blockAt(bx, by) ~= before then
-        ChunkMesher.refresh(self.id)
+        -- naming the block lets the mesher drop what stood there from the
+        -- mesh on screen, so a cut tree goes on this frame
+        ChunkMesher.refresh(self.id, bx, by, self, before)
         Companion:worldChanged("map.setBlock")
       end
     end
