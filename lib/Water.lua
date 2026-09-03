@@ -988,15 +988,36 @@ vec2 waveUV(vec2 tc, vec2 col) {
   return org + (mod(col, 8.0) + 0.5) * texel;
 }
 
-// The float parameters are pinned to mediump BECAUSE the stage default is
-// not: LOVE's own header forward-declares effect() under its default, and
-// at least one mobile compiler (Samsung's Xclipse, in so many words) holds
-// that a definition whose parameter precisions differ from its prototype's
-// is a second function of the same name, and refuses the pair. The params
-// can afford it -- the colour is a colour, and tc/sc arrived through
-// LOVE's mediump plumbing whatever this signature says -- and the maths
-// below runs on the stage default the moment the values touch a local.
-vec4 effect(mediump vec4 color, Image tex, mediump vec2 tc, mediump vec2 sc) {
+// The float parameters are pinned BECAUSE the stage default is not: LOVE's
+// own header forward-declares effect() under its default, and at least one
+// mobile compiler (Samsung's Xclipse, in so many words) holds that a
+// definition whose parameter precisions differ from its prototype's is a
+// second function of the same name, and refuses the pair. The params can
+// afford it -- the colour is a colour, and tc/sc arrived through LOVE's
+// mediump plumbing whatever this signature says -- and the maths below runs
+// on the stage default the moment the values touch a local.
+//
+// THE RETURN TYPE IS PINNED THE SAME WAY, and for a while it was not, which
+// is what put this whole pass on the flat fallback on Mali. The stage lifts
+// its float default to highp a few hundred lines up, so a bare return type
+// is a HIGHP one, against a prototype whose default return is mediump --
+// and Mali's compiler calls that what it is:
+//
+//   0:563: S0023: Function 'effect' redeclared with a different
+//   precision qualifier on the return type
+//
+// Matching the parameters is not enough on its own; the return has to agree
+// too. Read off a Pixel 9 (Mali-G715) in logcat, which is why it is quoted
+// rather than described.
+//
+// WHICH precision it must be is not ours to know, so it is a define the Lua
+// side fills in, and Water.shader compiles the pinned form first and the
+// bare one only if that is refused. LOVE 12 forward-declares effect() under
+// a different default, and pins that match 11's prototype are the mismatch
+// there -- the same refusal from the other side. Whichever prototype a
+// runtime brought, one of the two agrees with it.
+EFFECT_PREC vec4 effect(EFFECT_PREC vec4 color, Image tex, EFFECT_PREC vec2 tc,
+                        EFFECT_PREC vec2 sc) {
   // THE DEPTH TEST, done here because the buffer that would have done it is
   // detached for the length of this pass so it can be READ (see the header).
   // Same comparison, same buffer, same result: a building in front of a pond
@@ -1212,13 +1233,19 @@ end
 
 Water._trainSource = trainSource       -- named for the suite
 
-local function source(grid, skyOnly)
+-- `bare` leaves effect()'s precision qualifiers off entirely, for a runtime
+-- whose forward declaration of it carries no explicit precision. See the
+-- prototype's own comment: one of the two forms agrees with any given
+-- runtime, and which one is not knowable from here.
+local function source(grid, skyOnly, bare)
   local src = SHADER_SRC:gsub("//@CRATERS", (craterSource():gsub("%%", "%%%%")))
   src = src:gsub("//@TRAINS", (trainSource():gsub("%%", "%%%%")))
   local head = ("#define RAY_STEPS %d\n#define RAY_REFINE %d\n"
                 .. "#define WAVE_STEPS %d\n#define WAVE_STRIDE %.1f\n")
     :format(Water.RAY_STEPS, Water.RAY_REFINE, Water.WAVE_STEPS,
             Water.WAVE_STRIDE)
+  head = head .. (bare and "#define EFFECT_PREC\n"
+                        or "#define EFFECT_PREC mediump\n")
   if grid then head = head .. "#define VOXEL_GRID 1\n" end
   if skyOnly then head = head .. "#define SKY_ONLY 1\n" end
   return head .. src
@@ -1240,9 +1267,17 @@ function Water.shader(grid, skyOnly)
   local family = skyOnly and shaders.sky or shaders.full
   if family[grid] == nil then
     if not (love.graphics and love.graphics.newShader) then
-      shaders[grid] = false
+      family[grid] = false
     else
       local ok, sh = pcall(love.graphics.newShader, source(grid, skyOnly))
+      if not ok then
+        -- The pinned prototype was the wrong one for this runtime, and the
+        -- bare one is the only other shape there is. A driver that refuses
+        -- both was never going to draw this water anyway.
+        local bareOk, bareSh = pcall(love.graphics.newShader,
+                                     source(grid, skyOnly, true))
+        if bareOk then ok, sh = bareOk, bareSh end
+      end
       if not ok and V and V.mod and V.mod.log then
         -- once, where it can be read: the fallback is flat water, which is
         -- easy to look at and impossible to diagnose without this line
