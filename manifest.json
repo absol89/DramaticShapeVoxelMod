@@ -1,7 +1,7 @@
 {
   "id": "BATTLE_ART_VOXEL_FORK",
   "name": "BATTLE ART VOXEL FORK",
-  "version": "1.10.1",
+  "version": "1.10.2",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
