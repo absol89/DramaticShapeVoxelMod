@@ -318,6 +318,26 @@ local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
   -- are drawn below. That makes the contract symmetric: they neither receive
   -- somebody else's shadow nor cast/self-cast one of their own, independent
   -- of the selected arena fill.
+
+  -- Stadium model shadows (3D Pokemon models) -- always cast, even in flat fill
+  if type(models) == "table" and next(models) then
+    ShadowMap.sprites(true)
+    for side, placement in pairs(models) do
+      local ok, result = pcall(function()
+        if placement.instance and placement.instance.drawShadow then
+          return placement.instance:drawShadow({
+            modelMatrix = placement.modelMatrix,
+            lightViewProjection = ShadowMap.clipVP,
+          })
+        end
+      end)
+      if not ok then
+        -- Shadow casting failed for this model, fall back to card shadow
+      end
+    end
+    ShadowMap.sprites(false)
+  end
+
   if not UiBackplates.spritesUnlit() then
     ShadowMap.sprites(true)
     local modelShadows = {}
