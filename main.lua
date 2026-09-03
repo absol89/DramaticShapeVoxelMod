@@ -96,6 +96,8 @@ local WorldCurve = V.require("WorldCurve")
 local WorldUnderlay = V.require("WorldUnderlay")
 local RenderDistance = V.require("RenderDistance")
 local OverworldBattle = V.require("OverworldBattle")
+local PokeballSettings = V.require("PokeballSettings")
+local LegendaryPokeballs = V.require("LegendaryPokeballs")
 local BattlePresentation = V.require("BattlePresentation")
 local BattleStage = V.require("BattleStage")
 local BattleArt = V.require("BattleArt")
@@ -117,6 +119,8 @@ local HealOverlay = V.require("HealOverlay")
 local TransformCompat = V.require("TransformCompat")
 local VoxelCompanion = V.require("VoxelCompanion")
 local CompanionLifecycle = V.require("CompanionLifecycle")
+local CharacterRenderers = V.require("CharacterRenderers")
+local CommunityVisuals = V.require("CommunityVisuals")
 
 -- The public provider is created while this mod loads, before consumers resolve
 -- optional dependencies. The dispatcher starts at mods.loaded; a consumer that
@@ -198,6 +202,87 @@ local function sceneSize(ctx)
   end
   return ctx.width, ctx.height
 end
+
+-- A naming screen is a foreground state, but render-pipeline drawWorld calls
+-- still receive the live OverworldState as ctx.state.  Checking only that
+-- object therefore misses caught-Pokemon naming: the overworld is complete,
+-- so the voxel pass clears and redraws the frame behind (and, with some UI
+-- renderers, after) the native naming canvas.  Colosseum's replacement flow
+-- happens to draw at the final HUD stage, which is why that one mode survives.
+--
+-- Resolve ownership from the authoritative screen stack instead.  Native and
+-- third-party Gen I naming screens do not consistently expose screenId, so the
+-- grid/confirm/update contract is the stable fallback.  Colosseum-tagged flows
+-- are deliberately exempt: that renderer already owns the final overlay and
+-- its approved live voxel background must remain unchanged.
+local function colosseumNamingState(state)
+  return type(state) == "table" and (
+    state.__colosseumFlowKind == "naming"
+    or state.__colosseumCaughtNaming == true
+    or state.__colosseumGiftNaming == true
+    or state.__colosseumIntroSafe == true
+    or state.__colosseumNicknamePrompt == true
+    or state.__colosseumNicknameChoice == true
+  )
+end
+
+local function nativeNamingState(state)
+  if type(state) ~= "table" or colosseumNamingState(state) then return false end
+
+  local id = tostring(state.screenId or state.id or ""):lower()
+  if id == "naming" or id == "namingscreen"
+      or id:find("naming", 1, true) then
+    return true
+  end
+
+  local namingContract = type(state.grid) == "function"
+      and type(state.confirm) == "function"
+      and type(state.update) == "function"
+  local namingData = type(state.glyphs) == "table"
+      or state.maxLen ~= nil or state.maxLength ~= nil
+      or type(state.onDone) == "function"
+  return namingContract and namingData
+end
+
+local function nativeNamingOwnsFrame(ctxState)
+  local okGame, Game = pcall(require, "src.core.Game")
+  if not okGame or type(Game) ~= "table" then
+    return nativeNamingState(ctxState)
+  end
+
+  local stack = Game.stack
+  local states = stack and stack.states
+  local top
+  if stack and type(stack.top) == "function" then
+    local okTop, value = pcall(stack.top, stack)
+    if okTop then top = value end
+  end
+  if not top and type(states) == "table" then top = states[#states] end
+
+  -- Preserve the already-working Colosseum flow exactly, including the live
+  -- voxel field visible behind its translucent naming deck.
+  if colosseumNamingState(top) then return false end
+
+  if nativeNamingState(top) then return true end
+  if type(states) == "table" then
+    -- Preset/choice menus may temporarily sit above NamingScreen. Inspect the
+    -- complete active stack rather than assuming the naming object is on top.
+    for i = #states, 1, -1 do
+      local state = states[i]
+      if colosseumNamingState(state) then return false end
+      if nativeNamingState(state) then return true end
+      -- BattleState deliberately raises this while its stock nickname prompt
+      -- and native naming flow own the canvas. It remains the reliable bridge
+      -- on engine builds whose NamingScreen exposes neither ID nor metadata.
+      if type(state) == "table" and state.blankForAskName == true then
+        return true
+      end
+    end
+  end
+  return nativeNamingState(ctxState)
+end
+
+V.nativeNamingOwnsFrame = nativeNamingOwnsFrame
 
 local voidFill = { last = nil }
 function voidFill.check()
@@ -317,9 +402,36 @@ mod.content.render_pipelines:register("voxel", {
     -- canvas it was handed, so the sky's dither, the water's march and the
     -- camera itself all come out the same picture at a higher sample rate.
     local rw, rh = AntiAlias.expand(sw, sh)
-    local canvas, waiting = VoxelScene.render(ctx.state, rw, rh,
+    -- Naming screens can be pushed before Oak has finished constructing a
+    -- save, an overworld, or even a live player. The render-pipeline registry
+    -- still asks every enabled world pipeline for a frame during that early UI
+    -- state. VoxelScene requires the complete OverworldState contract, so
+    -- decline the pass until all of its authoritative pieces exist. Returning
+    -- nil is the registry's documented fail-open path: the engine keeps its
+    -- native intro/name-entry canvas and resumes 3D automatically on the first
+    -- real overworld frame.
+    local state = ctx and ctx.state
+    if nativeNamingOwnsFrame(state) then return nil end
+    if type(state) ~= "table" or not (state.map and state.camera and state.player) then
+      return nil
+    end
+
+    -- TEST435's protected handoff is intentional compatibility, not merely a
+    -- diagnostic wrapper. If a future engine introduces another incomplete
+    -- world-like state, fail open to its native renderer instead of aborting
+    -- the remainder of the frame (which otherwise leaves only the naming
+    -- canvas's green clear colour visible).
+    local okRender, canvas, waiting = pcall(VoxelScene.render, state, rw, rh,
                                               ctx.vw, ctx.vh, ctx.paletteFor)
-    local map = ctx.state and ctx.state.map
+    local map = state.map
+    if not okRender then
+      VoxelTransitionGate.cancel(map)
+      if not V.worldStateCompatWarned and mod.log and mod.log.error then
+        V.worldStateCompatWarned = true
+        mod.log:error("Voxel world pass failed open: %s", tostring(canvas))
+      end
+      return nil
+    end
     if not canvas then
       local generating = map and not ChunkMesher.slotKnown(map, false)
       if waiting or generating then
@@ -400,6 +512,7 @@ mod.content.render_pipelines:register("voxel", {
   invalidate = function()
     VoxelScene.invalidate()
     Voxel3D.invalidate()
+    V.require("Pokeball").invalidate()
     OverworldBattle.invalidate()
     AntiAlias.invalidate()
     VoxelLoadingVeil.invalidate()
@@ -553,6 +666,30 @@ local SETTINGS = {
     "Maximum compressed voxel cache eagerly loaded after CONTINUE, in MiB. "
     .. "FULL loads every generated cache file; OFF skips the preload and "
     .. "handles voxel data on demand during play.",
+    full = true },
+  { CommunityVisuals.pillars,
+    "Choose the original Battle Art pillars or the community granite design: "
+    .. "standalone, joined by the approved low wall, or interlocked across "
+    .. "the crown. Geometry rebuilds in the background; collision is unchanged.",
+    full = true },
+  { CommunityVisuals.masonry,
+    "Choose granite, red brick, sandstone, or slate for the Legendary wall "
+    .. "and ledge treatment. Pillars retain their authored granite material.",
+    full = true },
+  { CommunityVisuals.trees,
+    "Choose Battle Art's round trees or the Legendary Visuals S/M/L/XL tree family.",
+    full = true },
+  { CommunityVisuals.grass,
+    "Choose the original turf or Legendary Visuals natural grass.",
+    full = true },
+  { CommunityVisuals.roads,
+    "Choose original routes and bridges or Legendary packed earth and timber.",
+    full = true },
+  { CommunityVisuals.walls,
+    "Choose original terrain faces or Legendary masonry walls and stone ledges.",
+    full = true },
+  { CommunityVisuals.courtyards,
+    "Choose original courts and fences or Legendary timber and warm flagstone.",
     full = true },
   { Water.setting,
     "Reflections on water. FULL adds screen-space reflections of the "
@@ -724,6 +861,71 @@ local SETTINGS = {
     .. "pixels in each direction and 4X twice, which makes this the most "
     .. "expensive row in the mod.",
     full = true },
+  { PokeballSettings.enabled,
+    "Choose Battle Art's original capture animation or Legendary Visuals' "
+    .. "real 3D Poke Ball throw, intake beam, ground shakes, catch click and "
+    .. "breakout. This changes presentation only; items, odds and outcomes "
+    .. "remain Battle Art's.",
+    when = function() return stagedBattles() end, full = true },
+  { PokeballSettings.size,
+    "Scale the Legendary 3D capture ball without changing its trajectory.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
+  { PokeballSettings.suction,
+    "Enable the Legendary intake beam and suction presentation.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
+  { PokeballSettings.preset,
+    "Choose a coordinated capture-effects profile. CUSTOM exposes the "
+    .. "individual beam, streamer and star controls below.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
+  { PokeballSettings.beam,
+    "Set intake-beam strength for the CUSTOM capture profile.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+        and PokeballSettings.preset:get() == "CUSTOM"
+    end, full = true },
+  { PokeballSettings.streamers,
+    "Set airborne trail strength for the CUSTOM capture profile.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+        and PokeballSettings.preset:get() == "CUSTOM"
+    end, full = true },
+  { PokeballSettings.stars,
+    "Set successful-catch star strength for the CUSTOM capture profile.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+        and PokeballSettings.preset:get() == "CUSTOM"
+    end, full = true },
+  { PokeballSettings.pokemonGlow,
+    "Control the opponent glow while it is drawn into the ball.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
+  { PokeballSettings.suctionParticles,
+    "Control the particles pulled inward during capture.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
+  { PokeballSettings.captureSpeed,
+    "Choose the timing of the visual intake; battle timing remains native.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
+  { PokeballSettings.openTime,
+    "Choose how long the 3D ball visibly holds open before closing.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
+  { PokeballSettings.fxScale,
+    "Scale the Legendary beam, trails, particles and catch effects together.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
 }
 
 local schema = {}
@@ -789,6 +991,10 @@ local HOTKEYS = {
 -- retain the original flat list, including v0.2.36.
 local OPTION_CATEGORIES = {
   { id = "world", label = "WORLD", settings = {
+    CommunityVisuals.pillars, CommunityVisuals.masonry,
+    CommunityVisuals.trees, CommunityVisuals.grass,
+    CommunityVisuals.roads, CommunityVisuals.walls,
+    CommunityVisuals.courtyards,
     VoxelGrid.setting, WorldCurve.setting, WorldUnderlay.setting,
     Water.setting, DayNight.setting, FirstPerson.invertYSetting,
   } },
@@ -809,6 +1015,12 @@ local OPTION_CATEGORIES = {
     UiBackplates.spriteLight, UiBackplates.hudColor, UiBackplates.arenaFill,
     UiBackplates.stadiumCircle, UiBackplates.backdropOffset,
     UiBackplates.bossBg, UiBackplates.textboxFill,
+    PokeballSettings.enabled, PokeballSettings.size,
+    PokeballSettings.suction, PokeballSettings.preset,
+    PokeballSettings.beam, PokeballSettings.streamers,
+    PokeballSettings.stars, PokeballSettings.pokemonGlow,
+    PokeballSettings.suctionParticles, PokeballSettings.captureSpeed,
+    PokeballSettings.openTime, PokeballSettings.fxScale,
   } },
 }
 
@@ -1220,6 +1432,8 @@ mod.events:on("mod.options_changed", function(payload)
   for _, entry in ipairs(SETTINGS) do
     if payload.key == entry[1].key then entry[1]:sync(payload.value) end
   end
+  CommunityVisuals.changed(payload.key)
+  LegendaryPokeballs.changed()
   -- 3D-BTL switched on from the manager's page pins BATTLE LAYOUT exactly as
   -- the OPTIONS row does. The manager persists its own value; this is the one
   -- that has to follow it.
@@ -1483,6 +1697,7 @@ TransformCompat.install()
 -- pcall-guarded inside OverworldBattle.update, so calling it here only
 -- matters when a battle is actually on screen.
 V.require("CamControl").install()
+LegendaryPokeballs.install()
 
 -- The overworld's own pushBattle is the choke point for a wild encounter or
 -- a trainer, and it is wrapped. A battle that arrives some other way -- a
@@ -1526,6 +1741,7 @@ InterfaceSprites.install()
 -- Every ending path emits this, including a battle skipped before it drew,
 -- so this is where the map's cast comes back.
 mod.events:on("battle.ended", function()
+  LegendaryPokeballs.finish()
   OverworldBattle.finish()
 end)
 
@@ -1609,6 +1825,7 @@ mod.exports.version = "1.10.2"
 mod.exports.battlePresentation = BattlePresentation.export()
 mod.exports.battleStage = BattleStage.export(OverworldBattle)
 mod.exports.voxel_companion = Companion.provider
+mod.exports.characterRenderers = CharacterRenderers.export()
 -- exposed so a companion mod can pin its own tiles' shapes or read the
 -- camera without reaching into this mod's file layout
 mod.exports.lib = V

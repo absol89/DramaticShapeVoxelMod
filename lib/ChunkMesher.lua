@@ -204,6 +204,8 @@ end
 -- skipping ~a million short-lived Lua tables per route and LOVE's slow
 -- table-by-table vertex upload.
 
+local newSpans
+
 local function newTableSink()
   local verts, indices, quads = {}, {}, 0
   local spans = newSpans(function() return #verts end)
@@ -253,7 +255,7 @@ local TRI_ORDER = { 1, 2, 3, 1, 3, 4 }
 -- One flat array of numbers, four per run (first vertex, vertex count,
 -- footprint center x and z). It rides along with every cached mesh, on disk
 -- as well as in memory, so a table per run would be wasteful.
-local function newSpans(count)
+newSpans = function(count)
   local runs, first, cx, cz = {}, nil, 0, 0
   local function close()
     if not first then return end

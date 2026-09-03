@@ -1298,6 +1298,17 @@ end
 -- the tileset atlas. A sprite sheet's coordinates land wherever they land
 -- on it, and at night that painted lamplight stripes down whoever was
 -- standing in the wrong part of their own sheet.
+function Voxel3D.glassMaskNow(mask)
+  Voxel3D.glassMask = mask
+  if not (active and activeShader) then return end
+  local current = mask or GlassMask.blank()
+  if not current then return end
+  pcall(activeShader.send, activeShader, "glassMask", current)
+  local ok, w, h = pcall(current.getDimensions, current)
+  pcall(activeShader.send, activeShader, "glassSize",
+        { ok and w or 1, ok and h or 1 })
+end
+
 function Voxel3D.glass(on)
   if not (active and activeShader) then return end
   pcall(activeShader.send, activeShader, "glassOn", on and 1 or 0)

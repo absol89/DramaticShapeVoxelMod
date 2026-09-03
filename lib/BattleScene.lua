@@ -717,6 +717,23 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     for _, card in ipairs(cards) do
       if failedModels[card.side] then drawCard(card) end
     end
+
+    -- A companion 3D-player mod may own the trainer for the complete staged
+    -- battle. Draw it while this arena's camera and depth target are active.
+    if rawget(_G, "RED3D_TRAINER_INTRO_ACTIVE") == true then
+      local direct = rawget(_G, "RED3D_DIRECT_BATTLE_DRAW")
+      if type(direct) == "function" then
+        _G.RED3D_BATTLE_ART_DIRECT_CALLS =
+          (tonumber(_G.RED3D_BATTLE_ART_DIRECT_CALLS) or 0) + 1
+        local okDirect, didDraw = pcall(direct, arena, groundY,
+                                        Voxel3D, Mat4)
+        _G.RED3D_BATTLE_ART_DIRECT_RESULT = okDirect
+          and (didDraw and "DRAW OK" or "NO DRAW") or "CALL ERROR"
+      end
+    elseif rawget(_G, "RED3D_DIRECT_BATTLE_STATUS") == "DRAW OK" then
+      _G.RED3D_DIRECT_BATTLE_STATUS = "BATTLE DONE"
+    end
+
     Voxel3D.glass(true)
     Voxel3D.seams(true)
     if flashing then Voxel3D.flatten(nil) end

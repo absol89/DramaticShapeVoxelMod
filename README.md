@@ -58,6 +58,9 @@ Key visual controls include:
 | `AA` | `OFF`, `2X`, `4X` | Supersampled edge smoothing; the most expensive visual option |
 | `R.DIST` | `SHORT`, `MEDIUM`, `FAR`, `FULL` | Limits adjacent-map rendering work |
 | `DAYTIME` | `SYNC`, `DAY`, `NIGHT`, `DUSK`, `DAWN`, `CYCLE` | Controls outdoor lighting and sky time |
+| `LEGENDARY PILLARS` | `BATTLE ART`, `SEPARATE`, `BOTTOM LINK`, `TOP INTERLOCK` | Selects the original or community granite pillar layout |
+| `WALL & LEDGE COLOR` | `GRANITE`, `RED BRICK`, `SANDSTONE`, `SLATE` | Selects Legendary masonry material |
+| `TREES` | `BATTLE ART`, `LEGENDARY VISUALS` | Selects the original or community S/M/L/XL tree family |
 
 `WORLD FILL` controls empty space below and outside the world:
 
@@ -76,6 +79,9 @@ Their variant and 100%/150%/200% size are randomized deterministically, so they 
 flicker when the camera moves. Authored ROM cells always remain unobstructed.
 
 ### Water and sky
+
+The sky keeps the active `DAYTIME` palette but blends its colors continuously
+from zenith to horizon, including twilight glow and the shader fallback.
 
 `WATER` has three levels:
 
@@ -101,6 +107,7 @@ Presentation controls include:
 
 | Option | Choices | Purpose |
 | --- | --- | --- |
+| `STANDING TRAINER` | `STOCK`, `LEGENDARY` | Lets a compatible 3D-player provider keep the trainer in the staged arena |
 | `ARENA FILL` | `OFF`, `WHITE`, `GEN6`, `PNG`, `BLUE` | Voxel level, flat Battle Art arena, or Stadium's blue arena |
 | `STADIUM CIRCLE` | `ON`, `OFF`, `HALF` | Independently selects full, hidden, or two-thirds-radius Stadium ground circles when supported |
 | `BG Y-OFFSET` | `0` to `400` (default `100`) | Vertically crops a selected backdrop |

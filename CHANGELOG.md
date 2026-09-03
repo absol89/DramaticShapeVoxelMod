@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Legendary Visuals options.** The WORLD menu can now opt into the community
+  granite pillar layouts (separate, bottom-linked, or crown-interlocked), the
+  finalized S/M/L/XL tree family, natural terrain finishes, timber fences and
+  bridges, and granite/red-brick/sandstone/slate masonry. Battle Art remains the
+  default for every row, and derived mesh/cache identities include each choice.
+
+- **Continuous sky color.** Outdoor day/night colors now interpolate smoothly
+  from zenith to horizon. The checker pattern, horizontal palette shelves, and
+  posterized twilight rings are gone; the shader fallback uses the same linear
+  treatment in thin rows.
+
+- **Optional standing 3D trainer.** `STANDING TRAINER: LEGENDARY` lets a
+  compatible 3D-player provider retain the selected trainer in the staged arena
+  for the full battle. Both native trainer-card routes are suppressed only while
+  the provider is live, so missing providers retain Battle Art's stock fallback.
+
 - **No more dark band on water at a map connection.** The corner AO probe
   counted the border ring as a raised neighbour on every map edge, including
   the edges a connection covers, where the ring is never drawn. Water sits

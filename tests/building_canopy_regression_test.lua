@@ -161,6 +161,16 @@ do
     TerrainAtlas = { setLive = function() end },
     VoxelState = sceneVoxel,
     RenderDistance = { neighbor = function() return false end },
+    GranitePillars = { invalidate = function() end },
+    CommunityFlora = {
+      invalidate = function() end,
+      shadowSignature = function() return "" end,
+      castShadows = function() end,
+      drawCommunityTrees = function() end,
+    },
+    ModSetting = { new = function(_, _, values)
+      return { get = function() return values[1] end }
+    end },
   }, { __index = function() return {} end })
   local SceneV = { require = function(name) return sceneModules[name] end }
   local sceneChunk = assert(loadfile(base .. "/lib/VoxelScene.lua"))

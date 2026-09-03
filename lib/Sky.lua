@@ -60,12 +60,10 @@ local Sky = {}
 -- them from is built at the width actually used, so the cap costs nothing.
 Sky.MAX_BANDS = 8
 
--- The checkerboard between bands. DITHER_START is how far down a band it begins,
--- as a fraction of that band: lower is a wider blend, and 1 switches it off. 0.6
--- leaves the top of each band flat -- a band dithered all the way through reads
--- as one averaged colour instead of as a step with a soft bottom edge.
-Sky.DITHER = true
-Sky.DITHER_START = 0.6
+-- Legendary Visuals keeps the existing day/night palette, but interpolates
+-- continuously between its stops. The old checker and quantised shelves were
+-- visible as horizontal bands on tall displays and through translucent weather.
+Sky.DITHER = false
 
 -- How much of the frame the bands cover when the horizon is NOT in it, as a
 -- fraction of the canvas height.
@@ -76,7 +74,7 @@ Sky.DITHER_START = 0.6
 -- read as sky. So the bands take the same slice of the frame the top rung's own
 -- horizon gives them, which keeps the sky looking like one sky across the whole
 -- ladder instead of changing character rung by rung.
-Sky.SPAN = 0.23
+Sky.SPAN = 0.30
 
 -- ------- the bands
 --
@@ -168,8 +166,6 @@ local SHADER_SRC = [[
 uniform Image ramp;     // the bands, one texel each, top of the sky first
 uniform float count;    // how many texels wide that ramp is
 uniform float edge;     // the sky's bottom, in canvas pixels
-uniform float cell;     // the diorama's pixel size, in canvas pixels
-uniform float start;    // where the checker begins inside a band
 uniform float alpha;
 uniform float glowAmt;  // twilight warmth around the low sun; 0 = none
 uniform vec2 glowPos;   // the sun disc, in canvas pixels
@@ -186,29 +182,24 @@ vec3 bandAt(float i) {
 }
 
 vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
-  float row = floor(sc.y / cell) * cell;              // top of this cell row
-  float pos = min(row / max(edge, 1.0), 1.0) * count;
+  float pos = clamp(sc.y / max(edge, 1.0), 0.0, 1.0)
+            * max(count - 1.0, 0.0);
   float base = min(floor(pos), count - 1.0);
   vec3 c = bandAt(base);
-  float parity = mod(floor(sc.x / cell) + floor(sc.y / cell), 2.0);
-  if (base < count - 1.0 && (pos - base) > start) {
-    if (parity < 0.5) { c = bandAt(base + 1.0); }
+  if (base < count - 1.0) {
+    c = mix(c, bandAt(base + 1.0), fract(pos));
   }
-  // The sunset's warmth, radiating from the disc: posterised to a few rungs
-  // and checker-dithered between them -- the same 8-bit move as the bands,
-  // so the glow reads as painted light rather than as a smooth airbrush --
-  // and measured cell-to-cell, so its rings ride the diorama's own grid.
+  // Twilight follows the same continuous treatment as the main gradient.
   if (glowAmt > 0.0) {
-    vec2 cc = (floor(sc / cell) + 0.5) * cell;
-    float d = length(cc - glowPos) * glowInvR;
+    float d = length(sc - glowPos) * glowInvR;
     float g = glowAmt * pow(clamp(1.0 - d, 0.0, 1.0), 2.0);
-    float lvl = floor(g * 4.0);
-    if (g * 4.0 - lvl > 0.5 && parity < 0.5) { lvl += 1.0; }
-    c = mix(c, glowColor, min(lvl / 3.0, 1.0) * 0.65);
+    c = mix(c, glowColor, clamp(g, 0.0, 1.0) * 0.65);
   }
   return vec4(c, alpha);
 }
 ]]
+
+Sky._source = function() return SHADER_SRC end
 
 -- ------- the ramp
 --
@@ -282,7 +273,7 @@ end
 
 -- How far the twilight glow reaches around the disc, in canvas pixels, for
 -- a `w`-wide frame. The same number Sky.paint sends as `glowInvR`.
-Sky.GLOW_REACH = 0.55
+Sky.GLOW_REACH = 0.64
 
 local shader = nil            -- nil = untried, false = unavailable
 
@@ -307,20 +298,27 @@ end
 
 Sky._getShader = getShader        -- named for the suite
 
--- The flat fallback: the same bands as solid rectangles, no checker, on the same
--- quantised edges. For a driver that could not compile the shader -- which is
--- also every headless run.
-local function paintFlat(w, h, bands, edge, alpha, cell)
+-- Match the continuous shader when a driver cannot compile it. Thin linear
+-- strips avoid reintroducing the old large palette shelves on Android.
+local function paintFlat(w, h, bands, edge, alpha)
   local g = love.graphics
   local n = #bands
+  if n < 1 then return end
+  local bottom = math.min(h, math.ceil(edge))
+  local steps = math.max(1, math.min(720, bottom))
   local prev = 0
-  for i = 1, n do
-    local cut = (i == n) and math.min(h, math.ceil(edge))
-                         or math.floor(i / n * edge / cell + 0.5) * cell
-    cut = math.max(prev, math.min(cut, math.min(h, math.ceil(edge))))
+  for i = 0, steps - 1 do
+    local cut = math.floor((i + 1) / steps * bottom + 0.5)
+    cut = math.max(prev, math.min(cut, bottom))
     if cut > prev then
-      local c = bands[i]
-      g.setColor(c[1], c[2], c[3], alpha)
+      local pos = (i / steps) * math.max(n - 1, 0)
+      local a = math.min(n, math.floor(pos) + 1)
+      local b = math.min(n, a + 1)
+      local f = pos - math.floor(pos)
+      local c0, c1 = bands[a], bands[b]
+      g.setColor(c0[1] + (c1[1] - c0[1]) * f,
+                 c0[2] + (c1[2] - c0[2]) * f,
+                 c0[3] + (c1[3] - c0[3]) * f, alpha)
       g.rectangle("fill", 0, prev, w, cut - prev)
     end
     prev = cut
@@ -474,8 +472,6 @@ function Sky.paint(w, h, sky, horizonY, cell, body)
       sh:send("ramp", ramp)
       sh:send("count", #bands)
       sh:send("edge", edge)
-      sh:send("cell", cell)
-      sh:send("start", Sky.DITHER and Sky.DITHER_START or 2)
       sh:send("alpha", alpha)
       sh:send("glowAmt", glowAmt)
       if glowAmt > 0 then
@@ -494,7 +490,7 @@ function Sky.paint(w, h, sky, horizonY, cell, body)
       sh = nil
     end
   end
-  if not sh then paintFlat(w, h, bands, edge, alpha, cell) end
+  if not sh then paintFlat(w, h, bands, edge, alpha) end
   -- the disc goes over the glow, under nothing: plain rectangles, so it is
   -- there whether or not the shader built
   paintDisc(body, math.min(h, edge), cell, w, h)

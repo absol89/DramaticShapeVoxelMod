@@ -229,25 +229,29 @@ local function build(map)
     return bases[id .. ":" .. (cx * 16 + 8) .. "|" .. (cy * 16 + 8)] or 0
   end
 
-  local function pillar(cx, cy)
+  local function pillar(cx, cy, scale, skipTop)
+    scale = scale or 1.0
     local x, z, base = cx * 16 + 8, cy * 16 + 8, baseAt(cx, cy)
-    box(x,z,base,4.25,4.25,.10,.26,.955,.98,.90,.25)
-    box(x,z,base,4.31,4.31,.26,7.55,.08,.43,.98,.35)
-    box(x,z,base,4.07,4.07,7.48,7.60,.43,.46,.86,.26)
-    box(x,z,base,3.88,3.88,7.60,8.46,.47,.52,.64,.24)
-    box(x,z,base,4.07,4.07,8.46,8.58,.53,.56,.86,.26)
-    box(x,z,base,4.49,4.49,8.58,8.78,.58,.61,.93,.31)
-    box(x,z,base,4.55,4.55,8.78,14.55,.62,.94,1.02,.38)
-    box(x,z,base,4.82,4.82,14.55,14.81,.94,.99,1.045,.42)
+    box(x,z,base,4.25*scale,4.25*scale,.10,.26,.955,.98,.90,.25)
+    box(x,z,base,4.31*scale,4.31*scale,.26,7.55,.08,.43,.98,.35)
+    box(x,z,base,4.07*scale,4.07*scale,7.48,7.60,.43,.46,.86,.26)
+    box(x,z,base,3.88*scale,3.88*scale,7.60,8.46,.47,.52,.64,.24)
+    box(x,z,base,4.07*scale,4.07*scale,8.46,8.58,.53,.56,.86,.26)
+    box(x,z,base,4.49*scale,4.49*scale,8.58,8.78,.58,.61,.93,.31)
+    box(x,z,base,4.55*scale,4.55*scale,8.78,14.55,.62,.94,1.02,.38)
+    if not skipTop then
+      box(x,z,base,4.82*scale,4.82*scale,14.55,14.81,.94,.99,1.045,.42)
+    end
   end
 
   local piers = layout == "bottom" and pierRhythm(cells) or nil
+  local topScale = layout == "top" and 1.75 or 1.0
   for key in pairs(cells) do
     local cx, cy = key:match("^(-?%d+)|(-?%d+)$")
     cx, cy = tonumber(cx), tonumber(cy)
     if cx then
       local _, drawPier, d = wallRole(cx, cy, cells, piers)
-      if layout ~= "bottom" or drawPier then pillar(cx, cy) end
+      if layout ~= "bottom" or drawPier then pillar(cx, cy, topScale, layout == "top") end
       local base = baseAt(cx, cy)
       if layout == "bottom" then
         if d.east then
@@ -259,26 +263,6 @@ local function build(map)
           local b = math.min(base, baseAt(cx, cy + 1))
           box(cx*16+8,cy*16+16,b,2.72,8.15,.10,6.10,.08,.43,.94,.18)
           box(cx*16+8,cy*16+16,b,3.02,8.28,6.10,6.48,.43,.46,1.02,.20)
-        end
-      elseif layout == "top" then
-        -- Absol's top-interlock is a meeting of the pillar crowns themselves,
-        -- not a skinny rail hung between tall posts. Each side contributes a
-        -- broad cap arm to the midpoint, then two offset granite fingers lock
-        -- across the seam. The joint stays visibly chunky from both the orbit
-        -- and low/night cameras while the lantern-bearing shafts remain apart.
-        if d.east then
-          local b = math.min(base, baseAt(cx + 1, cy))
-          box(cx*16+12,cy*16+8,b,4.18,4.48,14.25,14.62,.94,.99,1.03,.34)
-          box(cx*16+20,cy*16+8,b,4.18,4.48,14.25,14.62,.94,.99,1.03,.34)
-          box(cx*16+14.15,cy*16+6.55,b,2.22,1.72,14.62,15.04,.62,.94,.98,.24)
-          box(cx*16+17.85,cy*16+9.45,b,2.22,1.72,14.62,15.04,.62,.94,.98,.24)
-        end
-        if d.south then
-          local b = math.min(base, baseAt(cx, cy + 1))
-          box(cx*16+8,cy*16+12,b,4.48,4.18,14.25,14.62,.94,.99,1.03,.34)
-          box(cx*16+8,cy*16+20,b,4.48,4.18,14.25,14.62,.94,.99,1.03,.34)
-          box(cx*16+6.55,cy*16+14.15,b,1.72,2.22,14.62,15.04,.62,.94,.98,.24)
-          box(cx*16+9.45,cy*16+17.85,b,1.72,2.22,14.62,15.04,.62,.94,.98,.24)
         end
       end
     end
