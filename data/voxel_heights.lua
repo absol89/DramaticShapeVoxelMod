@@ -483,9 +483,9 @@ return {
     -- underwater, and the only class in this file that goes negative is
     -- `water` (-2), which exists to cut the overworld's shoreline lip.
     -- It is deliberately NOT used anywhere in this entry.  The one thing
-    -- that does reach below the datum is the DOWN ladder's stairwell,
-    -- which is a hole on purpose: it is the shaft to the floor below,
-    -- and no walkable surface is drawn in it.
+    -- that does reach below the datum is the DOWN ladder's shaft, which
+    -- is a hole on purpose: it is the way to the floor below, and no
+    -- walkable surface is drawn in it.
     --
     -- What the detector made of it: the rock EDGES towered.  A shelf's
     -- side is drawn as a cap over a run of face tiles over a corner
@@ -607,7 +607,7 @@ return {
       ground = { 32, 33, 42,       -- $20/$21/$2A, the dark lower floor
                  20,               -- $14, the surfable cave water
                  47, 34 },         -- $2F over $22, the drop hole
-      -- ---- 0 to 16: the ladders, the caves' real staircases ----
+      -- ---- 16: the ladders ----
       --
       -- Both ladder graphics are drawn from above as a shaft with two
       -- rails and rungs between them, and which one is which is not a
@@ -621,24 +621,40 @@ return {
       -- to daylight).  $08 is the ladder DOWN, $0A the ladder UP: 77
       -- cells, no exceptions.
       --
-      -- So they take the two classes that MOVE between floors.  $0A
-      -- becomes a rising flight -- four real steps climbing 0 -> 16, the
-      -- height of the rock band it disappears into -- and $08 becomes an
-      -- excavated stairwell, four steps descending below the floor into
-      -- a dark opening.  East for both: the ladder art is symmetric
-      -- about its own centre line so the drawing does not choose a side,
-      -- the cell's east neighbour is the closed (rock) side more often
-      -- than its west, and the rest of this profile's staircases
-      -- (REDS_HOUSE_1, UNDERGROUND) climb east too.  The flight's treads
-      -- land one rung apiece, which is as close to a drawn ladder as
-      -- stepped geometry gets.
+      -- These were `stair_e` / `stair_down_e`, and the note here used to
+      -- concede that a four-step flight was "as close to a drawn ladder as
+      -- stepped geometry gets".  That was the bug: a staircase runs along
+      -- an AXIS, so the pin threw a stepped wedge across a cell whose
+      -- drawing is a ladder lying in it, and in a cave you got stairs.
       --
-      -- All four tiles of each cell are listed, the way REDS_HOUSE_1
-      -- lists its flight: buildStairs anchors on the cell's TOP-LEFT
-      -- tile ($08 / $0A) and claims the other three, but pinning them
-      -- too keeps them out of the region flood and the door fold.
-      stair_e = { 10, 11, 26, 27 },        -- $0A/$0B over $1A/$1B, UP
-      stair_down_e = { 8, 9, 24, 25 },     -- $08/$09 over $18/$19, DOWN
+      -- `ladder` is a STANDEE POOL -- the same per-pixel voxelization
+      -- `billboard`, `post`, `signpost` and `bike` go through, where the
+      -- drawing stands up and its pixels become voxels.  There is no
+      -- ladder-specific geometry anywhere; the class carries its own name
+      -- only so this file reads honestly and so the pool is its own
+      -- (Structures' PINNED_DEPTH gives it 2, the `bike` figure: what a
+      -- ladder and a bicycle have in common is that both are mostly the
+      -- air inside them, and a fatter pool closes that off).
+      --
+      -- Standing the drawing up is the whole trick, and it is free: the
+      -- art is a shaft seen from above, so rotating its depth axis into
+      -- height already gives a ladder ELEVATION -- rails left and right,
+      -- rungs across.
+      --
+      -- ONE CLASS FOR BOTH GRAPHICS, and that is a real concession.  The
+      -- warp table separates them cleanly, but the standee path has no
+      -- notion of a hole: it stands a drawing on the floor plane and does
+      -- nothing else.  So a descending ladder renders standing up like a
+      -- climbing one, where the old pin at least excavated a stairwell.
+      -- Splitting them again needs geometry the shared object pipeline
+      -- does not build, so the up/down distinction is recorded here in
+      -- prose rather than in two classes that would render identically.
+      --
+      -- All eight tiles are listed: the cluster carve claims what it
+      -- covers, and pinning the rest keeps them out of the region flood
+      -- and the door fold.
+      ladder = { 10, 11, 26, 27,           -- $0A/$0B over $1A/$1B, UP
+                 8, 9, 24, 25 },           -- $08/$09 over $18/$19, DOWN
       -- ---- 3: the boulder switches ----
       --
       -- Victory Road's four plates ($2B/$2C over $2D/$2E, on 1F, 2F and

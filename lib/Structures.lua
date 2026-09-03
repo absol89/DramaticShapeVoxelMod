@@ -81,7 +81,13 @@ local OBJECT_DEPTH = 6             -- voxel thickness of a detected prop
 -- space is the drawing, and at the 5 voxels `prop` gives, the side faces
 -- of neighbouring strokes close every gap in it off-axis
 local PINNED_DEPTH = { billboard = 10, prop = 5, stool = 10, cutout = 1,
-                       console = 10, post = 6, signpost = 2, bike = 2 }
+                       console = 10, post = 6, signpost = 2, bike = 2,
+                       -- the caves' ladders, on the `bike` reasoning: what a
+                       -- ladder and a bicycle have in common is that both are
+                       -- mostly the air inside them, and a fatter pool closes
+                       -- that off.  Its own pool rather than sharing one, so a
+                       -- ladder never clusters with a bicycle beside it
+                       ladder = 2 }
 
 local MAX_ROWS = 6                 -- volume height cap: 48px
 

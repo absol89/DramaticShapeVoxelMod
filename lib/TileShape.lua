@@ -117,6 +117,12 @@ local FALLBACK_HEIGHTS = {
   stair_w = 16,
   stair_down_e = 16,
   stair_down_w = 16,
+  -- the caves' ladders.  A standee pool like `bike` and `signpost` -- the
+  -- drawing stands up and voxelizes per pixel -- with its own name so the
+  -- profile reads honestly and the depth is its own (Structures'
+  -- PINNED_DEPTH).  NOT a staircase: pinning these cells `stair_e` threw a
+  -- four-step flight across them, which is the bug this replaces
+  ladder = 16,
 }
 
 -- class -> how the mesher draws it (see the header). The last three are
@@ -206,6 +212,7 @@ local ART = {
   stair_w = "stair",
   stair_down_e = "stair",
   stair_down_w = "stair",
+  ladder = "billboard",
 }
 
 local spec = nil          -- the loaded data file, or false when absent

@@ -62,7 +62,9 @@ local STATIC_PLAYTHROUGH = "bavc_static_mesh_v2"
 -- ordinary cached terrain when no extension can replace them. Revision 5
 -- stripped signposts unconditionally, then bypassed its own cache on Continue
 -- to reconstruct their sidecars.
-Disk.CACHE_REVISION = 7
+-- Revision 8 stores prop runs alongside the vertices so a precached map can
+-- drop a cut tree from the mesh it is already drawing.
+Disk.CACHE_REVISION = 8
 -- Patch releases which do not change emitted vertices must keep the existing
 -- world cache usable. This token matches the first static-mesh-cache-v2 build;
 -- CACHE_REVISION, not the public mod version, owns geometry compatibility.
@@ -866,6 +868,26 @@ local function readValidated(path, fp, map)
   return blob, pos
 end
 
+-- Prop runs stored with a record: a u32 count, then four floats per run.
+-- A precached map never runs the geometry pass, so without these the cut
+-- fast path in ChunkMesher would never fire on one.
+local function readSpans(blob, pos)
+  local count = readU32(blob, pos)
+  if not count or count > 1048576 then return nil end
+  pos = pos + 4
+  local spans = {}
+  for _ = 1, count do
+    if pos + 15 > #blob then return nil end
+    local a, b, c, d, nextPos = love.data.unpack("<ffff", blob, pos)
+    spans[#spans + 1] = a
+    spans[#spans + 1] = b
+    spans[#spans + 1] = c
+    spans[#spans + 1] = d
+    pos = nextPos
+  end
+  return spans, pos
+end
+
 function Disk.loadTerrain(map, slot, masks)
   if not Disk.staticEligible(map) then return nil end
   local path = pathFor(map, slot, "terrain")
@@ -873,13 +895,15 @@ function Disk.loadTerrain(map, slot, masks)
   local blob, pos = readValidated(path, fp, map)
   if not blob then return nil end
   local terrain, nextPos = streamRecord(blob, pos)
-  local water, finalPos
-  if nextPos then water, finalPos = streamRecord(blob, nextPos) end
-  if not terrain or not water or finalPos ~= #blob + 1 then
+  local water, afterWater
+  if nextPos then water, afterWater = streamRecord(blob, nextPos) end
+  local spans, finalPos
+  if afterWater then spans, finalPos = readSpans(blob, afterWater) end
+  if not terrain or not water or not spans or finalPos ~= #blob + 1 then
     discard(path, true)
     return nil
   end
-  return { terrain = terrain, water = water }
+  return { terrain = terrain, water = water, spans = spans }
 end
 
 local function float4(blob, pos)
@@ -912,7 +936,14 @@ function Disk.loadAux(map)
     figures[#figures + 1] = stream
     pos = finalPos
   end
-  if pos ~= #blob + 1 then discard(path, true); return nil end
+  -- tuft and billboard runs, after the figures
+  local grassSpans, afterGrass = readSpans(blob, pos)
+  local flowerSpans, finalPos
+  if afterGrass then flowerSpans, finalPos = readSpans(blob, afterGrass) end
+  if not grassSpans or not flowerSpans or finalPos ~= #blob + 1 then
+    discard(path, true); return nil
+  end
+  grass.spans, flowers.spans = grassSpans, flowerSpans
   return { grass = grass, flowers = flowers, figures = figures }
 end
 
@@ -1080,6 +1111,16 @@ function Disk.saveRamToDisk()
   return failures == 0, saved, failures, errors
 end
 
+local function writeSpans(file, spans)
+  local count = math.floor(#(spans or {}) / 4)
+  write(file, u32(count))
+  for i = 1, count * 4, 4 do
+    write(file, love.data.pack("string", "<ffff",
+                               spans[i], spans[i + 1],
+                               spans[i + 2], spans[i + 3]))
+  end
+end
+
 function Disk.saveTerrain(map, slot, masks, terrain, water)
   if not Disk.staticEligible(map) then return false end
   local path = pathFor(map, slot, "terrain")
@@ -1087,6 +1128,7 @@ function Disk.saveTerrain(map, slot, masks, terrain, water)
   return writeFile(path, fp, function(file)
     writeChunked(file, terrain)
     writeChunked(file, water)
+    writeSpans(file, terrain and terrain.spans)
   end)
 end
 
@@ -1107,6 +1149,8 @@ function Disk.saveAux(map, aux)
       write(file, f32x4(figure.wx, figure.wz, figure.y, figure.w))
       Budget.check()
     end
+    writeSpans(file, aux.grass and aux.grass.spans)
+    writeSpans(file, aux.flowers and aux.flowers.spans)
   end)
 end
 
