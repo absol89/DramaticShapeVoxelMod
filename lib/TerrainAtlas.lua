@@ -33,11 +33,13 @@ local V = ...
 local Assets = require("src.render.Assets")
 local TileRenderer = require("src.render.TileRenderer")
 local PaletteFX = require("src.render.PaletteFX")
+local CommunityVisuals = V.require("CommunityVisuals")
 
 local TerrainAtlas = {}
 
 local cache = {}
 local cacheData = {}    -- the pixels behind the atlases we baked ourselves
+local community = {}    -- TEST435 material variants, keyed by live options
 local animated = {}     -- key -> one map's private, mutable animated atlas
                         -- false = given up on; nil = not built (or retrying)
 local attempts = {}     -- key -> consecutive failures, for the retry budget
@@ -391,6 +393,176 @@ local function rendererPixels(map)
   return ok and data or nil
 end
 
+-- TEST435's approved material family, isolated behind Battle Art-native
+-- settings. Every edit stays inside the existing cached atlas: no per-frame
+-- uploads, extra material or draw call.
+local MATERIAL = {
+  granite = {
+    dark={.13,.13,.12,1}, shadow={.25,.24,.22,1},
+    body={.43,.41,.37,1}, light={.60,.57,.51,1},
+  },
+  red = {
+    dark={.18,.070,.045,1}, shadow={.32,.125,.080,1},
+    body={.50,.225,.145,1}, light={.66,.375,.250,1},
+  },
+  sandstone = {
+    dark={.22,.155,.085,1}, shadow={.37,.275,.155,1},
+    body={.56,.430,.260,1}, light={.72,.590,.390,1},
+  },
+  slate = {
+    dark={.085,.105,.145,1}, shadow={.175,.215,.285,1},
+    body={.305,.365,.455,1}, light={.475,.545,.635,1},
+  },
+}
+
+local ROCK_ART = {
+  "DSBLDSBL", "DBBBBLLD", "DBLBBBBD", "DDBBBDDD",
+  "BBBDDDBB", "BLBDBBBB", "BBBDBLBB", "DDDDDBDD",
+}
+local PATH_ART = {
+  "BSBBLBSB", "SBLBBSBL", "BBSBLBBS", "LBBSBSBB",
+  "BSLBBLBS", "SBBLSBBB", "BLBSBBLB", "SBBBLBBS",
+}
+local WOOD_ART = {
+  "DSBLDSBL", "BBBBLLBB", "BBLBBBBD", "SBBBBBBS",
+  "BBBSBBBB", "BLBBBBLB", "BBBBLBBB", "SBBBBBBS",
+}
+local GRASS_ART = {
+  "BBSSBBLB", "BSLLSBBB", "SSBLLBBS", "BLBSSSBB",
+  "BBSSBLBB", "SBBLSSLB", "BLSBBBSS", "SSBBLSBB",
+}
+local COURT_ART = {
+  "DDDDDDDD", "DBBBBBBD", "DBBLBBBD", "DBBBBBBD",
+  "DBBBLBDD", "DBBBBBBD", "DBLBBBBD", "DDDDDDDD",
+}
+
+local PATH = {
+  dark={.626,.566,.456,1}, shadow={.638,.578,.468,1},
+  body={.650,.590,.480,1}, light={.662,.602,.492,1},
+}
+local WOOD = {
+  dark={.16,.085,.035,1}, shadow={.29,.16,.070,1},
+  body={.48,.29,.13,1}, light={.66,.43,.22,1},
+}
+local GRASS = {
+  dark={.17,.35,.12,1}, shadow={.22,.43,.16,1},
+  body={.27,.50,.20,1}, light={.33,.57,.26,1},
+}
+local COURT = {
+  dark={.38,.34,.27,1}, shadow={.50,.46,.37,1},
+  body={.64,.59,.48,1}, light={.74,.69,.57,1},
+}
+local TALL_GRASS = {
+  [1]={.34,.58,.26}, [2]={.28,.51,.20},
+  [3]={.21,.41,.14}, [4]={.15,.32,.10},
+}
+
+local function communityKey()
+  return table.concat({
+    CommunityVisuals.grass:get(), CommunityVisuals.roads:get(),
+    CommunityVisuals.walls:get(), CommunityVisuals.courtyards:get(),
+    CommunityVisuals.wallColor(),
+  }, ":")
+end
+
+local function communityAtlas(map, colors, base, baked)
+  local enabled = CommunityVisuals.customGrass()
+    or CommunityVisuals.customRoads() or CommunityVisuals.customWalls()
+    or CommunityVisuals.customCourtyards()
+  if not enabled or not (map.tileset and map.tileset.id == "OVERWORLD") then
+    return base, baked
+  end
+  if not (love.image and love.image.newImageData and love.graphics
+          and love.graphics.newImage) then return base, baked end
+
+  local perMap = map.renderer and map.renderer.gbcAtlas and map.id or ""
+  local key = map.tileset.image .. "#community#" .. communityKey()
+    .. "#" .. paletteKey(colors or {}) .. perMap
+  local held = community[key]
+  if held then return held.image, held.data end
+  local src = baked or rendererPixels(map)
+  if not src then return base, baked end
+
+  local ok, entry = pcall(function()
+    local w, h = src:getDimensions()
+    local data = love.image.newImageData(w, h)
+    data:paste(src, 0, 0, 0, 0, w, h)
+    local perRow = map.tileset.tilesPerRow or 16
+    local total = (w / 8) * (h / 8)
+
+    local function paint(tile, art, palette)
+      if type(tile) ~= "number" or tile < 0 or tile >= total then return end
+      local ox, oy = (tile % perRow) * 8, math.floor(tile / perRow) * 8
+      for py = 0, 7 do
+        local row = art[py + 1]
+        for px = 0, 7 do
+          local mark = row:sub(px + 1, px + 1)
+          local c = mark == "D" and palette.dark
+            or mark == "S" and palette.shadow
+            or mark == "L" and palette.light or palette.body
+          local _, _, _, alpha = data:getPixel(ox + px, oy + py)
+          data:setPixel(ox + px, oy + py, c[1], c[2], c[3], alpha)
+        end
+      end
+    end
+
+    if CommunityVisuals.customWalls() then
+      local shapes = V.require("TileShape").forMap(map)
+      local masonry = MATERIAL[CommunityVisuals.wallColor()] or MATERIAL.granite
+      for tile = 0, total - 1 do
+        local shape = shapes[tile]
+        if shape and shape.class == "ledge" then paint(tile, ROCK_ART, masonry) end
+      end
+      -- Safe swatch used by the community retaining/pillar material family.
+      paint(13, ROCK_ART, masonry)
+    end
+
+    if CommunityVisuals.customRoads() then
+      paint(57, PATH_ART, PATH)
+      paint(60, WOOD_ART, WOOD)
+    end
+
+    if CommunityVisuals.customCourtyards() then
+      -- The connected fence samples the same full TEST435 timber tile as the
+      -- bridge. Keep that material available even when ROADS & BRIDGES stays
+      -- on Battle Art; TEST2's four flat swatches produced the plain tan fence.
+      paint(60, WOOD_ART, WOOD)
+      -- $5B is exclusive to Overworld block $55 and is therefore a stable
+      -- courtyard material identity rather than a coordinate-specific fix.
+      paint(91, COURT_ART, COURT)
+    end
+
+    if CommunityVisuals.customGrass() then
+      paint(44, GRASS_ART, GRASS)
+      local tall = map.tileset.grassTile
+      if type(tall) == "number" then tall = math.floor(tall) end
+      if type(tall) == "number" and tall >= 0 and tall < total and tall ~= 44 then
+        pcall(function()
+          local raw = Assets.imageData(map.tileset.image)
+          local rw, rh = raw:getDimensions()
+          local ox, oy = (tall % perRow) * 8, math.floor(tall / perRow) * 8
+          if ox + 7 >= rw or oy + 7 >= rh then return end
+          for py = 0, 7 do
+            for px = 0, 7 do
+              local sourceR = raw:getPixel(ox + px, oy + py)
+              local _, _, _, alpha = data:getPixel(ox + px, oy + py)
+              local c = TALL_GRASS[shadeOf(sourceR)]
+              data:setPixel(ox + px, oy + py, c[1], c[2], c[3], alpha)
+            end
+          end
+        end)
+      end
+    end
+
+    local image = love.graphics.newImage(data)
+    image:setFilter("nearest", "nearest")
+    return { image=image, data=data, mapId=perMap ~= "" and perMap or nil }
+  end)
+  if not ok or not entry then return base, baked end
+  community[key] = entry
+  return entry.image, entry.data
+end
+
 -- The engine's tile-animation clock: TileRenderer's 60Hz counter, by
 -- whatever route this build offers.
 --
@@ -633,7 +805,7 @@ function TerrainAtlas.animate(map, colors, base, baked)
   -- exist at all.
   local perMap = map.renderer and map.renderer.gbcAtlas and map.id or nil
   local key = map.tileset.image .. "#a#" .. paletteKey(colors or {})
-    .. (perMap or "")
+    .. "#community#" .. communityKey() .. (perMap or "")
   local entry = animated[key]
   if entry == nil then
     entry = newEntry(map, base, baked)
@@ -669,6 +841,7 @@ end
 function TerrainAtlas.forMap(map, colors)
   local base, baked = staticAtlas(map, colors)
   if not base then return nil end
+  base, baked = communityAtlas(map, colors, base, baked)
   return TerrainAtlas.animate(map, colors, base, baked) or base
 end
 
@@ -783,11 +956,17 @@ function TerrainAtlas.setLive(live)
       animated[key] = nil
     end
   end
+  for key, entry in pairs(community) do
+    if entry and entry.mapId and not live[entry.mapId] then
+      community[key] = nil
+    end
+  end
 end
 
 function TerrainAtlas.invalidate()
   cache = {}
   cacheData = {}
+  community = {}
   attempts = {}
   borderColorCache = setmetatable({}, { __mode = "k" })
   for _, entry in pairs(animated) do

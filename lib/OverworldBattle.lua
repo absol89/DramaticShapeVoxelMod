@@ -85,6 +85,19 @@ OverworldBattle.setting = ModSetting.new(OverworldBattle.KEY,
                                          OverworldBattle.LABEL,
                                          { true, false }, { "ON", "OFF" })
 
+-- Optional community battle cast. STOCK is deliberately first/default so the
+-- Battle Art fork remains complete when neither the 3D character selector nor
+-- the Stadium/N64 Pokemon provider is installed. LEGENDARY activates only the
+-- presentation pieces whose live callbacks/models are actually available;
+-- every unavailable side retains Battle Art's native art.
+OverworldBattle.trainerBattleSetting =
+  ModSetting.new("standingTrainer", "STANDING TRAINER",
+                 { "stock", "legendary" }, { "STOCK", "LEGENDARY" }, 1)
+
+function OverworldBattle.legendaryTrainerEnabled()
+  return OverworldBattle.trainerBattleSetting:get() == "legendary"
+end
+
 -- HUD SCALE: SCALED draws the player/opponent HUD at the battle's zoom factor
 -- (hs = zoom - 1), the look this mod ships with. OG pins the HUD to the
 -- window-fit scale (hs = fitScale), like upstream gen1recomp's player HUD --
@@ -128,6 +141,14 @@ function OverworldBattle.backPinned()
   local battle = session and session.battle
   local trainerBack = battle and battle.showPlayerBack
                       and battle.playerBackPic
+  -- LEGENDARY keeps the player Pokemon off the native anchor attached to the
+  -- battle menu. With the pin released, textures() captures the same sprite
+  -- for BattleScene's arena billboard instead: it stays planted on the player
+  -- cell while the Colosseum menu moves independently. No N64 model provider
+  -- is required. STOCK retains the complete original placement path.
+  if not trainerBack and OverworldBattle.legendaryTrainerEnabled() then
+    return false
+  end
   -- PLAYER controls Pokemon views, not the trainer intro. A trainer back can
   -- still use OG UI while FRONT SPRITES keeps the later Pokemon card in-world.
   if not trainerBack and BattleArt.playerSide() ~= "back" then return false end
@@ -619,8 +640,23 @@ function OverworldBattle.providerRender(expectedBattle, drawActors,
       and session.battle ~= expectedBattle then return nil end
   session.battle = session.battle or expectedBattle
   session.token = (session.token or 0) + 1
+  -- A hosted presentation normally supplies every battler itself, so the
+  -- Battle Art card list is empty. A host can opt individual sprite sides
+  -- back into this world pass through drawActors.cards. This is how the
+  -- sprite-only LEGENDARY path provides the player battler without requiring
+  -- an N64 model or reopening the native menu-attached sprite slot.
+  local textures = nil
+  local cardSides = type(drawActors) == "table" and drawActors.cards or nil
+  if type(cardSides) == "table" then
+    textures = OverworldBattle.textures(session.battle)
+    if textures then
+      for _, side in ipairs({ "enemy", "player" }) do
+        if cardSides[side] ~= true then textures[side] = nil end
+      end
+    end
+  end
   local ok, shot = pcall(BattleScene.render, session.state, session.arena,
-    nil, session.token, session.battle, drawActors, externalCamera,
+    textures, session.token, session.battle, drawActors, externalCamera,
     externalModelShadow)
   if not (ok and shot and shot.canvas) then
     session.providerShot = nil
@@ -653,6 +689,14 @@ function OverworldBattle.providerFinish()
 end
 
 function OverworldBattle.finish()
+  -- The 3D player mod reads this small, presentation-only handoff. Clear it
+  -- even if a battle was torn down before a staged session fully opened, so
+  -- a later battle can never inherit the previous trainer or hand position.
+  local endingBattle = session and session.battle or nil
+  if endingBattle then endingBattle._red3dTrainerHandoffLatched = nil end
+  _G.RED3D_TRAINER_INTRO_ACTIVE = false
+  _G.RED3D_TRAINER_BATTLE_STATE = nil
+  _G.RED3D_BATTLE_HAND_WORLD = nil
   if not session then return end
   AnimatedBattleArt.finish(session.battle)
   StadiumModels.release()
@@ -1039,6 +1083,16 @@ end
 function OverworldBattle.sideTexture(battle, side)
   if not (innerPics and battle) then return nil end
   BattleArt.apply(battle)
+  -- A live 3D-player callback owns the player's trainer-back presentation.
+  -- Do not bake the old flat trainer into Battle Art's captured side canvas;
+  -- the player's Pokemon resumes this normal texture path immediately after
+  -- the send-out phase. If the companion mod is absent, the original trainer
+  -- remains untouched as a compatibility fallback.
+  if side == "player" and battle.showPlayerBack and battle.playerBackPic
+      and rawget(_G, "RED3D_TRAINER_INTRO_ACTIVE") == true
+      and type(rawget(_G, "RED3D_DIRECT_BATTLE_DRAW")) == "function" then
+    return nil
+  end
   if not sideVisible(battle, side) then return nil end
   local battler = side == "enemy" and battle.enemy or battle.player
   local showingTrainer = (side == "enemy" and battle.showEnemyTrainer
@@ -1146,6 +1200,29 @@ end
 -- ground under a mon that is not on it.
 function OverworldBattle.textures(battle)
   if not battle then return nil end
+
+  -- Persistent 3D trainer handoff. The engine exposes the selected player
+  -- trainer during a short showPlayerBack/playerBackPic intro window. Latch
+  -- that authoritative signal once, then keep the selected 3D character
+  -- standing behind the player's Pokemon through the rest of a normal fight.
+  -- This owns presentation only: BattleState, turns, stats and battle flow
+  -- remain authoritative, and Safari/demo battles retain their native path.
+  local legendaryTrainer = OverworldBattle.legendaryTrainerEnabled()
+  local trainerWindow = battle.showPlayerBack and battle.playerBackPic
+  if legendaryTrainer and trainerWindow then
+    battle._red3dTrainerHandoffLatched = true
+  elseif not legendaryTrainer then
+    battle._red3dTrainerHandoffLatched = nil
+  end
+  local trainerCallback = rawget(_G, "RED3D_DIRECT_BATTLE_DRAW")
+  local trainerBattleOk = legendaryTrainer
+    and battle._red3dTrainerHandoffLatched == true
+    and type(trainerCallback) == "function"
+    and not battle.safari and not battle.demo
+    and battle.player ~= nil and battle.enemy ~= nil
+  _G.RED3D_TRAINER_INTRO_ACTIVE = trainerBattleOk and true or false
+  _G.RED3D_TRAINER_BATTLE_STATE = trainerBattleOk and battle or nil
+
   local out = {}
   local okE, enemy = pcall(OverworldBattle.sideTexture, battle, "enemy")
   local okP, player = true, nil
@@ -1453,6 +1530,17 @@ function OverworldBattle.install()
     local shot = self.dramaticShapeShot
     if not shot then
       return innerPics(self, slide, sx, sy, onlySide, skipMenuClip)
+    end
+    -- The player trainer has two independent native routes in this stack.
+    -- sideTexture suppression removes the version captured as a world card;
+    -- this removes the second copy drawn directly by BattleState over the
+    -- finished staged shot (most visible when BACK SPRITES is enabled).
+    -- Gate it on the live callback so Battle Art keeps a complete fallback
+    -- whenever the optional 3D-character mod is not present.
+    if self.showPlayerBack and self.playerBackPic
+        and rawget(_G, "RED3D_TRAINER_INTRO_ACTIVE") == true
+        and type(rawget(_G, "RED3D_DIRECT_BATTLE_DRAW")) == "function" then
+      return
     end
     if OverworldBattle.backPinned() and onlySide ~= "enemy" then
       -- under the hour's own light, like everything else in the frame -- see

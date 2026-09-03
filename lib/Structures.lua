@@ -50,6 +50,7 @@ local Buildings = V.require("Buildings")
 local TileShape = V.require("TileShape")
 local Budget = V.require("BuildBudget")
 local VisualObjects = V.require("VoxelVisualObjects")
+local CommunityVisuals = V.require("CommunityVisuals")
 
 local Structures = {}
 
@@ -139,6 +140,123 @@ local DIRS4 = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }
 
 local function keyOf(tx, ty)
   return (ty + 64) * 4096 + (tx + 64)
+end
+
+-- TEST429: the Overworld's $0E/$55 pair is not a row of independent
+-- columns. It is the authored fence family: every 2x2-tile collision cell
+-- draws one post, and adjacent cells imply the rails between them. The old
+-- per-pixel standee path preserved the picture literally, which made a long
+-- fence read as a row of thick orange/white pillars after the road palette
+-- changed around it. Build the relationship the map data already states
+-- instead: one low timber post per cell and two rails for every connection.
+--
+-- Texture still comes from the approved TEST417 bridge-timber swatches in
+-- Overworld tile $3C, so the fence belongs to the same material family
+-- without changing bridge geometry or consuming another atlas slot.
+function Structures.buildCommunityFence(S, map, postCells)
+  if not (CommunityVisuals.customCourtyards()
+      and map.tileset and map.tileset.id == "OVERWORLD") then return false end
+
+  local nodes, claimed = {}, {}
+  for _, node in pairs(postCells or {}) do
+    nodes[node.cx .. "|" .. node.cy] = node
+    for _, c in ipairs(node.tiles) do claimed[keyOf(c[1], c[2])] = true end
+  end
+  if not next(nodes) then return false end
+
+  local atlasW = map.tileset.imageWidth or 128
+  local atlasH = map.tileset.imageHeight or 48
+  local swatchTile, perRow = 60, map.tileset.tilesPerRow or 16
+  local ax = (swatchTile % perRow) * 8
+  local ay = math.floor(swatchTile / perRow) * 8
+  local sample = {
+    dark   = { (ax + 0.5) / atlasW, (ay + 0.5) / atlasH },
+    shadow = { (ax + 1.5) / atlasW, (ay + 0.5) / atlasH },
+    body   = { (ax + 2.5) / atlasW, (ay + 0.5) / atlasH },
+    light  = { (ax + 3.5) / atlasW, (ay + 0.5) / atlasH },
+  }
+  local grainUV = {
+    { (ax + 0.50) / atlasW, (ay + 7.50) / atlasH },
+    { (ax + 7.50) / atlasW, (ay + 7.50) / atlasH },
+    { (ax + 7.50) / atlasW, (ay + 0.50) / atlasH },
+    { (ax + 0.50) / atlasW, (ay + 0.50) / atlasH },
+  }
+  local quads = S.objectQuads
+
+  local function quad(c1, c2, c3, c4, tone, shade, textured)
+    local uv = sample[tone]
+    local q = {
+      c1, c2, c3, c4, u = uv[1], v = uv[2], shade = shade,
+      kantoFence = true,
+    }
+    if textured then
+      q.uv = {
+        { grainUV[1][1], grainUV[1][2] },
+        { grainUV[2][1], grainUV[2][2] },
+        { grainUV[3][1], grainUV[3][2] },
+        { grainUV[4][1], grainUV[4][2] },
+      }
+      q.kantoFenceGrain = true
+    end
+    quads[#quads + 1] = q
+  end
+
+  local function box(x0, y0, z0, x1, y1, z1)
+    quad({ x0, y0, z1 }, { x1, y0, z1 },
+         { x1, y1, z1 }, { x0, y1, z1 }, "body", 0.94, true)
+    quad({ x1, y0, z0 }, { x0, y0, z0 },
+         { x0, y1, z0 }, { x1, y1, z0 }, "shadow", 0.78, true)
+    quad({ x0, y1, z0 }, { x1, y1, z0 },
+         { x1, y1, z1 }, { x0, y1, z1 }, "light", 1.00, true)
+    quad({ x0, y0, z0 }, { x0, y0, z1 },
+         { x0, y1, z1 }, { x0, y1, z0 }, "dark", 0.82)
+    quad({ x1, y0, z1 }, { x1, y0, z0 },
+         { x1, y1, z0 }, { x1, y1, z1 }, "body", 0.88)
+  end
+
+  -- Preserve the standee path's synthesized floor behavior. Fence cells
+  -- remain the same blocked collision cells; this only chooses what is
+  -- painted beneath the new open rails where the sprite used to be.
+  for _, node in pairs(nodes) do
+    local votes, best, bestN = {}, nil, 0
+    for _, c in ipairs(node.tiles) do
+      for _, d in ipairs(DIRS4) do
+        local nk = keyOf(c[1] + d[1], c[2] + d[2])
+        local ns = S.shapeAt[nk]
+        if not claimed[nk] and ns and ns.flat and ns.class ~= "void" then
+          local tile = S.tileAt[nk]
+          votes[tile] = (votes[tile] or 0) + 1
+          if votes[tile] > bestN then best, bestN = tile, votes[tile] end
+        end
+      end
+    end
+    for _, c in ipairs(node.tiles) do
+      local k = keyOf(c[1], c[2])
+      S.skip[k], S.ground[k] = true, best or false
+    end
+  end
+
+  for _, node in pairs(nodes) do
+    Budget.tick()
+    local x = node.cx * 16 + 8
+    local z = node.cy * 16 + 8
+    -- A compact 4x4 post, deliberately lower and slimmer than the old
+    -- 16px standee. The cap rises just above the upper rail.
+    box(x - 2, 0, z - 2, x + 2, 13, z + 2)
+
+    -- Emit each connection once. Rails stop at the neighbouring post's
+    -- face, so corners and T-junctions meet cleanly without overlapping
+    -- blocks or doubling their end caps.
+    if nodes[(node.cx + 1) .. "|" .. node.cy] then
+      box(x + 2, 4, z - 1, x + 14, 6, z + 1)
+      box(x + 2, 8, z - 1, x + 14, 10, z + 1)
+    end
+    if nodes[node.cx .. "|" .. (node.cy + 1)] then
+      box(x - 1, 4, z + 2, x + 1, 6, z + 14)
+      box(x - 1, 8, z + 2, x + 1, 10, z + 14)
+    end
+  end
+  return true
 end
 
 function Structures.forMap(map)
@@ -426,14 +544,18 @@ function Structures.forMap(map)
       for tx = x0, x1 do
         local s = shapeAt[keyOf(tx, ty)]
         if s and s.art == "post" then
-          local ck = keyOf(math.floor(tx / 2), math.floor(ty / 2))
-          postCells[ck] = postCells[ck] or {}
-          local list = postCells[ck]
+          local cx, cy = math.floor(tx / 2), math.floor(ty / 2)
+          local ck = keyOf(cx, cy)
+          postCells[ck] = postCells[ck]
+            or { cx = cx, cy = cy, tiles = {} }
+          local list = postCells[ck].tiles
           list[#list + 1] = { tx, ty }
         end
       end
     end
-    for _, tiles in pairs(postCells) do
+    if not Structures.buildCommunityFence(S, map, postCells) then
+    for _, node in pairs(postCells) do
+      local tiles = node.tiles
       local reg = { tiles = tiles,
                     minX = tiles[1][1], maxX = tiles[1][1],
                     minY = tiles[1][2], maxY = tiles[1][2] }
@@ -444,6 +566,7 @@ function Structures.forMap(map)
         reg.maxY = math.max(reg.maxY, c[2])
       end
       Structures.extractObjects(S, map, reg, data, perRow, "opaque")
+    end
     end
 
     -- ---- profile-pinned relief props: top-down drawings that extrude ----
@@ -1508,17 +1631,43 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
             S.tileAt[k], S.tileAt[keyOf(cx * 2 + 1, cy * 2)],
             S.tileAt[keyOf(cx * 2, cy * 2 + 1)],
             S.tileAt[keyOf(cx * 2 + 1, cy * 2 + 1)] }, ":")
+          local granitePillar = CommunityVisuals.customPillars()
+            and tsid == "OVERWORLD" and s.class == "cylinder"
+            and S.tileAt[k] == 42 and S.tileAt[keyOf(cx * 2 + 1, cy * 2)] == 43
+            and S.tileAt[keyOf(cx * 2, cy * 2 + 1)] == 58
+            and S.tileAt[keyOf(cx * 2 + 1, cy * 2 + 1)] == 59
+          local communityTree = CommunityVisuals.customTrees()
+            and tsid == "OVERWORLD" and s.class == "cylinder"
+            and S.tileAt[k] == 64 and S.tileAt[keyOf(cx * 2 + 1, cy * 2)] == 65
+            and S.tileAt[keyOf(cx * 2, cy * 2 + 1)] == 80
+            and S.tileAt[keyOf(cx * 2 + 1, cy * 2 + 1)] == 81
+          if granitePillar then sig = sig .. "|community_granite_pillar_v1" end
+          if communityTree then sig = sig .. "|community_n64_memory_tree_v1" end
           local tpl = roundCache[sig]
           if not tpl then
-            local tq, tbg = roundTemplate(S, map, data, cx, cy,
-                                          groundTiles, 16, cap, nil, nil,
-                                          base, tall, well, taper, true)
-            tpl = { quads = tq, bg = tbg }
-            roundCache[sig] = tpl
+            local tq, tbg = roundTemplate(S, map, data, cx, cy, groundTiles, 16, cap, nil, nil, base, tall, well, taper, true)
+            tpl = { quads = tq, bg = tbg }; roundCache[sig] = tpl
           end
           ground = tpl.bg or false
-          S.roundStamps[#S.roundStamps + 1] =
-            { quads = tpl.quads, mx = cx * 16 + 8, mz = cy * 16 + 8 }
+          local stamp = { quads = tpl.quads, mx = cx * 16 + 8, mz = cy * 16 + 8 }
+          if granitePillar then
+            stamp.lift=0.01; stamp.hideCrown=true; stamp.keepTree=true
+            local reg=rawget(_G,"__bav_granite_pillars"); if not reg then reg={}; _G.__bav_granite_pillars=reg end
+            local mk=map.id or (map.def and map.def.id) or tostring(map); reg[mk]=reg[mk] or {}; reg[mk][cx.."|"..cy]=true
+          elseif communityTree then
+            local variant = (cx * 73856093 + cy * 19349663) % 5
+            local lift = (variant < 2) and 10 or ((variant < 4) and 17 or 24)
+            stamp.lift = lift
+            stamp.hideCrown = true
+            stamp.keepTree = true
+            stamp.communityTree = true
+            local reg = rawget(_G, "__ds_round_cells")
+            if not reg then reg = {}; _G.__ds_round_cells = reg end
+            local mk = map.id or (map.def and map.def.id) or tostring(map)
+            reg[mk] = reg[mk] or {}
+            reg[mk][cx .. "|" .. cy] = lift
+          end
+          S.roundStamps[#S.roundStamps + 1] = stamp
         end
         -- headless (no pixels): no hull, but still claim the tiles so
         -- the volume path never boxes a pinned cell. Ground is the
@@ -2320,6 +2469,25 @@ function Structures.buildVolume(S, map, tiles)
     end
   end
   local regionUniform = uniformTotal > 0 and uniformVotes * 2 > uniformTotal
+
+  -- TEST435 retaining masonry is a region-level structural reading, not a
+  -- broad tile recolor. The wall and its authored ledges therefore share the
+  -- same real stone courses while roofs and appended building art stay out.
+  local kantoRetaining = false
+  if CommunityVisuals.customWalls()
+      and map.tileset and map.tileset.id == "OVERWORLD"
+      and (modeRepeat or regionUniform) then
+    local sawRock, sawAppended = false, false
+    for _, c in ipairs(tiles) do
+      local tile = S.tileAt[keyOf(c[1], c[2])]
+      if type(tile) == "number" then
+        if tile >= 96 then sawAppended = true end
+        if tile == 17 then sawRock = true end
+      end
+    end
+    kantoRetaining = sawRock and not sawAppended
+  end
+
   for _, r in ipairs(runs) do
     local run = r.run
     local h = run.unit * 8
@@ -2356,7 +2524,7 @@ function Structures.buildVolume(S, map, tiles)
     -- wrong instantly. Distinct top rows -> slope; repeated -> level top.
     local roofRows = 0
     if S.outdoor and (not run.fromRepeat or adopted) and h >= 16
-       and not flatDoor then
+       and not flatDoor and not kantoRetaining then
       roofRows = math.min(2, math.floor(h / 8) - 1)
       if roofRows > 0 and map:tileAt(r.tx, run.north)
                          == map:tileAt(r.tx, run.north + 1) then
@@ -2368,6 +2536,7 @@ function Structures.buildVolume(S, map, tiles)
     run.peak = h
     run.h = h - run.rise               -- facade height: what sides build to
     run.topUniform = run.ownUniform or regionUniform
+    run.kantoRetaining = kantoRetaining or nil
     for ty = run.north, run.front do
       S.runs[keyOf(r.tx, ty)] = run
     end

@@ -463,6 +463,20 @@ function Disk.fingerprint(map, slot, masks, kind)
     "row", tostring(tileset.tilesPerRow),
     "trueColor", tileset.trueColor and "1" or "0",
   }
+  -- Community visuals are real geometry/UV inputs. Keep each choice in the
+  -- canonical fingerprint so a DEFAULT cache can never be reused for custom
+  -- trees/fences/pillars (or vice versa), while every default remains the
+  -- creator's original cache family.
+  local CommunityVisuals = V.require("CommunityVisuals")
+  -- Final contract: brick courses, bridge boards, crown-lock and the
+  -- grain-mapped TEST435 fence must never reuse an older community mesh.
+  parts[#parts + 1] = "legendary-visuals-final"
+  parts[#parts + 1] = CommunityVisuals.layout()
+  parts[#parts + 1] = CommunityVisuals.trees:get()
+  parts[#parts + 1] = CommunityVisuals.grass:get()
+  parts[#parts + 1] = CommunityVisuals.roads:get()
+  parts[#parts + 1] = CommunityVisuals.walls:get()
+  parts[#parts + 1] = CommunityVisuals.courtyards:get()
   -- VOID FILL (trees vs black) only changes the apron ring that sits in the
   -- FULL slot (see Structures.lua hullRingOnly / RING). The BODY slot builds
   -- r=0 (no ring) so its vertices never vary with void fill, and AUX carries

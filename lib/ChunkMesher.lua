@@ -56,6 +56,7 @@ local TileShape = V.require("TileShape")
 local Voxel3D = V.require("Voxel3D")
 local Budget = V.require("BuildBudget")
 local MeshDisk = V.require("VoxelMeshDisk")
+local CommunityVisuals = V.require("CommunityVisuals")
 
 local ffi = nil
 do
@@ -64,6 +65,45 @@ do
 end
 
 local ChunkMesher = {}
+
+-- Exact TEST435 material identities. These remain visual classifiers only;
+-- Battle Art collision and source map tiles are never changed.
+local KANTO_PATH_TILE = { [35] = true, [57] = true }
+local KANTO_COURTYARD_ANCHOR_TILE = { [16] = true, [33] = true }
+local KANTO_BLOCK55_COURT_TILE = 91
+local KANTO_PATH_SWATCH_TILE = 57
+local KANTO_WOOD_TILE = 60
+local KANTO_GRASS_TILE = 44
+
+function ChunkMesher.kantoSurfaceKind(tilesetId, class, tile)
+  if tilesetId ~= "OVERWORLD" or class ~= "ground" then return nil end
+  if KANTO_PATH_TILE[tile] then return "path" end
+  if tile == KANTO_WOOD_TILE then return "wood" end
+  return nil
+end
+
+function ChunkMesher.kantoCourtyardMember(tile, hasAnchor)
+  return KANTO_COURTYARD_ANCHOR_TILE[tile] == true
+         or (tile == 35 and hasAnchor == true)
+end
+
+function ChunkMesher.kantoBlock55CourtyardMember(tile)
+  return tile == KANTO_BLOCK55_COURT_TILE
+end
+
+function ChunkMesher.kantoWoodAxis(isWood, tx, ty)
+  local function span(dx, dy)
+    local n = 1
+    for sign = -1, 1, 2 do
+      for step = 1, 8 do
+        if not isWood(tx + dx * step * sign, ty + dy * step * sign) then break end
+        n = n + 1
+      end
+    end
+    return n
+  end
+  return span(0, 1) >= span(1, 0) and "z" or "x"
+end
 
 local function visualObjectVisible(id)
   if id == nil then return true end
@@ -680,6 +720,600 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
 
   local r = bodyOnly and 0 or RING * 4
 
+  -- TEST402 Kanto bedrock. TerrainAtlas writes these four warm-stone
+  -- swatches into the first row of every authored ledge tile.  Sampling
+  -- those texels keeps the replacement inside the existing terrain atlas:
+  -- one cached chunk, one material, one draw call.
+  local ROCK_TEXEL = {
+    dark = { 0, 0 }, shadow = { 1, 0 },
+    body = { 2, 0 }, light = { 3, 0 },
+  }
+
+  -- TEST403 Kanto retaining walls.  The cliff-mound family reuses tile 17
+  -- for its broad body and the authored 2/36 corner-and-side pair.  Those
+  -- same tile ids occur in roofs and walkable art, so the tile number alone
+  -- is not permission to replace them: the resolved shape must still be an
+  -- upright OVERWORLD wall.  Profiled buildings are claimed by Structures
+  -- before this terrain path, which keeps their facades and roofs untouched.
+  local KANTO_RETAINING_TILE = { [2] = true, [17] = true, [36] = true }
+  local RETAINING_SWATCH_TILE = 13
+
+  -- TEST416 paths.  $23 is the blank companion used around the dotted $39
+  -- road tile; both become one continuous world-space limestone field. $3C
+  -- is the real authored bridge surface (Route 24 block $54) and becomes wood.
+  -- Classification stays visual only: TileShape, collision and map data are
+  -- never changed.
+  local function kantoSurfaceKind(s, tile)
+    if not CommunityVisuals.customRoads() then return nil end
+    return s and ChunkMesher.kantoSurfaceKind(tileset.id, s.class, tile) or nil
+  end
+
+  local function isKantoWoodAt(tx, ty)
+    local s = S.shapeAt[keyOf(tx, ty)]
+    return s and s.class == "ground"
+           and S.tileAt[keyOf(tx, ty)] == KANTO_WOOD_TILE
+  end
+
+  local function isKantoPathAt(tx, ty)
+    local s = S.shapeAt[keyOf(tx, ty)]
+    return s and s.class == "ground"
+           and KANTO_PATH_TILE[S.tileAt[keyOf(tx, ty)]] == true
+  end
+
+  -- TEST435: a claimed wall/prop cell can inherit the generic path tile even
+  -- when only a narrow rim of that floor remains visible. Continue the real
+  -- neighbouring material into that hidden cell so bridge timber and turf
+  -- meet their pillars, trees and fences instead of stopping at a packed-
+  -- earth outline. Only visible cardinal ground is allowed to vote; this
+  -- prevents the finish from propagating through a structure or across a
+  -- genuine road border. Timber wins when a bridge and grass meet at an end.
+  local function claimedPathFinishAt(tx, ty)
+    if tileset.id ~= "OVERWORLD" then return nil end
+    local grass = false
+    for _, side in ipairs(SIDES) do
+      local nk = keyOf(tx + side[1], ty + side[2])
+      local ns = S.shapeAt[nk]
+      if not S.skip[nk] and ns and ns.class == "ground" then
+        local tile = S.tileAt[nk]
+        if tile == KANTO_WOOD_TILE then
+          return "wood", ChunkMesher.kantoWoodAxis(
+            isKantoWoodAt, tx + side[1], ty + side[2])
+        end
+        if tile == KANTO_GRASS_TILE then grass = true end
+      end
+    end
+    return grass and "grass" or nil
+  end
+
+  -- TEST431: structure stamping may replace the visible shape and synthesized
+  -- ground, but it deliberately leaves S.tileAt as the untouched map source.
+  -- Read that source family here. TEST430 looked at S.ground after stamping,
+  -- which is why the house court's original orange/white panel survived.
+  -- The 3x3 context reaches a $10/$21 anchor from every $23 member of the
+  -- authored $5D/$5E court blocks without turning ordinary $23 roads to stone.
+  local function isKantoCourtyardAt(tx, ty, synthesizedTile)
+    if not CommunityVisuals.customCourtyards() then return false end
+    if tileset.id ~= "OVERWORLD" then return false end
+    local tile = S.tileAt[keyOf(tx, ty)]
+    -- TEST433: $5B occurs only in the all-$5B courtyard block $55. Props and
+    -- building claims can replace the source tile while inheriting $5B as
+    -- their synthesized floor, so accept either owner. This removes slivers
+    -- beneath signs and applies the material to every authored $55 court.
+    if ChunkMesher.kantoBlock55CourtyardMember(tile)
+       or ChunkMesher.kantoBlock55CourtyardMember(synthesizedTile) then
+      return true
+    end
+    if KANTO_COURTYARD_ANCHOR_TILE[tile] then return true end
+    if tile ~= 35 then return false end
+    for dy = -1, 1 do
+      for dx = -1, 1 do
+        if (dx ~= 0 or dy ~= 0)
+           and KANTO_COURTYARD_ANCHOR_TILE[
+                 S.tileAt[keyOf(tx + dx, ty + dy)]] then
+          return true
+        end
+      end
+    end
+    return false
+  end
+
+  local function isKantoRetainingWall(s, tile, run)
+    return CommunityVisuals.customWalls() and tileset.id == "OVERWORLD" and (
+      (run and run.kantoRetaining == true)
+      or (s and s.class == "wall" and KANTO_RETAINING_TILE[tile] == true)
+    )
+  end
+
+  local function rockUV(tile, sample)
+    local ax = (tile % perRow) * 8
+    local ay = math.floor(tile / perRow) * 8
+    return { (ax + sample[1] + 0.5) / atlasW,
+             (ay + sample[2] + 0.5) / atlasH }
+  end
+
+  local function pushSolid(c, uv, shade)
+    push(c, { uv, uv, uv, uv }, shade)
+  end
+
+  local function shadeTimes(shade, k)
+    if type(shade) ~= "table" then return shade * k end
+    return { shade[1] * k, shade[2] * k,
+             shade[3] * k, shade[4] * k }
+  end
+
+  -- Stable world-space variation.  It is evaluated only while the chunk is
+  -- built, so camera movement, weather and battles cannot make a stone pop
+  -- or change shape.
+  local function rockNoise(a, b, salt)
+    local n = a * 73856093 + b * 19349663 + salt * 83492791
+    n = n % 104729
+    if n < 0 then n = n + 104729 end
+    return n / 104729
+  end
+
+  -- Shared boundaries for a staggered world-space stone field.  The old
+  -- attempt split every eight-pixel tile in half, which simply exchanged
+  -- the zig-zag for gold wall panels. These courses are six by four pixels
+  -- on average, cross tile edges, and vary their widths deterministically.
+  local function rockXBoundary(col, row)
+    local stagger = (row % 2 ~= 0) and 3 or 0
+    return col * 6 + stagger + (rockNoise(col, row, 1) - 0.5) * 1.15
+  end
+
+  local function rockZBoundary(row)
+    return row * 4 + (rockNoise(row, 0, 2) - 0.5) * 0.70
+  end
+
+  local function ledgeRockTop(tx, ty, x0, z0, h, tile, shade)
+    local x1, z1 = x0 + 8, z0 + 8
+    local uvDark = rockUV(tile, ROCK_TEXEL.dark)
+    local uvShadow = rockUV(tile, ROCK_TEXEL.shadow)
+    local uvBody = rockUV(tile, ROCK_TEXEL.body)
+    local uvLight = rockUV(tile, ROCK_TEXEL.light)
+
+    -- Recessed stone bed: every gap exposes this instead of the old art.
+    pushSolid({ { x0, h, z0 }, { x1, h, z0 },
+                { x1, h, z1 }, { x0, h, z1 } },
+              uvDark, shadeTimes(shade, 0.82))
+
+    local gap = 0.16
+    local firstRow = math.floor((z0 - 5) / 4) - 1
+    local lastRow = math.ceil((z1 + 5) / 4) + 1
+    for row = firstRow, lastRow do
+      local zs, ze = rockZBoundary(row), rockZBoundary(row + 1)
+      if ze > z0 and zs < z1 then
+        local stagger = (row % 2 ~= 0) and 3 or 0
+        local firstCol = math.floor((x0 - stagger - 8) / 6) - 1
+        local lastCol = math.ceil((x1 - stagger + 8) / 6) + 1
+        for col = firstCol, lastCol do
+          local xs = rockXBoundary(col, row)
+          local xe = rockXBoundary(col + 1, row)
+          if xe > x0 and xs < x1 then
+            -- Gaps belong to real stone boundaries, never to the invisible
+            -- 8px clipping boundary: one rock crossing two tiles stays one.
+            local sx = math.max(x0, xs + gap)
+            local ex = math.min(x1, xe - gap)
+            local sz = math.max(z0, zs + gap)
+            local ez = math.min(z1, ze - gap)
+            if ex > sx and ez > sz then
+              local variation = rockNoise(col, row, 3)
+              local uv = variation > 0.82 and uvLight
+                         or variation < 0.16 and uvShadow or uvBody
+              local tone = 0.91 + rockNoise(col, row, 4) * 0.13
+              pushSolid({ { sx, h + 0.12, sz }, { ex, h + 0.12, sz },
+                          { ex, h + 0.12, ez }, { sx, h + 0.12, ez } },
+                        uv, shadeTimes(shade, tone))
+            end
+          end
+        end
+      end
+    end
+  end
+
+  local function pathExtent(tx, ty, dx, dy)
+    local n = 0
+    for i = 1, 8 do
+      if not isKantoPathAt(tx + dx * i, ty + dy * i) then break end
+      n = n + 1
+    end
+    return n
+  end
+
+  -- Full-tile orientations break the source repeat while retaining one flat
+  -- quad. The subdued atlas marks are embedded grain, never raised objects.
+  local function pavedUV(tile, variant)
+    local u0, u1, v0, v1 = uvRect(tile, 0, 8)
+    if variant == 1 then
+      return { { u1, v0 }, { u0, v0 }, { u0, v1 }, { u1, v1 } }
+    elseif variant == 2 then
+      return { { u0, v1 }, { u1, v1 }, { u1, v0 }, { u0, v0 } }
+    elseif variant == 3 then
+      return { { u1, v1 }, { u0, v1 }, { u0, v0 }, { u1, v0 } }
+    end
+    return { { u0, v0 }, { u1, v0 }, { u1, v1 }, { u0, v1 } }
+  end
+
+  local function smoothPathNoise(x, z, salt)
+    local scale = 32
+    local gx, gz = x / scale, z / scale
+    local ix, iz = math.floor(gx), math.floor(gz)
+    local fx, fz = gx - ix, gz - iz
+    fx, fz = fx * fx * (3 - 2 * fx), fz * fz * (3 - 2 * fz)
+    local n00 = rockNoise(ix, iz, salt)
+    local n10 = rockNoise(ix + 1, iz, salt)
+    local n01 = rockNoise(ix, iz + 1, salt)
+    local n11 = rockNoise(ix + 1, iz + 1, salt)
+    local nx0, nx1 = n00 + (n10 - n00) * fx,
+                           n01 + (n11 - n01) * fx
+    return nx0 + (nx1 - nx0) * fz
+  end
+
+  local function pavedShades(tx, ty, x0, z0, shade)
+    local west, east = pathExtent(tx, ty, -1, 0), pathExtent(tx, ty, 1, 0)
+    local north, south = pathExtent(tx, ty, 0, -1), pathExtent(tx, ty, 0, 1)
+    local horizontal, vertical = west + east, north + south
+    local travelAxis, travelCenter, travelHalf
+    if vertical >= horizontal + 2 then
+      local edge0, edge1 = x0 - west * 8, x0 + (east + 1) * 8
+      travelAxis, travelCenter = 1, (edge0 + edge1) * 0.5
+      travelHalf = math.max(1, (edge1 - edge0) * 0.5)
+    elseif horizontal >= vertical + 2 then
+      local edge0, edge1 = z0 - north * 8, z0 + (south + 1) * 8
+      travelAxis, travelCenter = 2, (edge0 + edge1) * 0.5
+      travelHalf = math.max(1, (edge1 - edge0) * 0.5)
+    end
+
+    local nw = (west == 0 or north == 0) and 1.015 or 1
+    local ne = (east == 0 or north == 0) and 1.015 or 1
+    local se = (east == 0 or south == 0) and 1.015 or 1
+    local sw = (west == 0 or south == 0) and 1.015 or 1
+    local corners = {
+      { x0, z0, nw }, { x0 + 8, z0, ne },
+      { x0 + 8, z0 + 8, se }, { x0, z0 + 8, sw },
+    }
+    local out = {}
+    for i, corner in ipairs(corners) do
+      local base = type(shade) == "table" and shade[i] or shade
+      local terrainTone = 0.97 + smoothPathNoise(corner[1], corner[2], 422) * 0.06
+      local travelTone = 1
+      if travelAxis then
+        travelTone = 0.95 + math.min(1,
+          math.abs(corner[travelAxis] - travelCenter) / travelHalf) * 0.05
+      end
+      out[i] = base * terrainTone * travelTone * corner[3]
+    end
+    return out
+  end
+
+  -- TEST422 ordinary roads are exactly one flat quad. Fine atlas grain and
+  -- continuous world-space corner shading provide depth without seams,
+  -- bricks, cracks, floating marks, or additional collision geometry.
+  local function kantoPavedTop(tx, ty, x0, z0, h, shade)
+    local x1, z1 = x0 + 8, z0 + 8
+    local variant = math.floor(rockNoise(tx, ty, 422) * 4)
+    push({ { x0, h, z0 }, { x1, h, z0 },
+           { x1, h, z1 }, { x0, h, z1 } },
+         pavedUV(KANTO_PATH_SWATCH_TILE, variant),
+         pavedShades(tx, ty, x0, z0, shade))
+  end
+
+  -- TEST430's house court uses broad, quiet limestone flags rather than a
+  -- second dirt road or another field of brick-sized marks. Slab boundaries
+  -- live in world space and cross the source 8px tile grid; the tiny recessed
+  -- bed supplies hairline joints while collision remains the original plane.
+  local function courtyardXBoundary(col, row)
+    local stagger = (row % 2 ~= 0) and 8.5 or 0
+    return col * 17 + stagger
+           + (rockNoise(col, row, 430) - 0.5) * 1.0
+  end
+
+  local function courtyardZBoundary(row)
+    return row * 12 + (rockNoise(row, 0, 431) - 0.5) * 0.7
+  end
+
+  local function kantoCourtyardTop(tx, ty, x0, z0, h, shade)
+    local x1, z1 = x0 + 8, z0 + 8
+    local uvJoint = rockUV(KANTO_PATH_SWATCH_TILE, ROCK_TEXEL.dark)
+    local uvShadow = rockUV(KANTO_PATH_SWATCH_TILE, ROCK_TEXEL.shadow)
+    local uvBody = rockUV(KANTO_PATH_SWATCH_TILE, ROCK_TEXEL.body)
+    local uvLight = rockUV(KANTO_PATH_SWATCH_TILE, ROCK_TEXEL.light)
+    pushSolid({ { x0, h, z0 }, { x1, h, z0 },
+                { x1, h, z1 }, { x0, h, z1 } },
+              uvJoint, shadeTimes(shade, 0.965))
+
+    local gap = 0.10
+    local firstRow = math.floor((z0 - 13) / 12) - 1
+    local lastRow = math.ceil((z1 + 13) / 12) + 1
+    for row = firstRow, lastRow do
+      local zs, ze = courtyardZBoundary(row), courtyardZBoundary(row + 1)
+      if ze > z0 and zs < z1 then
+        local stagger = (row % 2 ~= 0) and 8.5 or 0
+        local firstCol = math.floor((x0 - stagger - 18) / 17) - 1
+        local lastCol = math.ceil((x1 - stagger + 18) / 17) + 1
+        for col = firstCol, lastCol do
+          local xs = courtyardXBoundary(col, row)
+          local xe = courtyardXBoundary(col + 1, row)
+          if xe > x0 and xs < x1 then
+            local sx, ex = math.max(x0, xs + gap), math.min(x1, xe - gap)
+            local sz, ez = math.max(z0, zs + gap), math.min(z1, ze - gap)
+            if ex > sx and ez > sz then
+              local variation = rockNoise(col, row, 432)
+              local uv = variation > 0.84 and uvLight
+                         or variation < 0.13 and uvShadow or uvBody
+              local tone = 0.985 + rockNoise(col, row, 433) * 0.03
+              pushSolid({ { sx, h + 0.025, sz }, { ex, h + 0.025, sz },
+                          { ex, h + 0.025, ez }, { sx, h + 0.025, ez } },
+                        uv, shadeTimes(shade, tone))
+            end
+          end
+        end
+      end
+    end
+  end
+
+  local function grassShades(x0, z0, shade)
+    local corners = {
+      { x0, z0 }, { x0 + 8, z0 },
+      { x0 + 8, z0 + 8 }, { x0, z0 + 8 },
+    }
+    local out = {}
+    for i, corner in ipairs(corners) do
+      local base = type(shade) == "table" and shade[i] or shade
+      local worldTone = 0.96 + smoothPathNoise(corner[1], corner[2], 425) * 0.08
+      out[i] = base * worldTone
+    end
+    return out
+  end
+
+  -- TEST425 plain turf remains one flat cached terrain quad. Deterministic
+  -- UV rotation breaks the old maze repeat; slow world-coordinate shading
+  -- supplies broad natural variation without touching tall grass or flora.
+  local function kantoGrassTop(tx, ty, x0, z0, h, shade)
+    local x1, z1 = x0 + 8, z0 + 8
+    local variant = math.floor(rockNoise(tx, ty, 425) * 4)
+    push({ { x0, h, z0 }, { x1, h, z0 },
+           { x1, h, z1 }, { x0, h, z1 } },
+         pavedUV(KANTO_GRASS_TILE, variant),
+         grassShades(x0, z0, shade))
+  end
+
+  local function woodRect(axis, across0, across1, along0, along1, y)
+    if axis == "z" then
+      return { { across0, y, along0 }, { across1, y, along0 },
+               { across1, y, along1 }, { across0, y, along1 } }
+    end
+    return { { along0, y, across0 }, { along1, y, across0 },
+             { along1, y, across1 }, { along0, y, across1 } }
+  end
+
+  -- Warm crosswise timber boards for authored bridge/deck tile $3C.  The
+  -- connected deck's long axis selects board orientation, while staggered
+  -- world-space end joints and sparse grain strokes remove the old orange
+  -- eight-pixel repeat without turning the bridge into a high-frequency mat.
+  local function kantoWoodTop(tx, ty, x0, z0, h, shade, axisOverride)
+    local axis = axisOverride
+                 or ChunkMesher.kantoWoodAxis(isKantoWoodAt, tx, ty)
+    local across0, across1 = x0, x0 + 8
+    local along0, along1 = z0, z0 + 8
+    if axis == "x" then
+      across0, across1, along0, along1 = z0, z0 + 8, x0, x0 + 8
+    end
+    local uvDark = rockUV(KANTO_WOOD_TILE, ROCK_TEXEL.dark)
+    local uvShadow = rockUV(KANTO_WOOD_TILE, ROCK_TEXEL.shadow)
+    local uvBody = rockUV(KANTO_WOOD_TILE, ROCK_TEXEL.body)
+    local uvLight = rockUV(KANTO_WOOD_TILE, ROCK_TEXEL.light)
+
+    pushSolid(woodRect(axis, across0, across1, along0, along1, h),
+              uvDark, shadeTimes(shade, 0.92))
+
+    local boardDepth, boardLength, gap, salt = 3.2, 13.0, 0.11, 220
+    local firstRow = math.floor((along0 - boardDepth) / boardDepth) - 1
+    local lastRow = math.ceil((along1 + boardDepth) / boardDepth) + 1
+    for row = firstRow, lastRow do
+      local a0 = row * boardDepth
+                 + (rockNoise(row, 0, salt) - 0.5) * 0.18
+      local a1 = (row + 1) * boardDepth
+                 + (rockNoise(row + 1, 0, salt) - 0.5) * 0.18
+      if a1 > along0 and a0 < along1 then
+        local stagger = (row % 2 ~= 0) and boardLength * 0.5 or 0
+        local firstCol = math.floor((across0 - stagger - boardLength)
+                                    / boardLength) - 1
+        local lastCol = math.ceil((across1 - stagger + boardLength)
+                                  / boardLength) + 1
+        for col = firstCol, lastCol do
+          local c0 = col * boardLength + stagger
+                     + (rockNoise(col, row, salt + 1) - 0.5) * 0.34
+          local c1 = (col + 1) * boardLength + stagger
+                     + (rockNoise(col + 1, row, salt + 1) - 0.5) * 0.34
+          if c1 > across0 and c0 < across1 then
+            local sc, ec = math.max(across0, c0 + gap),
+                           math.min(across1, c1 - gap)
+            local sa, ea = math.max(along0, a0 + gap),
+                           math.min(along1, a1 - gap)
+            if ec > sc and ea > sa then
+              local variation = rockNoise(col, row, salt + 2)
+              local uv = variation > 0.88 and uvLight
+                         or variation < 0.12 and uvShadow or uvBody
+              local tone = 0.94 + rockNoise(col, row, salt + 3) * 0.11
+              pushSolid(woodRect(axis, sc, ec, sa, ea, h + 0.06),
+                        uv, shadeTimes(shade, tone))
+
+              if ec - sc > 2.6 and rockNoise(col, row, salt + 4) > 0.48 then
+                local grainA = sa + (ea - sa) * 0.68
+                local grainC0, grainC1 = sc + 0.65, ec - 0.65
+                if grainC1 > grainC0 then
+                  pushSolid(woodRect(axis, grainC0, grainC1,
+                                     grainA, math.min(ea, grainA + 0.055),
+                                     h + 0.065),
+                            uvShadow, shadeTimes(shade, tone * 0.94))
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  local function faceAxisPoint(d, x0, z0, axis, y, out)
+    if d == 5 then return { axis, y, z0 + 8 + out } end  -- south
+    if d == 6 then return { axis, y, z0 - out } end      -- north
+    if d == 1 then return { x0 + 8 + out, y, axis } end  -- east
+    return { x0 - out, y, axis }                         -- west
+  end
+
+  local function ledgeRockSide(d, tx, ty, x0, z0, y0, y1,
+                               tile, shade)
+    local uvDark = rockUV(tile, ROCK_TEXEL.dark)
+    local uvShadow = rockUV(tile, ROCK_TEXEL.shadow)
+    local uvBody = rockUV(tile, ROCK_TEXEL.body)
+    local uvLight = rockUV(tile, ROCK_TEXEL.light)
+    local axis0 = (d == 5 or d == 6) and x0 or z0
+    local axis1 = axis0 + 8
+
+    pushSolid({ faceAxisPoint(d, x0, z0, axis0, y0, 0),
+                faceAxisPoint(d, x0, z0, axis1, y0, 0),
+                faceAxisPoint(d, x0, z0, axis1, y1, 0),
+                faceAxisPoint(d, x0, z0, axis0, y1, 0) },
+              uvDark, shadeTimes(shade, 0.76))
+
+    local rows = 2
+    local rowH = (y1 - y0) / rows
+    local gap = 0.16
+    local depth = 0.30
+    for row = 0, rows - 1 do
+      local ys = y0 + row * rowH
+      local ye = y0 + (row + 1) * rowH
+      local offset = (row % 2 ~= 0) and 3 or 0
+      local firstCol = math.floor((axis0 - offset - 8) / 6) - 1
+      local lastCol = math.ceil((axis1 - offset + 8) / 6) + 1
+      for col = firstCol, lastCol do
+        -- Direction joins the seed only for colour; physical boundaries
+        -- stay shared between opposite sides and around corners.
+        local xs = col * 6 + offset
+                   + (rockNoise(col, row, 10) - 0.5) * 1.15
+        local xe = (col + 1) * 6 + offset
+                   + (rockNoise(col + 1, row, 10) - 0.5) * 1.15
+        if xe > axis0 and xs < axis1 then
+          local sx = math.max(axis0, xs + gap)
+          local ex = math.min(axis1, xe - gap)
+          local sy = ys + gap
+          local ey = ye - gap
+          if ex > sx and ey > sy then
+            local bbl = faceAxisPoint(d, x0, z0, sx, sy, 0)
+            local bbr = faceAxisPoint(d, x0, z0, ex, sy, 0)
+            local btr = faceAxisPoint(d, x0, z0, ex, ey, 0)
+            local btl = faceAxisPoint(d, x0, z0, sx, ey, 0)
+            local fbl = faceAxisPoint(d, x0, z0, sx, sy, depth)
+            local fbr = faceAxisPoint(d, x0, z0, ex, sy, depth)
+            local ftr = faceAxisPoint(d, x0, z0, ex, ey, depth)
+            local ftl = faceAxisPoint(d, x0, z0, sx, ey, depth)
+            local variation = rockNoise(col, row, 20 + d)
+            local uv = variation > 0.82 and uvLight
+                       or variation < 0.16 and uvShadow or uvBody
+            local tone = 0.91 + rockNoise(col, row, 30 + d) * 0.12
+
+            pushSolid({ fbl, fbr, ftr, ftl }, uv,
+                      shadeTimes(shade, tone))
+            pushSolid({ btl, btr, ftr, ftl }, uvLight,
+                      shadeTimes(shade, 0.96))
+            pushSolid({ bbr, bbl, fbl, fbr }, uvShadow,
+                      shadeTimes(shade, 0.82))
+
+            -- Do not bevel an artificial tile clip: when the same stone
+            -- continues into the neighbour, both pieces meet seamlessly.
+            if xs + gap >= axis0 - 0.001 then
+              pushSolid({ bbl, btl, ftl, fbl }, uvShadow,
+                        shadeTimes(shade, 0.86))
+            end
+            if xe - gap <= axis1 + 0.001 then
+              pushSolid({ btr, bbr, fbr, ftr }, uvBody,
+                        shadeTimes(shade, 0.88))
+            end
+          end
+        end
+      end
+    end
+  end
+
+  -- A taller companion to TEST402's six-pixel ledge face.  Courses are
+  -- locked to world Y, so a 16/32px wall receives four/eight continuous
+  -- courses even though the ordinary mesher visits its side in 8px bands.
+  -- Horizontal joints use the same six-pixel rhythm as the accepted ledges,
+  -- but a different stable noise salt keeps the wall from looking stamped.
+  local function retainingRockSide(d, x0, z0, y0, y1, shade)
+    local tile = RETAINING_SWATCH_TILE
+    local uvDark = rockUV(tile, ROCK_TEXEL.dark)
+    local uvShadow = rockUV(tile, ROCK_TEXEL.shadow)
+    local uvBody = rockUV(tile, ROCK_TEXEL.body)
+    local uvLight = rockUV(tile, ROCK_TEXEL.light)
+    local axis0 = (d == 5 or d == 6) and x0 or z0
+    local axis1 = axis0 + 8
+
+    pushSolid({ faceAxisPoint(d, x0, z0, axis0, y0, 0),
+                faceAxisPoint(d, x0, z0, axis1, y0, 0),
+                faceAxisPoint(d, x0, z0, axis1, y1, 0),
+                faceAxisPoint(d, x0, z0, axis0, y1, 0) },
+              uvDark, shadeTimes(shade, 0.74))
+
+    local courseH = 4
+    local gap = 0.16
+    local depth = 0.28
+    local firstRow = math.floor(y0 / courseH)
+    local lastRow = math.ceil(y1 / courseH) - 1
+    for row = firstRow, lastRow do
+      local ys = math.max(y0, row * courseH)
+      local ye = math.min(y1, (row + 1) * courseH)
+      local offset = (row % 2 ~= 0) and 3 or 0
+      local firstCol = math.floor((axis0 - offset - 8) / 6) - 1
+      local lastCol = math.ceil((axis1 - offset + 8) / 6) + 1
+      for col = firstCol, lastCol do
+        local xs = col * 6 + offset
+                   + (rockNoise(col, row, 41) - 0.5) * 1.05
+        local xe = (col + 1) * 6 + offset
+                   + (rockNoise(col + 1, row, 41) - 0.5) * 1.05
+        if xe > axis0 and xs < axis1 then
+          local sx = math.max(axis0, xs + gap)
+          local ex = math.min(axis1, xe - gap)
+          local sy = ys + gap
+          local ey = ye - gap
+          if ex > sx and ey > sy then
+            local bbl = faceAxisPoint(d, x0, z0, sx, sy, 0)
+            local bbr = faceAxisPoint(d, x0, z0, ex, sy, 0)
+            local btr = faceAxisPoint(d, x0, z0, ex, ey, 0)
+            local btl = faceAxisPoint(d, x0, z0, sx, ey, 0)
+            local fbl = faceAxisPoint(d, x0, z0, sx, sy, depth)
+            local fbr = faceAxisPoint(d, x0, z0, ex, sy, depth)
+            local ftr = faceAxisPoint(d, x0, z0, ex, ey, depth)
+            local ftl = faceAxisPoint(d, x0, z0, sx, ey, depth)
+            local variation = rockNoise(col, row, 50 + d)
+            local uv = variation > 0.84 and uvLight
+                       or variation < 0.14 and uvShadow or uvBody
+            local tone = 0.90 + rockNoise(col, row, 60 + d) * 0.12
+
+            pushSolid({ fbl, fbr, ftr, ftl }, uv,
+                      shadeTimes(shade, tone))
+            pushSolid({ btl, btr, ftr, ftl }, uvLight,
+                      shadeTimes(shade, 0.94))
+            pushSolid({ bbr, bbl, fbl, fbr }, uvShadow,
+                      shadeTimes(shade, 0.80))
+
+            -- A stone clipped only by the hidden 8px source-tile boundary
+            -- resumes in the neighbour without receiving a fake end bevel.
+            if xs + gap >= axis0 - 0.001 then
+              pushSolid({ bbl, btl, ftl, fbl }, uvShadow,
+                        shadeTimes(shade, 0.84))
+            end
+            if xe - gap <= axis1 + 0.001 then
+              pushSolid({ btr, bbr, fbr, ftr }, uvBody,
+                        shadeTimes(shade, 0.87))
+            end
+          end
+        end
+      end
+    end
+  end
+
   -- true when the (ring) position lies under a connected neighbour's body
   local function masked(px0, pz0, px1, pz1)
     if not masks then return false end
@@ -733,7 +1367,24 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
         -- prebuilt prism quads (appended below) carry the art
         local g = S.ground[k]
         if g then
-          topQuad(tx * 8, ty * 8, 0, g, 1)
+          if isKantoCourtyardAt(tx, ty, g) then
+            kantoCourtyardTop(tx, ty, tx * 8, ty * 8, 0,
+                             aoShades(tx, ty, 0, 1))
+          elseif CommunityVisuals.customRoads() and KANTO_PATH_TILE[g] then
+            local finish, finishAxis = claimedPathFinishAt(tx, ty)
+            if finish == "wood" then
+              kantoWoodTop(tx, ty, tx * 8, ty * 8, 0,
+                           aoShades(tx, ty, 0, 1), finishAxis)
+            elseif finish == "grass" and CommunityVisuals.customGrass() then
+              kantoGrassTop(tx, ty, tx * 8, ty * 8, 0,
+                            aoShades(tx, ty, 0, 1))
+            else
+              kantoPavedTop(tx, ty, tx * 8, ty * 8, 0,
+                            aoShades(tx, ty, 0, 1))
+            end
+          else
+            topQuad(tx * 8, ty * 8, 0, g, 1)
+          end
           -- the claimed tile is still ground at height 0, and water next
           -- door still recesses below it: without the same below-ground
           -- side bands ordinary ground emits, the two-pixel shoreline
@@ -807,7 +1458,12 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
         elseif run then
           local topTile = s.topTile
             or map:tileAt(tx, ChunkMesher.flatTopRow(run, ty))
-          topQuad(x0, z0, h, topTile, VOLUME_TOP_SHADE)
+          if isKantoRetainingWall(s, tile, run) then
+            ledgeRockTop(tx, ty, x0, z0, h, RETAINING_SWATCH_TILE,
+                         aoShades(tx, ty, h, VOLUME_TOP_SHADE))
+          else
+            topQuad(x0, z0, h, topTile, VOLUME_TOP_SHADE)
+          end
         else
           local topTile = s.topTile or tile
           if s.art == "upright" and s.authored then
@@ -852,9 +1508,28 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           -- stands on took the branch above and paints synthesized GROUND,
           -- which is right -- a sign at the waterline stands on a plot, not
           -- on the pond.
-          topQuad(x0, z0, h, topTile,
-                  s.art == "upright" and VOLUME_TOP_SHADE or 1,
-                  (s.class == "water") and waterPush or nil)
+          local paved = kantoSurfaceKind(s, tile)
+          if isKantoCourtyardAt(tx, ty) and s.flat then
+            kantoCourtyardTop(tx, ty, x0, z0, h,
+                             aoShades(tx, ty, h, 1))
+          elseif paved == "path" then
+            kantoPavedTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
+          elseif paved == "wood" then
+            kantoWoodTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
+          elseif CommunityVisuals.customGrass() and tileset.id == "OVERWORLD"
+                 and s.class == "ground" and topTile == KANTO_GRASS_TILE then
+            kantoGrassTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
+          elseif CommunityVisuals.customWalls() and s.class == "ledge" then
+            ledgeRockTop(tx, ty, x0, z0, h, topTile,
+                         aoShades(tx, ty, h, 1))
+          elseif isKantoRetainingWall(s, tile, run) then
+            ledgeRockTop(tx, ty, x0, z0, h, RETAINING_SWATCH_TILE,
+                         aoShades(tx, ty, h, VOLUME_TOP_SHADE))
+          else
+            topQuad(x0, z0, h, topTile,
+                    s.art == "upright" and VOLUME_TOP_SHADE or 1,
+                    (s.class == "water") and waterPush or nil)
+          end
         end
 
         -- sides: 8px bands wherever the neighbour is lower. Band k spans
@@ -915,9 +1590,18 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                     src = S.tileAt[fk]
                   end
                 end
-                sideQuad(d, x0, z0, y0, y1, src,
-                         (band * 8 + 8) - y1, (band * 8 + 8) - y0,
-                         sideShades(hl, hr, y0, y1, y0 <= nh, shade))
+                local faceShade = sideShades(hl, hr, y0, y1,
+                                             y0 <= nh, shade)
+                if CommunityVisuals.customWalls() and s.class == "ledge" then
+                  ledgeRockSide(d, tx, ty, x0, z0, y0, y1,
+                                src, faceShade)
+                elseif isKantoRetainingWall(s, tile, run) then
+                  retainingRockSide(d, x0, z0, y0, y1, faceShade)
+                else
+                  sideQuad(d, x0, z0, y0, y1, src,
+                           (band * 8 + 8) - y1, (band * 8 + 8) - y0,
+                           faceShade)
+                end
               end
             end
           end
@@ -1096,6 +1780,14 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
       keepAll = interior or not maskedClosed(sx0, sz0, sx1, sz1)
       skipAll = not overBody and containedInMask(sx0, sz0, sx1, sz1)
     end
+    -- Legendary Visuals crowns extend beyond the authored 16px owner. Resolve seam
+    -- ownership at the original tree center so the complete tree is kept or
+    -- dropped atomically instead of clipping individual canopy quads.
+    if st.keepTree and not keepAll and not skipAll then
+      local e = .25
+      keepAll = keepQuad(mx - e, mz - e, mx + e, mz + e)
+      skipAll = not keepAll
+    end
     if not skipAll then
       -- a stamp is one prop whatever it spans, so it owns its whole
       -- footprint in one run: the 2x2-cell canopy groups are exactly a
@@ -1109,7 +1801,16 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
         for i = 1, 4 do
           local c, s2 = q[i], sc[i]
           s2[1] = c[1] + mx
-          s2[2] = c[2]
+          s2[2] = c[2] + (st.lift or 0)
+          if st.hideCrown and st.lift and st.lift > 0 then
+            local globalName = st.communityTree
+              and "__ds_round_base" or "__bav_granite_pillar_base"
+            local rb = rawget(_G, globalName)
+            if not rb then rb = {}; _G[globalName] = rb end
+            local mk = map.id or (map.def and map.def.id) or tostring(map)
+            local bk = mk .. ":" .. st.mx .. "|" .. st.mz
+            if rb[bk] == nil or c[2] < rb[bk] then rb[bk] = c[2] end
+          end
           s2[3] = c[3] + mz
         end
         local ok = keepAll
@@ -1120,7 +1821,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           local z1 = math.max(sc[1][3], sc[2][3], sc[3][3], sc[4][3])
           ok = keepQuad(x0, z0, x1, z1)
         end
-        if ok then
+        if ok and not st.hideCrown then
           push(sc, quadUV(q), groundShades(sc, q.shade))
         end
       end
@@ -1521,7 +2222,14 @@ local function runJob(job)
   -- write them so the title precache can complete, while the sign sidecars are
   -- rebuilt in-session and remain available to the companion pass.
   local annotatedVisuals = mapHasVisualObjects(map)
-  local cached = not annotatedVisuals
+  -- Legendary Visuals trees and TEST366 pillars publish owner/base registries while
+  -- Structures expands the terrain stamp. A disk-restored vertex stream has
+  -- the pixels but cannot replay those Lua-side registrations, which made the
+  -- selected trees disappear after a cached load. Rebuild these two opt-in
+  -- modes once per session; all ordinary Battle Art/cache paths stay intact.
+  local registryVisuals = CommunityVisuals.customTrees()
+    or CommunityVisuals.customPillars()
+  local cached = not annotatedVisuals and not registryVisuals
     and MeshDisk.loadTerrain(map, job.slot, job.masks) or nil
   if cached then
     mesh = meshFromRaw(cached.terrain)

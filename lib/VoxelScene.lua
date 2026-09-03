@@ -1,4 +1,4 @@
-﻿-- Voxel world mode: assemble and draw one frame of the 3D scene.
+-- Voxel world mode: assemble and draw one frame of the 3D scene.
 --
 -- World space is world pixels and shares its origin with the 2D paths, so
 -- the terrain mesh needs no transform at all and a connected map just
@@ -28,6 +28,8 @@ local DayNight = V.require("DayNight")
 local FirstPerson = V.require("FirstPerson")
 local WorldUnderlay = V.require("WorldUnderlay")
 local WorldFillProps = V.require("WorldFillProps")
+local GranitePillars = V.require("GranitePillars")
+local CommunityFlora = V.require("CommunityFlora")
 local RenderDistance = V.require("RenderDistance")
 local ModSetting = V.require("ModSetting")
 local PaletteFX = require("src.render.PaletteFX")
@@ -590,6 +592,8 @@ local function heldFrame(w, h, mapId)
 end
 
 function VoxelScene.invalidate()
+  GranitePillars.invalidate()
+  CommunityFlora.invalidate()
   lastCompleteCanvas, lastCompleteW, lastCompleteH = nil, 0, 0
   lastCompleteMapId = nil
 end
@@ -978,6 +982,7 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
                            nbVisualShadows)
   if not ShadowMap.available() then return end
   local sig = shadowSignature(state, terrain, nbMesh, posed, cx, cy, vw, vh)
+  sig = sig .. "|community-tree:" .. CommunityFlora.shadowSignature(state)
   if not ShadowMap.stale(sig) then return end
   if not ShadowMap.begin(cx, cy, vw, vh) then return end
 
@@ -1020,6 +1025,7 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
                      ShadowMap.snug(Mat4.translate(nb.ox, 0, nb.oy)))
     end
   end
+  pcall(CommunityFlora.castShadows, state, ShadowMap, Mat4)
   -- From here down it is the CAST, marked as such in the map (see
   -- ShadowMap.sprites) so water can decline them: everything the world casts
   -- still shades a lake, a silhouette of somebody standing beside it does
@@ -1229,6 +1235,13 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
       end
     end
   end
+
+  GranitePillars.draw(state.map,0,0)
+  for _,nb in ipairs(state.neighbors or {}) do if RenderDistance.neighbor(nb,state.player) then GranitePillars.draw(nb.map,nb.ox or 0,nb.oy or 0) end end
+
+  Voxel3D.glass(false)
+  pcall(CommunityFlora.drawCommunityTrees, state)
+  Voxel3D.glass(true)
 
   -- Trees or rocks continue the authored route beyond its finite mesh. They
   -- stand only on world cells outside the root/connected-map rectangles,
