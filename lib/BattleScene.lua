@@ -319,31 +319,16 @@ local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
   -- somebody else's shadow nor cast/self-cast one of their own, independent
   -- of the selected arena fill.
 
-  -- Stadium model shadows (3D Pokemon models) -- always cast, even in flat fill
-  if type(models) == "table" and next(models) then
-    ShadowMap.sprites(true)
-    for side, placement in pairs(models) do
-      local ok, result = pcall(function()
-        if placement.instance and placement.instance.drawShadow then
-          return placement.instance:drawShadow({
-            modelMatrix = placement.modelMatrix,
-            lightViewProjection = ShadowMap.clipVP,
-          })
-        end
-      end)
-      if not ok then
-        -- Shadow casting failed for this model, fall back to card shadow
-      end
-    end
-    ShadowMap.sprites(false)
+  -- Model casters are independent of sprite lighting. Route every model
+  -- through the adapter exactly once: it converts the depth matrix to the
+  -- provider's clip convention and reports failures for the card fallback.
+  ShadowMap.sprites(true)
+  local modelShadows = {}
+  for side, placement in pairs(models or {}) do
+    modelShadows[side] = StadiumModels.drawShadow(placement, ShadowMap.clipVP)
   end
 
   if not UiBackplates.spritesUnlit() then
-    ShadowMap.sprites(true)
-    local modelShadows = {}
-    for side, placement in pairs(models or {}) do
-      modelShadows[side] = StadiumModels.drawShadow(placement, ShadowMap.clipVP)
-    end
     for _, card in ipairs(cards or {}) do
       -- Model/shadow failure is local to one side; its retained card casts
       -- for this pass rather than leaving that battler without a silhouette.
@@ -352,8 +337,8 @@ local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
                        ShadowMap.snug(card.model))
       end
     end
-    ShadowMap.sprites(false)
   end
+  ShadowMap.sprites(false)
 
   ShadowMap.finish(sig)
 end
