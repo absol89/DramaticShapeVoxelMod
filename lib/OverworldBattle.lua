@@ -63,8 +63,8 @@ local session = nil
 -- the engine's own (opaque) HUD/textbox draw. Mirrors upstream PR #48.
 local function isIOS()
   -- The restricted mod environment no longer exposes love.system. The iOS
-  -- builds which need this workaround use LOVE's Metal renderer, which is
-  -- visible through the still-supported graphics API.
+  -- workaround requires LÖVE 12+ and its affected renderer, both detectable
+  -- through APIs which remain available to mods.
   return Voxel3D.metalRenderer()
 end
 

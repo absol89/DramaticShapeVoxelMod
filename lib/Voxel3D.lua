@@ -487,11 +487,18 @@ function Voxel3D.backdropShader()
   return backdropShader or nil
 end
 
--- Apple's Metal canvas path presents Image texture coordinates upside-down
+-- LÖVE 12's affected renderer path presents Image texture coordinates upside-down
 -- here (the same backend family that needs the HUD canvas workaround). Keep
 -- platform discovery inside the still-permitted graphics API: love.system is
 -- unavailable to sandboxed mods in the next engine release.
 function Voxel3D.metalRenderer()
+  -- A renderer/device mentioning Metal is not enough: LÖVE 11 keeps the
+  -- original canvas behavior. getVersion remains available to sandboxed mods.
+  if not (love and love.getVersion) then return false end
+  local versionOK, major = pcall(love.getVersion)
+  if not versionOK or type(major) ~= "number" or major < 12 then
+    return false
+  end
   if not (love and love.graphics and love.graphics.getRendererInfo) then
     return false
   end
