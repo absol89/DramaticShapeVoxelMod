@@ -1749,6 +1749,10 @@ mod.hooks:wrap("intro.oak_speech.build", function(next, steps, speech)
   local oak = BattleArt.trainerImage("prof.oak")
   if speech and oak then
     speech.oakPic, speech.oakTrueColor = oak, true
+    -- The custom trainer sheets are 96px tall. The intro's ROM-authentic
+    -- 7-tile bottom alignment otherwise starts them at y=-8 and clips Oak's
+    -- hair. Current engines apply this only while oakPic is the active image.
+    speech.oakPicOffsetY = 8
   end
   return out
 end)

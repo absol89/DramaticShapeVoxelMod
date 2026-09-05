@@ -1,3 +1,10 @@
+## Oak intro vertical placement: 2026-09-05
+
+Battle Art marks its 96px custom Oak intro portrait with an 8px vertical
+offset. The paired Gen1Recomp intro change applies it only while oakPic is the
+active picture, so Pokemon, player, rival, battle portraits and ROM Oak retain
+their positions. Both Gen 1 and Gen 2 intro renderers honor the field.
+
 ## iOS Voxel Companion sandbox fix: 2026-09-05
 
 VoxelCompanion no longer indexes the forbidden love.system namespace while

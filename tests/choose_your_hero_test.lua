@@ -76,6 +76,7 @@ local function next(s)assert(s==steps);return s end
 assert(hook(next,steps,speech)==steps and speech.oakPic=='rom')
 assets['assets/battle/front-static/gen3/prof.oak.png']='new-oak'
 hook(next,steps,speech);assert(speech.oakPic=='new-oak' and speech.oakTrueColor)
+assert(speech.oakPicOffsetY==8,"custom Oak intro moves below the top clip")
 api.setting.get=function()return 'rom' end
 speech={oakPic='rom',oakTrueColor=false};hook(next,steps,speech)
 assert(speech.oakPic=='rom' and not speech.oakTrueColor)
