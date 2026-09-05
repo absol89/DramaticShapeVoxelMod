@@ -2999,12 +2999,15 @@ return {
     OVERWORLD = {
       [11] = { 10, 75 }, [12] = { 10, 75 },
       [27] = 26, [28] = 26,
+      -- Front-only GYM / POKE / MART lettering is not a rear elevation.
+      [47] = 34, [63] = 34,
+      [66] = 75, [67] = 75,
+      [68] = 75, [69] = 75, [74] = 26,
     },
   },
-  -- Only exterior, enterable everyday buildings use the doorless rear-wall
-  -- treatment.  Interior HOUSE/FACILITY/POKECENTER models are separate
-  -- tilesets and are intentionally untouched; large landmarks/gates also
-  -- keep their individually authored shells.
+  -- These exterior building families use plain rear material courses.
+  -- Explicit real rear entrances are added separately by FacadeEntrances.
+  -- Interior tilesets remain separate; the Tower keeps its authored shell.
   building_back_templates = {
     OVERWORLD = {
       gabled_house = true,
@@ -3015,6 +3018,27 @@ return {
       gabled_cottage = true,
       gabled_house_wide = true,
       daycare = true,
+      gym = true,
+      gym_large = true,
+      fuchsia_gym = true,
+      game_corner = true,
+      celadon_mansion = true,
+      route_2_gate = true,
+      route_5_gate = true,
+      route_22_gate = true,
+      power_plant = true,
+      celadon_mart = true,
+      silph_co = true,
+      museum = true,
+      flat_block_4x4 = true,
+      flat_block_4x6 = true,
+      flat_block_6x4 = true,
+      flat_block_6x6 = true,
+      flat_block_8x4 = true,
+      gabled_block_4x3 = true,
+      gabled_block_6x2 = true,
+      gabled_block_4x2 = true,
+      gabled_block_6x6 = true,
     },
   },
 

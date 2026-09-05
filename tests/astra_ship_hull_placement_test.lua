@@ -74,6 +74,11 @@ for _,family in ipairs({'SHIP','GATE'})do
 end
 -- A21 bicycles are independently tested; every existing model stays in this comparison.
 actual.buildings=H.historicalPublicBuildings(actual.buildings,before.spec.buildings)
+-- Rear donors are deliberately expanded in the later facade pass. The live
+-- astra_rear_walls_test.lua owns all29 templates and restricts differences
+-- to rear materials; keep every other historical data field exact here.
+actual.building_back_tiles=copy(before.spec.building_back_tiles)
+actual.building_back_templates=copy(before.spec.building_back_templates)
 same(actual,before.spec,'all other profiles/templates/map overrides preserved')
 -- Real0.2.27 snapshot: first two rows remain fixed gangway, last six move.
 local tiles={}

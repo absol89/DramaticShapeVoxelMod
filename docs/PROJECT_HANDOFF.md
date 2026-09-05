@@ -1,3 +1,44 @@
+## Absol follow-up: building backs, entrances, cave exits and scrolls (2026-09-05)
+
+Separate follow-up to merged PR #45, integrated with master38e389c (1.10.3).
+No live installation is included in this source change.
+
+- `data/voxel_heights.lua`: 29 exterior families use rear wall courses instead of
+  mirrored front doors/signage. Occupancy, front art and the authored roof remain.
+- `lib/FacadeEntrances.lua`: guarded real rear entrances at Cerulean's badge and
+  robbed houses, Celadon Mansion, Route 5/6/12 gates and Fuchsia Good Rod house.
+  Route 23's north badge-gate receives visible doors. PLATEAU deliberately uses
+  its exact map/warp guards because the engine classifies it as indoor for SFX.
+  Existing Route 7/8 side entrances are preserved.
+- The department store and Warden's house have no corresponding rear warp in
+  the generated game maps. Their backs are cleaned; no fictional exit is added.
+- `lib/CaveExitVisuals.lua`: eight real outdoor cave mouths across seven maps
+  gain a bounded recessed opening and local daylight panel. The panel stays
+  ahead of neighboring rock facets; existing maze walls and ladders remain.
+- `lib/HangingScrolls.lua`: four scrolls in Oak's lab and Fighting Dojo gain
+  thin paper, raised rollers and plain backing rather than repeated glyph caps.
+- Structures/Buildings integrate the modules; disk mesh cache revision is31.
+  No gameplay, collision, warp, input, global lighting or provider API changes.
+
+New focused suites validate source donors, geometry, placement guards and map
+preservation. Historical snapshot tests restore only the historical rear material
+configuration in memory; a separate 19,496,504-check suite tests all29 live rear
+families. The ship source comparison normalizes CRLF/LF only.
+
+Pre-1.10.3 candidate audit:75/77 portable commands passed, plus3/3 inherited Stadium
+suites; all108 production Lua files compile. The two failures (voxel seam AO
+and legacy Legendary visuals) reproduce on the submitted PR45 baseline.
+
+The 1.10.3 integration preserves upstream startup/portrait/platform changes.
+Both updated portrait and platform regression tests pass; all108 production
+Lua files compile. Follow-up geometry files remain byte-identical to the
+validated candidate.
+
+Native comparison uses a private Windows Gen1Recomp0.2.27 runtime and copied save.
+Inspection cameras may occupy non-walkable positions; they are visual evidence,
+not an occupancy or route-traversal claim. Exact0.2.53 and Quest headset validation
+remain pending. No whole-game performance measurement is claimed.
+
 ## Oak intro vertical placement: 2026-09-05
 
 Battle Art marks its 96px custom Oak intro portrait with an 8px vertical

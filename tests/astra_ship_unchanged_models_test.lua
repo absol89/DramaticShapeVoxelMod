@@ -35,7 +35,18 @@ local ship,w,h=H.atlas(assert(os.getenv('ASTRA_SHIP_ATLAS')))
 same(H.building(candidate,'ship_stool',ship,w,h,nil,nil,'SHIP'),
   H.building(baseline,'ship_stool',ship,w,h,nil,nil,'SHIP'),'accepted A10 round stool')
 local data,w,h=H.atlas(assert(os.getenv('ASTRA_ATLAS')))
-for _,id in ipairs({'gabled_house','oaks_lab','pokemart','pokecenter','flat_commercial','pokemon_tower','museum','route_2_gate'})do
-  same(H.building(candidate,id,data,w,h),H.building(baseline,id,data,w,h),id)
+-- This historical guard owns unchanged geometry and all other material/shade
+-- behavior. Restore only the old rear-material configuration in memory so a
+-- deliberate new rear donor does not fail an A17 byte-value snapshot.
+-- astra_rear_walls_test.lua separately exercises the live configuration on
+-- all29 templates: exact occupancy, exposed face locations/winding/shading,
+-- source donor pixels and UV changes restricted to the rear one-pixel layer.
+local function historicalRear(actual)
+  actual.building_back_tiles=spec.building_back_tiles
+  actual.building_back_templates=spec.building_back_templates
 end
-print(('%d exact-value comparisons passed: 33 accepted A17 furniture/aliases/pipes, accepted round stool, and8 exterior meshes unchanged'):format(checks))
+for _,id in ipairs({'gabled_house','oaks_lab','pokemart','pokecenter','flat_commercial','pokemon_tower','museum','route_2_gate'})do
+  same(H.building(candidate,id,data,w,h,nil,nil,'OVERWORLD',historicalRear),
+    H.building(baseline,id,data,w,h),id)
+end
+print(('%d exact-value comparisons passed: 33 accepted A17 furniture/aliases/pipes, accepted round stool, and8 exterior meshes unchanged with historical rear materials'):format(checks))

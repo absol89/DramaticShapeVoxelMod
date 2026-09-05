@@ -133,10 +133,11 @@ for _,cx in ipairs({72,97})do
  end
 end
 -- Only model generation changed; exact-map ownership, movement, cache,
--- departure, shadows and draw code must stay byte-exact against A20.
+-- departure, shadows and draw code must stay exact against A20 (apart from
+-- Git checkout CRLF/LF conversion, which is not a runtime source change).
 local baseline=os.getenv('ASTRA_BICYCLE_BASELINE')or'../artifacts/battle-art-astra-bicycles/baseline-mod'
 local function integration(path)
- local f=assert(io.open(path..'/lib/ShipHull.lua','rb'));local s=f:read('*a');f:close()
+ local f=assert(io.open(path..'/lib/ShipHull.lua','rb'));local s=f:read('*a');f:close();s=s:gsub('\r\n','\n')
  local a=assert(s:find('function M.model(sp)',1,true));local b=assert(s:find('local function meshData',a,true))
  return s:sub(1,a-1)..'<MODEL>\n'..s:sub(b)
 end
