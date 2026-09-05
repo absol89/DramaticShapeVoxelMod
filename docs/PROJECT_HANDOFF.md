@@ -1,3 +1,18 @@
+## Issue 44: unified hosted UI, 2026-09-05
+
+BattlePresentation now exports drawHostedUI. The companion Gen1 compositor
+hands Battle Art a clean scene copy plus a scoped native HUD capture, bypassing
+Stadium glass panels in every arena mode. Native hosted textbox drawing uses
+Battle Art's fill/ink path; the native HUD pass is skipped after composition.
+HUD-only also suppresses Battle Art frosted backpanels. Existing foreign UI
+visibility claims remain respected. No battle model/camera logic was changed.
+
+Tests: visibility matrix across 4 modes and 5 fills, native/hosted text gates,
+HUD bands, settings/styles, and companion compose handoff pass under LuaJIT.
+The paired fix requires the importer gen1_battle.lua change. In-game visual
+checks, including prompts and party balls, remain pending. Master and tag are
+not moved by this fix.
+
 ## Independent Stadium switches: 2026-09-05
 
 BATTLES OFF uses the existing non-Stadium2 hosting path. BATTLES ON/MODELS OFF

@@ -1601,9 +1601,12 @@ function OverworldBattle.install()
   -- off the same verdict.
   local innerText = BattleState.drawTextArea
   function BattleState:drawTextArea()
-    if not self.dramaticShapeShot then return innerText(self) end
+    local hosted = self.stadium2ImporterGen1Shot
+    if not self.dramaticShapeShot and not (hosted and hosted.battleArtUI) then
+      return innerText(self)
+    end
     if BattlePresentation.suppressed("text", self) then return end
-    if isIOS() then return innerText(self) end
+    if isIOS() and not (hosted and hosted.battleArtUI) then return innerText(self) end
     return drawStyledTextArea(self, innerText)
   end
 
@@ -1703,6 +1706,8 @@ function OverworldBattle.install()
   -- only an exactly-black set is remapped.
   innerHUDs = BattleState.drawHUDs
   function BattleState:drawHUDs(slide)
+    local hosted = self.stadium2ImporterGen1Shot
+    if hosted and hosted.battleArtUI then return end
     if self.dramaticShapeShot
        and BattlePresentation.suppressed("hud", self) then return end
     -- Normally the HUDs have already been drawn this frame, snapped out to the
@@ -1843,6 +1848,46 @@ function OverworldBattle.snapHUDs(battle, shot)
   if prevCanvas then g.setCanvas(prevCanvas) else g.setCanvas() end
   g.setBlendMode(prevBlend or "alpha", prevAlpha)
   g.setColor(1, 1, 1, 1)
+  if not ok then error(err, 0) end
+  return true
+end
+
+-- Stadium supplies a clean scene copy and a scoped native-data capture.
+-- Draw Battle Art's HUD palette/layout without Stadium's glass panels. Text
+-- remains in the native UI canvas, styled by drawTextArea in the same frame.
+function OverworldBattle.drawHostedUI(ctx)
+  if not (ctx and ctx.battle and ctx.canvas and ctx.box and ctx.drawHUDs) then
+    return false
+  end
+  local battle = ctx.battle
+  if ctx.statusAvailable == false or BattlePresentation.suppressed("hud", battle) then
+    return true
+  end
+  local layer = BattleHud.layerTexture(BattleScene.GB_W, BattleScene.GB_H,
+    true, ctx.drawHUDs, UiBackplates.hudUsesColor(),
+    UiBackplates.hudUsesColorShadow(), battle)
+  if not layer then return false end
+  local shot = { scale = ctx.box.scale, ly = ctx.box.ly, pw = ctx.width }
+  local _, placement = OverworldBattle.snapRects(shot)
+  local g = love.graphics
+  local previous = g.getCanvas()
+  g.push("all")
+  local ok, err = pcall(function()
+    g.setCanvas(ctx.canvas)
+    g.setShader()
+    g.setDepthMode("always", false)
+    g.setBlendMode("alpha", "alphamultiply")
+    g.setColor(1, 1, 1, 1)
+    g.scale(ctx.sx or 1, ctx.sy or 1)
+    for side, band in pairs(OverworldBattle.HUD_BAND) do
+      local at = placement[side]
+      local quad = g.newQuad(band[1], band[2], band[3], band[4],
+        BattleScene.GB_W, BattleScene.GB_H)
+      g.draw(layer, quad, at.x + band[1] * at.scale, at.y, 0, at.scale, at.scale)
+    end
+  end)
+  g.pop()
+  if previous then g.setCanvas(previous) else g.setCanvas() end
   if not ok then error(err, 0) end
   return true
 end
