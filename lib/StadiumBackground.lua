@@ -329,9 +329,15 @@ local function drawCircleStage(next, ctx)
   return a, b
 end
 
-local function legendaryPlayer()
-  return OverworldBattle.legendaryTrainerEnabled
-    and OverworldBattle.legendaryTrainerEnabled() or false
+local function legendaryPlayerCard(ctx)
+  if not (OverworldBattle.legendaryTrainerEnabled
+      and OverworldBattle.legendaryTrainerEnabled()) then return false end
+  -- The standing trainer option must not replace a Pokemon model selected by
+  -- Stadium. Its live visual actor already reflects model availability; keep
+  -- the Legendary card only as the sprite fallback for a missing player model.
+  local host = ctx and ctx.scene and ctx.scene.host
+  local actor = host and host.visualActor and host:visualActor("player")
+  return not (actor and actor.renderer)
 end
 
 local function drawHostedActors(sceneCtx, providerCtx)
@@ -353,7 +359,7 @@ local function drawHostedActors(sceneCtx, providerCtx)
     for _, side in ipairs({ "enemy", "player" }) do
       local actor = host.visualActor and host:visualActor(side)
       if actor and actor.renderer and host.modelMatrix
-          and not (side == "player" and legendaryPlayer()) then
+          and not (side == "player" and legendaryPlayerCard(sceneCtx)) then
         local localModel, yaw = host:modelMatrix(side, actor)
         local model = renderer.matMul(worldFromStadium, localModel)
         local ok = actor.renderer:drawScene(pass, model, {
@@ -425,7 +431,7 @@ local function stadiumActorPasses(sceneCtx)
       return true
     end,
   }
-  if legendaryPlayer() then passes.cards = { player = true } end
+  if legendaryPlayerCard(sceneCtx) then passes.cards = { player = true } end
   return passes
 end
 
@@ -440,7 +446,7 @@ function StadiumBackground.battlers(next, ctx)
     local sides = {}
     for _, side in ipairs({ "enemy", "player" }) do
       local actor = host.visualActor and host:visualActor(side)
-      sides[side] = ((side == "player" and legendaryPlayer())
+      sides[side] = ((side == "player" and legendaryPlayerCard(ctx))
         or (rendererApi() and actor and actor.renderer)) and "provider" or "host"
     end
     return { sides = sides }
@@ -459,7 +465,7 @@ function StadiumBackground.shadow(next, ctx)
   for _, side in ipairs({ "enemy", "player" }) do
     local actor = host.visualActor and host:visualActor(side)
     if actor and actor.renderer and host.modelMatrix
-          and not (side == "player" and legendaryPlayer()) then
+          and not (side == "player" and legendaryPlayerCard(ctx)) then
       local model = host:modelMatrix(side, actor)
       actor.renderer:drawShadowMap(model, lightVP)
     end
@@ -500,7 +506,7 @@ function StadiumBackground.environment(next, ctx)
     return drawCircleStage(next, ctx)
   end
   local host = ctx.scene and ctx.scene.host
-  if host and legendaryPlayer() then
+  if host and legendaryPlayerCard(ctx) then
     hostedDrawn[host] = hostedDrawn[host] or {}
     hostedDrawn[host].player = true
   end

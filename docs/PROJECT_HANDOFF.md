@@ -1,3 +1,19 @@
+## Stadium player model regression: 2026-09-05
+
+Corrected the integration's unconditional Legendary player-card preference.
+A live Stadium player model now takes precedence over the Legendary sprite
+fallback, retaining both model draw passes and its shadow caster in the shared
+voxel depth attachment. Standing trainer mode only selects the player card
+when Stadium has no player model. This supersedes the unconditional player
+model/shadow skipping described in the original integration notes below.
+
+Validation: Stadium circle depth, background API, models API, BattleScene
+sidecar/shadows, and battle UI visibility tests pass under LuaJIT. Regression
+coverage includes Legendary enabled with both models, missing player model,
+and model restoration, checking card ownership and shadow/draw counts.
+The shared-depth and circle placement assertions still pass. In-game visual
+confirmation with Stadium battle/models ON and overworld enabled is pending.
+
 ## Battle UI visibility: 2026-09-05
 
 Added BATTLE ART UI to the battle options and mod-manager schema. BOTH is the

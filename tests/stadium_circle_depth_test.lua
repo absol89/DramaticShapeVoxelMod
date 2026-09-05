@@ -109,30 +109,40 @@ providerFails=true
 assert(api.environment(fallback,ctx)==marks and fallbackCalls==1)
 print('stadium circle depth regression: ok')
 
--- Combined Legendary card ownership and Stadium model depth path.
+-- Standing trainer mode must not replace either live Stadium Pokemon model.
 providerFails=false
 failStage=false
-local legendary=true
-overworld.legendaryTrainerEnabled=function() return legendary end
+overworld.legendaryTrainerEnabled=function() return true end
 local render=overworld.providerRender
+local playerModel=true
+host.visualActor=function(_,side)
+  if side=='player' and not playerModel then return nil end
+  return actor
+end
 overworld.providerRender=function(battle, passes, ...)
-  assert(passes.cards and passes.cards.player, 'Legendary player card omitted')
+  assert((passes.cards and passes.cards.player or false)==not playerModel,
+    'Legendary sprite must only replace an unavailable Stadium player model')
   return render(battle, passes, ...)
 end
-ctx.battlerPhase='prepare'
-local owned=api.battlers(fallback,ctx)
-assert(owned.sides.player=='provider' and owned.sides.enemy=='provider')
-local before=actorCalls
-api.environment(fallback,ctx)
-assert(actorCalls==before+2, 'Legendary player also submitted as a model')
-ctx.battlerPhase='draw'
-local drawn=api.battlers(fallback,ctx).drawn
-assert(drawn.player and drawn.enemy)
-local beforeShadow=shadowCalls
-api.shadow(function() end,ctx)
-assert(shadowCalls==beforeShadow+1, 'hidden player model casts a duplicate shadow')
+for _, available in ipairs({true, false, true}) do
+  playerModel=available
+  ctx.battlerPhase='prepare'
+  local owned=api.battlers(fallback,ctx)
+  assert(owned.sides.player=='provider' and owned.sides.enemy=='provider')
+  local before=actorCalls
+  api.environment(fallback,ctx)
+  assert(actorCalls==before+(available and 4 or 2),
+    'Stadium model was replaced or Legendary sprite duplicated')
+  ctx.battlerPhase='draw'
+  local drawn=api.battlers(fallback,ctx).drawn
+  assert(drawn.player and drawn.enemy)
+  local beforeShadow=shadowCalls
+  api.shadow(function() end,ctx)
+  assert(shadowCalls==beforeShadow+(available and 2 or 1),
+    'Stadium shadow casters do not match the visible model actors')
+end
 providerFails=true
 api.environment(fallback,ctx)
 assert(api.battlers(function() return 'released' end,ctx)=='released',
   'failed Legendary frame retained ownership')
-print('Legendary/Stadium integration: ok')
+print('Legendary/Stadium model precedence and sprite fallback: ok')
