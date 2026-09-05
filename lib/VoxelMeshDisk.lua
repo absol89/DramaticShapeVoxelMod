@@ -56,15 +56,16 @@ end
 -- playthrough identity.
 local STATIC_PLAYTHROUGH = "bavc_static_mesh_v2"
 
--- Revision 7 stops the corner AO probe shading a connected map edge against
--- border ring the connection hides, which changes the baked vertex shade of
--- every tile along a seam. Revision 6 restores visual-object quads to
--- ordinary cached terrain when no extension can replace them. Revision 5
--- stripped signposts unconditionally, then bypassed its own cache on Continue
--- to reconstruct their sidecars.
--- Revision 8 stores prop runs alongside the vertices so a precached map can
--- drop a cut tree from the mesh it is already drawing.
-Disk.CACHE_REVISION = 8
+-- Revision 9 replaces CAVERN brick courses with rough-hewn moonstone faces.
+-- Revision 8 varies CAVERN top-surface UV donors and orientation. Revision 7
+-- adds CAVERN-only rough rock faces. Revision 6 restored
+-- visual-object quads to ordinary cached terrain when no extension could
+-- replace them. A revision bump is required because these vertices are not
+-- observable in the map-data fingerprint.
+-- TEST39 lowers true inner maze walls to 30px and restores every walkable
+-- ledge top to its authored height so actors share the visible floor plane.
+-- Jagged TEST38 masonry, ordinary floors and the distant perimeter are locked.
+Disk.CACHE_REVISION = 25
 -- Patch releases which do not change emitted vertices must keep the existing
 -- world cache usable. This token matches the first static-mesh-cache-v2 build;
 -- CACHE_REVISION, not the public mod version, owns geometry compatibility.
@@ -473,6 +474,8 @@ function Disk.fingerprint(map, slot, masks, kind)
   parts[#parts + 1] = "legendary-visuals-final"
   parts[#parts + 1] = CommunityVisuals.layout()
   parts[#parts + 1] = CommunityVisuals.trees:get()
+  parts[#parts + 1] = CommunityVisuals.cutTrees:get()
+  parts[#parts + 1] = CommunityVisuals.signs:get()
   parts[#parts + 1] = CommunityVisuals.grass:get()
   parts[#parts + 1] = CommunityVisuals.roads:get()
   parts[#parts + 1] = CommunityVisuals.walls:get()
@@ -882,26 +885,6 @@ local function readValidated(path, fp, map)
   return blob, pos
 end
 
--- Prop runs stored with a record: a u32 count, then four floats per run.
--- A precached map never runs the geometry pass, so without these the cut
--- fast path in ChunkMesher would never fire on one.
-local function readSpans(blob, pos)
-  local count = readU32(blob, pos)
-  if not count or count > 1048576 then return nil end
-  pos = pos + 4
-  local spans = {}
-  for _ = 1, count do
-    if pos + 15 > #blob then return nil end
-    local a, b, c, d, nextPos = love.data.unpack("<ffff", blob, pos)
-    spans[#spans + 1] = a
-    spans[#spans + 1] = b
-    spans[#spans + 1] = c
-    spans[#spans + 1] = d
-    pos = nextPos
-  end
-  return spans, pos
-end
-
 function Disk.loadTerrain(map, slot, masks)
   if not Disk.staticEligible(map) then return nil end
   local path = pathFor(map, slot, "terrain")
@@ -909,15 +892,13 @@ function Disk.loadTerrain(map, slot, masks)
   local blob, pos = readValidated(path, fp, map)
   if not blob then return nil end
   local terrain, nextPos = streamRecord(blob, pos)
-  local water, afterWater
-  if nextPos then water, afterWater = streamRecord(blob, nextPos) end
-  local spans, finalPos
-  if afterWater then spans, finalPos = readSpans(blob, afterWater) end
-  if not terrain or not water or not spans or finalPos ~= #blob + 1 then
+  local water, finalPos
+  if nextPos then water, finalPos = streamRecord(blob, nextPos) end
+  if not terrain or not water or finalPos ~= #blob + 1 then
     discard(path, true)
     return nil
   end
-  return { terrain = terrain, water = water, spans = spans }
+  return { terrain = terrain, water = water }
 end
 
 local function float4(blob, pos)
@@ -950,14 +931,7 @@ function Disk.loadAux(map)
     figures[#figures + 1] = stream
     pos = finalPos
   end
-  -- tuft and billboard runs, after the figures
-  local grassSpans, afterGrass = readSpans(blob, pos)
-  local flowerSpans, finalPos
-  if afterGrass then flowerSpans, finalPos = readSpans(blob, afterGrass) end
-  if not grassSpans or not flowerSpans or finalPos ~= #blob + 1 then
-    discard(path, true); return nil
-  end
-  grass.spans, flowers.spans = grassSpans, flowerSpans
+  if pos ~= #blob + 1 then discard(path, true); return nil end
   return { grass = grass, flowers = flowers, figures = figures }
 end
 
@@ -1125,16 +1099,6 @@ function Disk.saveRamToDisk()
   return failures == 0, saved, failures, errors
 end
 
-local function writeSpans(file, spans)
-  local count = math.floor(#(spans or {}) / 4)
-  write(file, u32(count))
-  for i = 1, count * 4, 4 do
-    write(file, love.data.pack("string", "<ffff",
-                               spans[i], spans[i + 1],
-                               spans[i + 2], spans[i + 3]))
-  end
-end
-
 function Disk.saveTerrain(map, slot, masks, terrain, water)
   if not Disk.staticEligible(map) then return false end
   local path = pathFor(map, slot, "terrain")
@@ -1142,7 +1106,6 @@ function Disk.saveTerrain(map, slot, masks, terrain, water)
   return writeFile(path, fp, function(file)
     writeChunked(file, terrain)
     writeChunked(file, water)
-    writeSpans(file, terrain and terrain.spans)
   end)
 end
 
@@ -1163,8 +1126,6 @@ function Disk.saveAux(map, aux)
       write(file, f32x4(figure.wx, figure.wz, figure.y, figure.w))
       Budget.check()
     end
-    writeSpans(file, aux.grass and aux.grass.spans)
-    writeSpans(file, aux.flowers and aux.flowers.spans)
   end)
 end
 

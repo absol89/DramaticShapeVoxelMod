@@ -115,7 +115,6 @@ local FirstPerson = V.require("FirstPerson")
 local FreeMove = V.require("FreeMove")
 local PoisonFlash = V.require("PoisonFlash")
 local MomHealFlash = V.require("MomHealFlash")
-local HealOverlay = V.require("HealOverlay")
 local TransformCompat = V.require("TransformCompat")
 local VoxelCompanion = V.require("VoxelCompanion")
 local CompanionLifecycle = V.require("CompanionLifecycle")
@@ -389,19 +388,6 @@ mod.content.render_pipelines:register("voxel", {
   end,
 
   drawWorld = function(ctx)
-    -- Terrain and characters are geometry; the field FX stay ordinary 2D
-    -- draws composited on top, anchored through the same camera the 3D
-    -- pass used (ctx.drawFx below).  The scene renders at the window's
-    -- PIXEL resolution (see sceneSize) so the 3D pass is crisp rather than
-    -- a magnified low-res image, while the FX closures keep drawing in
-    -- world-pixel units.
-    local sw, sh = sceneSize(ctx)
-    -- With AA on, the whole pass runs into a canvas BIGGER than the window
-    -- and is folded back down at the end (see AntiAlias).  Nothing between
-    -- these two lines knows: every pass in the frame measures itself in the
-    -- canvas it was handed, so the sky's dither, the water's march and the
-    -- camera itself all come out the same picture at a higher sample rate.
-    local rw, rh = AntiAlias.expand(sw, sh)
     -- Naming screens can be pushed before Oak has finished constructing a
     -- save, an overworld, or even a live player. The render-pipeline registry
     -- still asks every enabled world pipeline for a frame during that early UI
@@ -416,13 +402,26 @@ mod.content.render_pipelines:register("voxel", {
       return nil
     end
 
+    -- Terrain and characters are geometry; the field FX stay ordinary 2D
+    -- draws composited on top, anchored through the same camera the 3D
+    -- pass used (ctx.drawFx below).  The scene renders at the window's
+    -- PIXEL resolution (see sceneSize) so the 3D pass is crisp rather than
+    -- a magnified low-res image, while the FX closures keep drawing in
+    -- world-pixel units.
+    local sw, sh = sceneSize(ctx)
+    -- With AA on, the whole pass runs into a canvas BIGGER than the window
+    -- and is folded back down at the end (see AntiAlias).  Nothing between
+    -- these two lines knows: every pass in the frame measures itself in the
+    -- canvas it was handed, so the sky's dither, the water's march and the
+    -- camera itself all come out the same picture at a higher sample rate.
+    local rw, rh = AntiAlias.expand(sw, sh)
     -- TEST435's protected handoff is intentional compatibility, not merely a
     -- diagnostic wrapper. If a future engine introduces another incomplete
     -- world-like state, fail open to its native renderer instead of aborting
     -- the remainder of the frame (which otherwise leaves only the naming
     -- canvas's green clear colour visible).
     local okRender, canvas, waiting = pcall(VoxelScene.render, state, rw, rh,
-                                              ctx.vw, ctx.vh, ctx.paletteFor)
+                                            ctx.vw, ctx.vh, ctx.paletteFor)
     local map = state.map
     if not okRender then
       VoxelTransitionGate.cancel(map)
@@ -473,36 +472,9 @@ mod.content.render_pipelines:register("voxel", {
       -- else -- so the scale goes up with it, or the "!" bubble lands the
       -- right place at half the size.  project() already answers in canvas
       -- pixels, so only the scale needs saying.
-      local scale = ctx.scale * AntiAlias.factor()
-      -- Every field FX but one is anchored to the ground point of the thing
-      -- it belongs to -- the character wearing the "!", the cell the dust
-      -- puffs on -- so its flat closure lands unchanged through this.  The
-      -- heal machine's is not: it is anchored to the PLAYER, three tiles from
-      -- the art it paints, and slid rigidly onto that one point.  A camera
-      -- with any pitch foreshortens that lever arm, so the balls and the
-      -- monitor float off the cabinet.  Hide it from drawFx -- both the
-      -- dispatch and fxHeal itself read state.healAnim -- and put its pieces
-      -- on the machine's own surfaces instead.
-      --
-      -- healAnim goes back whatever drawFx does with the frame: the heal
-      -- script is waiting on that record to count its jingle out, and losing
-      -- it would strand the player at the counter.
-      local state = ctx.state
-      local healAnim = state and state.healAnim
-      if healAnim then state.healAnim = nil end
-      local drawn, err = pcall(ctx.drawFx,
-                               function(wx, wy) return Voxel3D.project(wx, 0, wy) end,
-                               scale)
-      if healAnim then
-        state.healAnim = healAnim
-        -- cosmetic, and last: a fault here must not retire the pipeline and
-        -- drop the whole world back to 2D mid-heal
-        if not pcall(HealOverlay.draw, healAnim, Voxel3D.project, scale, ctx) then
-          love.graphics.setShader()
-        end
-      end
+      ctx.drawFx(function(wx, wy) return Voxel3D.project(wx, 0, wy) end,
+                 ctx.scale * AntiAlias.factor())
       Voxel3D.endOverlay()
-      if not drawn then error(err, 0) end
     end
     -- and back to the window's own size, which is what the engine composites
     -- one canvas pixel to one display pixel.  A pass-through when AA is off.
@@ -639,11 +611,43 @@ local function stagedBattles()
 end
 
 local SETTINGS = {
+  { CommunityVisuals.pillars,
+    "Choose the original Battle Art pillars or the community granite design: "
+    .. "standalone, joined by the approved low wall, or interlocked across "
+    .. "the crown. Changing this rebuilds derived map geometry in the normal "
+    .. "background queue; collision and map data never change.",
+    full = true },
+  { CommunityVisuals.masonry,
+    "Color TEST435's synchronized retaining walls and authored ledges as "
+    .. "granite, red brick, sandstone or slate. Pillars stay in their locked "
+    .. "TEST366 granite material.",
+    full = true },
+  { CommunityVisuals.trees,
+    "Choose Battle Art's authored round trees or the finalized Legendary Visuals "
+    .. "small, medium, large and mature XL tree family.", full = true },
+  { CommunityVisuals.cutTrees,
+    "Choose Battle Art's original cuttable bush or the super-skinny Legendary "
+    .. "Visuals city sapling with two support stakes and dark ties. The "
+    .. "original Cut action, collision, replacement "
+    .. "block and regrowth remain authoritative.", full = true },
+  { CommunityVisuals.signs,
+    "Choose Battle Art's readable white town sign or add the Legendary "
+    .. "Visuals grained wooden frame behind that same authored face and label.",
+    full = true },
+  { CommunityVisuals.grass,
+    "Choose the original Overworld turf and encounter grass or TEST435's "
+    .. "harmonized natural-green materials.", full = true },
+  { CommunityVisuals.roads,
+    "Choose original route surfaces or TEST435's quiet packed-earth roads "
+    .. "and dark timber bridge deck.", full = true },
+  { CommunityVisuals.walls,
+    "Choose original terrain faces or TEST435's architectural masonry walls "
+    .. "and authored stone ledges.", full = true },
+  { CommunityVisuals.courtyards,
+    "Choose original courtyard/fence treatment or TEST435's timber fences, "
+    .. "warm flagstone courts and flush claimed-cell finish.", full = true },
   { VoxelGrid.setting,
     "One-pixel wireframe along every voxel edge." },
-  { VoxelScene.silhouetteSetting,
-    "Draw silhouettes for characters hidden behind voxel geometry. "
-    .. "OFF disables the silhouette pass completely." },
   { WorldCurve.setting,
     "Bend the world down over the horizon, Animal Crossing style." },
   { WorldUnderlay.setting,
@@ -667,30 +671,6 @@ local SETTINGS = {
     .. "FULL loads every generated cache file; OFF skips the preload and "
     .. "handles voxel data on demand during play.",
     full = true },
-  { CommunityVisuals.pillars,
-    "Choose the original Battle Art pillars or the community granite design: "
-    .. "standalone, joined by the approved low wall, or interlocked across "
-    .. "the crown. Geometry rebuilds in the background; collision is unchanged.",
-    full = true },
-  { CommunityVisuals.masonry,
-    "Choose granite, red brick, sandstone, or slate for the Legendary wall "
-    .. "and ledge treatment. Pillars retain their authored granite material.",
-    full = true },
-  { CommunityVisuals.trees,
-    "Choose Battle Art's round trees or the Legendary Visuals S/M/L/XL tree family.",
-    full = true },
-  { CommunityVisuals.grass,
-    "Choose the original turf or Legendary Visuals natural grass.",
-    full = true },
-  { CommunityVisuals.roads,
-    "Choose original routes and bridges or Legendary packed earth and timber.",
-    full = true },
-  { CommunityVisuals.walls,
-    "Choose original terrain faces or Legendary masonry walls and stone ledges.",
-    full = true },
-  { CommunityVisuals.courtyards,
-    "Choose original courts and fences or Legendary timber and warm flagstone.",
-    full = true },
   { Water.setting,
     "Reflections on water. FULL adds screen-space reflections of the "
     .. "shoreline, the trees and the buildings behind it; SKY is the sky, "
@@ -713,6 +693,79 @@ local SETTINGS = {
     "Fight on the map: the battle draws over the nearest clear ground, "
     .. "shot over the shoulder with a slow parallax drift.",
     full = true },
+  { OverworldBattle.trainerBattleSetting,
+    "STOCK keeps Battle Art's native trainer and player-Pokemon presentation. "
+    .. "LEGENDARY keeps the selected 3D trainer standing through a normal "
+    .. "battle and reserves the player side for the Stadium/N64 model, with "
+    .. "no duplicate 2D card attached to either the camera or UI box. Select "
+    .. "STOCK when the model provider is unavailable. Battle state and "
+    .. "gameplay stats are untouched.",
+    when = function() return stagedBattles() end, full = true },
+  { PokeballSettings.enabled,
+    "Choose Battle Art's original capture animation or Legendary Visuals' "
+    .. "real 3D Poke Ball throw, intake beam, ground shakes, catch click and "
+    .. "breakout. This changes presentation only; items, odds and outcomes "
+    .. "remain Battle Art's.",
+    when = function() return stagedBattles() end, full = true },
+  { PokeballSettings.size,
+    "Scale the Legendary 3D capture ball without changing its trajectory.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
+  { PokeballSettings.suction,
+    "Enable the Legendary intake beam and suction presentation.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
+  { PokeballSettings.preset,
+    "Choose a coordinated capture-effects profile. CUSTOM exposes the "
+    .. "individual beam, streamer and star controls below.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
+  { PokeballSettings.beam,
+    "Set intake-beam strength for the CUSTOM capture profile.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+        and PokeballSettings.preset:get() == "CUSTOM"
+    end, full = true },
+  { PokeballSettings.streamers,
+    "Set airborne trail strength for the CUSTOM capture profile.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+        and PokeballSettings.preset:get() == "CUSTOM"
+    end, full = true },
+  { PokeballSettings.stars,
+    "Set successful-catch star strength for the CUSTOM capture profile.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+        and PokeballSettings.preset:get() == "CUSTOM"
+    end, full = true },
+  { PokeballSettings.pokemonGlow,
+    "Control the opponent glow while it is drawn into the ball.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
+  { PokeballSettings.suctionParticles,
+    "Control the particles pulled inward during capture.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
+  { PokeballSettings.captureSpeed,
+    "Choose the timing of the visual intake; battle timing remains native.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
+  { PokeballSettings.openTime,
+    "Choose how long the 3D ball visibly holds open before closing.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
+  { PokeballSettings.fxScale,
+    "Scale the Legendary beam, trails, particles and catch effects together.",
+    when = function()
+      return stagedBattles() and PokeballSettings.active()
+    end, full = true },
   { FirstPerson.invertYSetting,
     "Invert vertical look input in 1ST and 3RD free-camera modes only. "
     .. "It does not change overhead camera movement.",
@@ -861,71 +914,6 @@ local SETTINGS = {
     .. "pixels in each direction and 4X twice, which makes this the most "
     .. "expensive row in the mod.",
     full = true },
-  { PokeballSettings.enabled,
-    "Choose Battle Art's original capture animation or Legendary Visuals' "
-    .. "real 3D Poke Ball throw, intake beam, ground shakes, catch click and "
-    .. "breakout. This changes presentation only; items, odds and outcomes "
-    .. "remain Battle Art's.",
-    when = function() return stagedBattles() end, full = true },
-  { PokeballSettings.size,
-    "Scale the Legendary 3D capture ball without changing its trajectory.",
-    when = function()
-      return stagedBattles() and PokeballSettings.active()
-    end, full = true },
-  { PokeballSettings.suction,
-    "Enable the Legendary intake beam and suction presentation.",
-    when = function()
-      return stagedBattles() and PokeballSettings.active()
-    end, full = true },
-  { PokeballSettings.preset,
-    "Choose a coordinated capture-effects profile. CUSTOM exposes the "
-    .. "individual beam, streamer and star controls below.",
-    when = function()
-      return stagedBattles() and PokeballSettings.active()
-    end, full = true },
-  { PokeballSettings.beam,
-    "Set intake-beam strength for the CUSTOM capture profile.",
-    when = function()
-      return stagedBattles() and PokeballSettings.active()
-        and PokeballSettings.preset:get() == "CUSTOM"
-    end, full = true },
-  { PokeballSettings.streamers,
-    "Set airborne trail strength for the CUSTOM capture profile.",
-    when = function()
-      return stagedBattles() and PokeballSettings.active()
-        and PokeballSettings.preset:get() == "CUSTOM"
-    end, full = true },
-  { PokeballSettings.stars,
-    "Set successful-catch star strength for the CUSTOM capture profile.",
-    when = function()
-      return stagedBattles() and PokeballSettings.active()
-        and PokeballSettings.preset:get() == "CUSTOM"
-    end, full = true },
-  { PokeballSettings.pokemonGlow,
-    "Control the opponent glow while it is drawn into the ball.",
-    when = function()
-      return stagedBattles() and PokeballSettings.active()
-    end, full = true },
-  { PokeballSettings.suctionParticles,
-    "Control the particles pulled inward during capture.",
-    when = function()
-      return stagedBattles() and PokeballSettings.active()
-    end, full = true },
-  { PokeballSettings.captureSpeed,
-    "Choose the timing of the visual intake; battle timing remains native.",
-    when = function()
-      return stagedBattles() and PokeballSettings.active()
-    end, full = true },
-  { PokeballSettings.openTime,
-    "Choose how long the 3D ball visibly holds open before closing.",
-    when = function()
-      return stagedBattles() and PokeballSettings.active()
-    end, full = true },
-  { PokeballSettings.fxScale,
-    "Scale the Legendary beam, trails, particles and catch effects together.",
-    when = function()
-      return stagedBattles() and PokeballSettings.active()
-    end, full = true },
 }
 
 local schema = {}
@@ -992,7 +980,8 @@ local HOTKEYS = {
 local OPTION_CATEGORIES = {
   { id = "world", label = "WORLD", settings = {
     CommunityVisuals.pillars, CommunityVisuals.masonry,
-    CommunityVisuals.trees, CommunityVisuals.grass,
+    CommunityVisuals.trees, CommunityVisuals.cutTrees,
+    CommunityVisuals.signs, CommunityVisuals.grass,
     CommunityVisuals.roads, CommunityVisuals.walls,
     CommunityVisuals.courtyards,
     VoxelGrid.setting, WorldCurve.setting, WorldUnderlay.setting,
@@ -1010,17 +999,18 @@ local OPTION_CATEGORIES = {
     BattleArt.frontFlipSetting,
   } },
   { id = "battle", label = "BATTLE SCENE", settings = {
-    OverworldBattle.setting, OverworldBattle.hudScaleSetting,
-    BattleArt.backPlacementSetting,
-    UiBackplates.spriteLight, UiBackplates.hudColor, UiBackplates.arenaFill,
-    UiBackplates.stadiumCircle, UiBackplates.backdropOffset,
-    UiBackplates.bossBg, UiBackplates.textboxFill,
+    OverworldBattle.setting, OverworldBattle.trainerBattleSetting,
+    OverworldBattle.hudScaleSetting,
     PokeballSettings.enabled, PokeballSettings.size,
     PokeballSettings.suction, PokeballSettings.preset,
     PokeballSettings.beam, PokeballSettings.streamers,
     PokeballSettings.stars, PokeballSettings.pokemonGlow,
     PokeballSettings.suctionParticles, PokeballSettings.captureSpeed,
     PokeballSettings.openTime, PokeballSettings.fxScale,
+    BattleArt.backPlacementSetting,
+    UiBackplates.spriteLight, UiBackplates.hudColor, UiBackplates.arenaFill,
+    UiBackplates.stadiumCircle, UiBackplates.backdropOffset,
+    UiBackplates.bossBg, UiBackplates.textboxFill,
   } },
 }
 
@@ -1101,6 +1091,31 @@ local function clearLegacyGBCFX()
   end
 end
 
+-- TEST48: one authoritative step for both the keyboard's "3" hotkey and
+-- the handheld/controller SELECT (Back) button. This is the proven N64
+-- Memory camera ladder: OFF -> 15 -> 35 -> 50 -> 75 -> 1ST -> 3RD.
+-- FULL remains an OPTIONS preset rather than a hotkey stop; pressing from
+-- FULL advances from its matching 35-degree view to 50 degrees.
+local function cycleVoxelCamera(game)
+  local Pipelines = require("src.render.Pipelines")
+  local top = game.stack and game.stack:top()
+  if not Pipelines.canToggle("voxel", top, game.overworld) then return false end
+  local nextLevel = Voxel.nextHotkeyLevel(Pipelines.level("voxel"))
+  Pipelines.setLevel("voxel", nextLevel)
+  Pipelines.syncOptions(game.save.options)
+  -- Preserve the established Battle Art compatibility rule: a real voxel
+  -- camera owns the view, so the engine's flat TILT/GBC post effects stay off.
+  game.save.options.tilt = 0
+  game.save.options.gbcfx = 0
+  clearLegacyGBCFX()
+  require("src.render.Tilt").setLevel(0)
+  game:writeOptions()
+  -- TEST49: camera cycling is gameplay behavior and must never depend on
+  -- optional diagnostics. Battle Art's 0.2.53 compatibility host has no
+  -- V.log object, so logging here previously crashed after a successful step.
+  return true
+end
+
 do
   local Game = require("src.core.Game")
   local Pipelines = require("src.render.Pipelines")
@@ -1117,35 +1132,16 @@ do
         -- 3 walks the ANGLE rungs and steps over FULL (Voxel.HOTKEY_ORDER),
         -- so the registry's plain "advance one and wrap" is not what it
         -- wants; 6 still is. The gate is the registry's own either way.
-        local stepped = false
         if key == "3" then
-          if Pipelines.canToggle("voxel", top, self.overworld) then
-            Pipelines.setLevel("voxel",
-              Voxel.nextHotkeyLevel(Pipelines.level("voxel")))
-            stepped = true
-          end
+          if cycleVoxelCamera(self) then return end
         else
-          stepped = Pipelines.hotkey(key, top, self.overworld) and true
-        end
-        if stepped then
-          Pipelines.syncOptions(self.save.options)
-          -- 3 is the key that used to turn TILT on and sits next to the one
-          -- that used to turn GBC FX on, and this mod has taken both away.
-          -- A player who left either running before enabling the mod would
-          -- otherwise have no way back to off, and both fight the diorama:
-          -- TILT is the flat fake of what this mode does for real, and GBC
-          -- FX is a full-screen present pass over the top of it. So the
-          -- VOXEL key clears them on EVERY press, not just the press that
-          -- switches the mode on -- cycling back round to OFF leaves them
-          -- off too, which is the state the key is now the only route to.
-          if key == "3" then
-            self.save.options.tilt = 0
-            self.save.options.gbcfx = 0
-            clearLegacyGBCFX()
+          local stepped = Pipelines.hotkey(key, top, self.overworld) and true
+          if stepped then
+            Pipelines.syncOptions(self.save.options)
+            require("src.render.Tilt").setLevel(self.save.options.tilt or 0)
+            self:writeOptions()
+            return
           end
-          require("src.render.Tilt").setLevel(self.save.options.tilt or 0)
-          self:writeOptions()
-          return
         end
       elseif Pipelines.canToggle("voxel", top, self.overworld) then
         -- All four answer to the voxel pass's own free-roam gate --
@@ -1499,9 +1495,7 @@ do
       local before = self:blockAt(bx, by)
       setBlock(self, bx, by, block)
       if self.id and self:blockAt(bx, by) ~= before then
-        -- naming the block lets the mesher drop what stood there from the
-        -- mesh on screen, so a cut tree goes on this frame
-        ChunkMesher.refresh(self.id, bx, by, self, before)
+        ChunkMesher.refresh(self.id)
         Companion:worldChanged("map.setBlock")
       end
     end
@@ -1677,6 +1671,27 @@ FirstPerson.install()
 FreeMove.install()
 VoxelTransitionGate.install()
 
+-- TEST48 SELECT/BACK CAMERA CYCLER, transplanted from N64 Memory TEST455.
+-- OverworldController:handleInput is reached only when the overworld itself
+-- owns input. Menus (where SELECT opens help), dialogue, scripted movement,
+-- transitions and battles are therefore untouched. Installed after FreeMove
+-- so 1ST and 3RD cannot swallow the button that is also their way back out.
+do
+  local OverworldState = require("src.world.OverworldController")
+  if not OverworldState.legendarySelectCameraHook then
+    local inner = OverworldState.handleInput
+    function OverworldState:handleInput(...)
+      local Game = require("src.core.Game")
+      local input = Game.input
+      if input and input.wasPressed and input:wasPressed("select") then
+        if cycleVoxelCamera(Game) then return end
+      end
+      return inner(self, ...)
+    end
+    OverworldState.legendarySelectCameraHook = true
+  end
+end
+
 -- Field poison still ticks every fourth step and retains its sound, damage,
 -- faint messages and blackout.  Only the engine's full-screen dark pulse is
 -- suppressed; on a 3D scene that legacy palette flicker reads as an intrusive
@@ -1821,7 +1836,7 @@ mod.hooks:wrap("world.tod", function(next, tod, ctx)
   return DayNight.tod()
 end)
 
-mod.exports.version = "1.10.2"
+mod.exports.version = "1.10.0-test49-select-camera-log-hotfix-compat253"
 mod.exports.battlePresentation = BattlePresentation.export()
 mod.exports.battleStage = BattleStage.export(OverworldBattle)
 mod.exports.voxel_companion = Companion.provider
