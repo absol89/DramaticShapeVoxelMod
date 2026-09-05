@@ -709,6 +709,17 @@ function OverworldBattle.finish()
   Voxel3D.camera = nil
 end
 
+-- A ready Stadium scene owns the entire frame even for flat arena fills.
+-- Do not publish a second normal shot or pre-snap HUDs behind its compositor.
+local function stadiumOwnsFrame(battle)
+  local finder=V.mod and V.mod.find
+  if type(finder)~="function" then return false end
+  local handle=finder("STADIUM2_IMPORTER")
+  local api=handle and handle.exports and handle.exports.scene
+  local scene=api and api.current and api.current()
+  return scene and scene.battle==battle and scene.readyFrame and not scene.defect or false
+end
+
 -- ------- per-frame
 --
 -- Driven from the voxel pipeline's update hook, which the engine ticks every
@@ -772,7 +783,7 @@ function OverworldBattle.update(dt)
   -- slice: nothing visible can hitch on them
   ChunkMesher.pump(true)
 
-  if session.apiHosted then
+  if session.apiHosted or stadiumOwnsFrame(session.battle) then
     session.shot = nil
     session.snapped = false
     return
@@ -846,7 +857,7 @@ end
 -- The finished shot for this frame, or nil when there is none and the battle
 -- should draw the way it always did.
 function OverworldBattle.shot()
-  if not session or session.broken then return nil end
+  if not session or session.broken or stadiumOwnsFrame(session.battle) then return nil end
   local s = session.shot
   if s and s.canvas then return s end
   return nil
@@ -1860,6 +1871,15 @@ function OverworldBattle.drawHostedUI(ctx)
     return false
   end
   local battle = ctx.battle
+  if ctx.report then
+    ctx.report("fill="..tostring(UiBackplates.arenaFill:get())
+      .." mode="..tostring(UiBackplates.battleUi:get())
+      .." statusAvailable="..tostring(ctx.statusAvailable)
+      .." suppressed="..tostring(BattlePresentation.suppressed("hud",battle))
+      .." nativeShot="..tostring(battle.dramaticShapeShot~=nil)
+      .." hostedShot="..tostring(battle.stadium2ImporterGen1Shot~=nil)
+      .." scale="..tostring(ctx.box.scale))
+  end
   if ctx.statusAvailable == false or BattlePresentation.suppressed("hud", battle) then
     return true
   end

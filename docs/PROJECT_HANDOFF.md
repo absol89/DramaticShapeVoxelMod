@@ -1,3 +1,20 @@
+## Flat hosted frame/HUD follow-up: 2026-09-05
+
+Captured diagnostic: BLUE/BOTH statusAvailable=true, suppressed=false, but
+nativeShot=true during Stadium HUD capture. The native Battle Art HUD wrapper
+therefore skipped capture as already snapped. Companion capture now clears
+both native/hosted shot markers temporarily and restores them even on errors.
+A ready, non-defective Stadium scene now also prevents Battle Art from rendering
+or publishing a second normal shot in flat modes. Failed/other scenes retain
+the normal fallback. This removes competing normal-frame composition while
+Stadium retains background-hook ownership for GEN6/PNG/WHITE/BLUE.
+
+Six targeted LuaJIT suites pass across the two repos, including stale-marker
+capture and frame-ownership regressions. A real LOVE 11.5 hidden-window GPU
+probe successfully executes WHITE, GEN6 and PNG background draws. That probe
+uses a generated image; it is not in-game or installed-asset visual validation.
+Deduplicated diagnostic records are retained to verify the next in-game run.
+
 ## Issue 44: unified hosted UI, 2026-09-05
 
 BattlePresentation now exports drawHostedUI. The companion Gen1 compositor
