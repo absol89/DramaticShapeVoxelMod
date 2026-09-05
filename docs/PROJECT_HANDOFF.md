@@ -1,3 +1,19 @@
+## Independent Stadium switches: 2026-09-05
+
+BATTLES OFF uses the existing non-Stadium2 hosting path. BATTLES ON/MODELS OFF
+keeps the Stadium2 host and offers both Battle Art sprite cards in voxel mode;
+flat backgrounds continue through native sprite rendering. Companion source
+change in dev/stadium2-importer on codex/independent-battle-model-switches removes
+the model requirement from Gen1 hosting and releases actors while MODELS is OFF.
+The installed importer is a separate copy and has NOT been updated. Apply the
+sibling stadium2-independent-switches.patch to that companion for this behavior.
+
+Validation: independent importer switch matrix plus Battle Art Stadium depth,
+background and model API tests pass. Gameplay testing remains pending.
+Shiny routing already uses shiny variants (BattleArt.isShiny and importer's DV
+check); extraction creates normal/shiny packs using configured palette pairs.
+This does not verify the palettes in the user's existing imported cache.
+
 ## Hosted trainer duplicate: 2026-09-05
 
 Inspected the installed red_3d_player provider: drawBattleTrainer returns true

@@ -58,7 +58,9 @@ local modules = {
   OverworldBattle=overworld, Voxel3D={}, BackdropImage={},
   Gen6Backdrop={}, BossBackdrop={},
 }
+local modelsEnabled=true
 local api=assert(loadfile('lib/StadiumBackground.lua'))({
+  mod={find=function() return {exports={modelsEnabled=function() return modelsEnabled end}} end},
   require=function(name) return assert(modules[name]) end,
 })
 local actorCalls, shadowCalls = 0, 0
@@ -162,3 +164,19 @@ ctx.battlerPhase='draw'
 local hidden=api.battlers(fallback,ctx).drawn
 assert(hidden.enemy and not hidden.player, 'hidden model replaced by a player sprite')
 print('Stadium loaded-but-hidden player keeps model ownership: ok')
+
+modelsEnabled=false
+host.actors={}
+host.visualActor=function() return nil end
+overworld.providerRender=function(battle,passes,...)
+  assert(passes.cards.player and passes.cards.enemy, 'MODELS OFF must offer both sprite sides')
+  return render(battle,passes,...)
+end
+ctx.battlerPhase='prepare'
+local spriteOwned=api.battlers(fallback,ctx)
+assert(spriteOwned.sides.player=='provider' and spriteOwned.sides.enemy=='provider')
+api.environment(fallback,ctx)
+ctx.battlerPhase='draw'
+local sprites=api.battlers(fallback,ctx).drawn
+assert(sprites.player and sprites.enemy)
+print('Stadium hosted sprite pair: ok')

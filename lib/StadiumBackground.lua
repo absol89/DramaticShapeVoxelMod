@@ -153,6 +153,14 @@ local function findMod(id)
   return ok and handle or nil
 end
 
+-- Scene hosting follows BATTLES; MODELS only selects the battler art.
+local function spriteBattlers()
+  local handle = findMod("STADIUM2_IMPORTER")
+  local exports = handle and handle.exports
+  return exports and type(exports.modelsEnabled) == "function"
+    and exports.modelsEnabled() == false
+end
+
 local function battleMap(ctx)
   local map = OverworldBattle.map and OverworldBattle.map() or nil
   if map then return map end
@@ -433,7 +441,11 @@ local function stadiumActorPasses(sceneCtx)
       return true
     end,
   }
-  if legendaryPlayerCard(sceneCtx) then passes.cards = { player = true } end
+  if spriteBattlers() then
+    passes.cards = { player = true, enemy = true }
+  elseif legendaryPlayerCard(sceneCtx) then
+    passes.cards = { player = true }
+  end
   return passes
 end
 
@@ -448,7 +460,7 @@ function StadiumBackground.battlers(next, ctx)
     local sides = {}
     for _, side in ipairs({ "enemy", "player" }) do
       local actor = host.visualActor and host:visualActor(side)
-      sides[side] = ((side == "player" and legendaryPlayerCard(ctx))
+      sides[side] = (spriteBattlers() or (side == "player" and legendaryPlayerCard(ctx))
         or (rendererApi() and actor and actor.renderer)) and "provider" or "host"
     end
     return { sides = sides }
@@ -508,7 +520,9 @@ function StadiumBackground.environment(next, ctx)
     return drawCircleStage(next, ctx)
   end
   local host = ctx.scene and ctx.scene.host
-  if host and legendaryPlayerCard(ctx) then
+  if host and spriteBattlers() then
+    hostedDrawn[host] = { player = true, enemy = true }
+  elseif host and legendaryPlayerCard(ctx) then
     hostedDrawn[host] = hostedDrawn[host] or {}
     hostedDrawn[host].player = true
   end
