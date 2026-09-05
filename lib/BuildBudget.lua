@@ -20,18 +20,23 @@ local clock = (love and love.timer and love.timer.getTime) or os.clock
 
 local deadline = math.huge
 local buildCo = nil
+local tickEvery = 32
 
 -- Enter/leave a pumped slice. `co` is the coroutine being resumed, so
 -- tick() can tell the build apart from any other coroutine the engine
 -- happens to be running (drivers are coroutines too).
-function B.begin(co, seconds)
+function B.begin(co, seconds, pollEvery)
   buildCo = co
   deadline = clock() + seconds
+  -- Visible meshing samples more often; other callers retain the cheap default.
+  tickEvery = pollEvery == 4 and 4 or 32
+  B.n = 0
 end
 
 function B.finish()
   buildCo = nil
   deadline = math.huge
+  tickEvery = 32
 end
 
 function B.expired()
@@ -39,11 +44,11 @@ function B.expired()
 end
 
 -- Cheap enough to sprinkle through inner loops: one modulo most calls,
--- a clock read every 32nd.
+-- a clock read every 32nd (every fourth during visible world builds).
 function B.tick()
   local n = B.n + 1
   B.n = n
-  if n % 32 ~= 0 then return end
+  if n % tickEvery ~= 0 then return end
   if buildCo and coroutine.running() == buildCo and clock() > deadline then
     coroutine.yield("budget")
   end

@@ -769,6 +769,9 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
       -- remain correct when this pass is supersampled.
       drawActorPass({
         vp = Voxel3D.vp,
+        view = Mat4.lookAt(Voxel3D.eye, Voxel3D.focus, cam.up or { 0, 1, 0 }),
+        eye = Voxel3D.eye,
+        origin = { arena.mid[1], groundY, arena.mid[2] },
         groundY = groundY,
         width = pw,
         height = ph,

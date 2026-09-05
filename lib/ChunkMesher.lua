@@ -2382,12 +2382,14 @@ end
 
 -- Advance queued builds inside a per-frame time budget. A partially built body
 -- for a seam just crossed runs first, then current-map jobs, visible neighbours,
--- and speculative destinations. All foreground classes get enough time to
--- finish a packed Android route before the player reaches its seam. `covered`
+-- and speculative destinations. Visible slices favor frame responsiveness
+-- over completion speed; a current-map BODY gets a slightly larger bootstrap
+-- slice so useful terrain lands first. `covered`
 -- says the world pass is hidden
 -- this frame (a warp's fade, a menu): nothing visible can hitch, so the
 -- slice opens up and a door fade swallows most of a destination build.
-local FOREGROUND_SLICE = 0.012
+local BODY_BOOTSTRAP_SLICE = 0.0065
+local FOREGROUND_SLICE = 0.00475
 local IDLE_SLICE = 0.005
 local COVERED_SLICE = 0.030
 
@@ -2403,7 +2405,9 @@ end
 function ChunkMesher.pump(covered)
   if #jobs == 0 then return end
   local pick = nextJob()
+  local bootstrap = pick.slot == "body" and (pick.priority or 0) >= 2
   local slice = covered and COVERED_SLICE
+                or (bootstrap and BODY_BOOTSTRAP_SLICE)
                 or ((pick.priority or 0) > 0 and FOREGROUND_SLICE
                     or IDLE_SLICE)
   local deadline = clock() + slice
@@ -2411,7 +2415,9 @@ function ChunkMesher.pump(covered)
     if not pick.co then
       pick.co = coroutine.create(runJob)
     end
-    Budget.begin(pick.co, deadline - clock())
+    -- Cap the whole pump, not each resumed job separately. Keep the registered
+    -- coroutine guard in BuildBudget even with more frequent visible polling.
+    Budget.begin(pick.co, deadline - clock(), covered and 32 or 4)
     local ok, err = coroutine.resume(pick.co, pick)
     Budget.finish()
     if not ok then

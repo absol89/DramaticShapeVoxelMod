@@ -1,6 +1,6 @@
 -- Battle Art ARENA FILL provider for Stadium 2 Importer's owned battle scene.
--- The importer retains its camera, platforms, models and HUD; this module
--- replaces only its public background phase.
+-- Flat backgrounds retain Stadium ownership. Voxel mode submits circles and
+-- model actors into the shared voxel depth attachment before compositing.
 
 local V = ...
 
@@ -14,8 +14,29 @@ local OverworldBattle = V.require("OverworldBattle")
 local StadiumBackground = {}
 local installed = false
 local hostedBattle
+local hostedDrawn = setmetatable({}, { __mode = "k" })
+local StadiumRenderer
 local catcherMesh
 local catcherShader
+
+local function rendererApi()
+  if StadiumRenderer == false then return nil end
+  if not StadiumRenderer then
+    local ok, renderer = pcall(require,
+      "mods.STADIUM2_IMPORTER.lib.renderer")
+    StadiumRenderer = ok and renderer or false
+  end
+  return StadiumRenderer or nil
+end
+
+local function translate(x, y, z)
+  return {
+    1, 0, 0, x,
+    0, 1, 0, y,
+    0, 0, 1, z,
+    0, 0, 0, 1,
+  }
+end
 
 local CATCHER_SHADER = [[
 varying vec3 vSun;
@@ -217,15 +238,134 @@ local function drawCircleStage(next, ctx)
   return a, b
 end
 
-local function stadiumActorPasses()
-  -- Stadium draws its models after this environment canvas. Their completed
-  -- shadow map is supplied separately as the voxel receiver's second sun.
-  return { draw = function() return true end }
+local function drawHostedActors(sceneCtx, providerCtx)
+  local host = sceneCtx and sceneCtx.scene and sceneCtx.scene.host
+  local renderer = rendererApi()
+  local origin = providerCtx and providerCtx.origin
+  if not (host and renderer and origin and providerCtx.vp) then
+    return { enemy = false, player = false }
+  end
+  local worldFromStadium = translate(origin[1], origin[2], origin[3])
+  local stadiumFromWorld = translate(-origin[1], -origin[2], -origin[3])
+  local shadow = sceneCtx.shadow
+  local sunVP = shadow and shadow.sunVP
+    and renderer.matMul(shadow.sunVP, stadiumFromWorld) or nil
+  local environment = sceneCtx.environment or host.environment or {}
+  local base = environment.modelTint or { 1, 1, 1 }
+  local drawn = { enemy = false, player = false }
+  for _, pass in ipairs({ "opaque", "additive" }) do
+    for _, side in ipairs({ "enemy", "player" }) do
+      local actor = host.visualActor and host:visualActor(side)
+      if actor and actor.renderer and host.modelMatrix then
+        local localModel, yaw = host:modelMatrix(side, actor)
+        local model = renderer.matMul(worldFromStadium, localModel)
+        local ok = actor.renderer:drawScene(pass, model, {
+          viewProjection = providerCtx.vp,
+          viewMatrix = providerCtx.view,
+          normalMatrix = renderer.normalMatrix(yaw, 0, false),
+          lightDir = environment.light,
+          ambient = environment.ambient,
+          diffuse = environment.diffuse,
+          skipHandlers = pass == "additive",
+          modernLighting = false,
+          flipWinding = true,
+          disableCulling = true,
+          tint = { base[1], base[2], base[3], 1 },
+          flashAmount = actor.flash and actor.flash > 0 and .5 or 0,
+          sunMap = shadow and shadow.map,
+          sunVP = sunVP,
+          sunDark = shadow and shadow.sunDark,
+          sunBias = shadow and shadow.sunBias,
+          sunTexel = shadow and shadow.sunTexel,
+        })
+        if pass == "opaque" then drawn[side] = ok == true end
+      end
+    end
+  end
+  hostedDrawn[host] = drawn
+  return drawn
 end
 
--- OFF means the real Battle Art level, not Stadium's generic platforms. The
--- existing BattleStage hosting seam renders terrain without sprite cards; the
--- importer then draws its own models and HUD over that completed environment.
+-- Submit the classic stage into the voxel attachment, using the same
+-- Stadium-to-world translation as the models. The host's environment fallback
+-- closes over its original camera, so calling it here would use the wrong VP.
+local function drawHostedStage(sceneCtx, providerCtx)
+  local host = sceneCtx.scene and sceneCtx.scene.host
+  local stage = host and host.Stage
+  local renderer = rendererApi()
+  local origin = providerCtx.origin
+  if UiBackplates.stadiumCircleScale() <= 0 then return sceneCtx.marks end
+  if not (stage and stage.draw and renderer and origin) then return sceneCtx.marks end
+  local frame = {}
+  for key, value in pairs(sceneCtx.camera or {}) do frame[key] = value end
+  frame.vp = renderer.matMul(providerCtx.vp,
+    translate(origin[1], origin[2], origin[3]))
+  local g, target = sceneCtx.graphics, sceneCtx.target
+  -- The importer's stage normally sinks below its empty floor. Voxel terrain
+  -- has a real depth-writing floor, so place the decal just above that floor.
+  local sink = stage.sink
+  stage.sink = -0.02
+  g.push("all")
+  local ok, marks = pcall(drawCircleStage, function()
+    -- Stage uses these dimensions for returned UI marks, not rasterization.
+    -- The importer subtracts its logical letterbox from those marks later;
+    -- supersampled target pixels here multiply the attack-anchor position.
+    return stage.draw(g, target.logicalWidth or target.width,
+      target.logicalHeight or target.height, frame, host.actors,
+      sceneCtx.shadow, sceneCtx.environment or host.environment)
+  end, sceneCtx)
+  g.pop()
+  stage.sink = sink
+  if not ok then error(marks, 0) end
+  return marks or sceneCtx.marks
+end
+
+local function stadiumActorPasses(sceneCtx)
+  return {
+    draw = function(providerCtx)
+      drawHostedStage(sceneCtx, providerCtx)
+      drawHostedActors(sceneCtx, providerCtx)
+      return true
+    end,
+  }
+end
+
+-- Claim only actual model actors; native trainer presentation remains owned
+-- by Stadium. Failed voxel frames release the draw phase to the importer.
+function StadiumBackground.battlers(next, ctx)
+  if UiBackplates.arenaFill:get() ~= "OFF" then return next(ctx) end
+  local host = ctx.scene and ctx.scene.host
+  if not (host and rendererApi()) then return next(ctx) end
+  if ctx.battlerPhase == "prepare" then
+    hostedDrawn[host] = nil
+    local sides = {}
+    for _, side in ipairs({ "enemy", "player" }) do
+      local actor = host.visualActor and host:visualActor(side)
+      sides[side] = actor and actor.renderer and "provider" or "host"
+    end
+    return { sides = sides }
+  end
+  if ctx.battlerPhase == "draw" and hostedDrawn[host] then
+    return { drawn = hostedDrawn[host] }
+  end
+  return next(ctx)
+end
+
+function StadiumBackground.shadow(next, ctx)
+  if UiBackplates.arenaFill:get() ~= "OFF" then return next(ctx) end
+  local host = ctx and ctx.scene and ctx.scene.host
+  local lightVP = ctx and ctx.shadow and ctx.shadow.viewProjection
+  if not (host and lightVP) then return next(ctx) end
+  for _, side in ipairs({ "enemy", "player" }) do
+    local actor = host.visualActor and host:visualActor(side)
+    if actor and actor.renderer and host.modelMatrix then
+      local model = host:modelMatrix(side, actor)
+      actor.renderer:drawShadowMap(model, lightVP)
+    end
+  end
+  return next(ctx)
+end
+
 function StadiumBackground.environment(next, ctx)
   local mode = UiBackplates.arenaFill:get()
   if mode ~= "OFF" then
@@ -253,12 +393,14 @@ function StadiumBackground.environment(next, ctx)
   local canvas = OverworldBattle.providerRender(battle,
     stadiumActorPasses(ctx), ctx.camera, ctx.shadow)
   if not drawCanvas(g, canvas, target) then
+    local host = ctx.scene and ctx.scene.host
+    if host then hostedDrawn[host] = nil end
     releaseVoxelHost()
     return drawCircleStage(next, ctx)
   end
-  -- The optional platform is drawn after the opaque voxel canvas, so ON/HALF
-  -- stays visible while OFF leaves only the terrain and its model shadows.
-  return drawCircleStage(next, ctx)
+  -- Keep the existing importer marks/attack projection contract unchanged.
+  -- Circles and actors are already in the voxel color/depth pass.
+  return ctx.marks
 end
 
 function StadiumBackground.install()
@@ -271,7 +413,11 @@ function StadiumBackground.install()
     StadiumBackground.draw, 100)
   local okEnvironment = pcall(scene.register, V.mod, "environment",
     StadiumBackground.environment, 100)
-  installed = okBackground and okEnvironment
+  local okBattlers = pcall(scene.register, V.mod, "battlers",
+    StadiumBackground.battlers, 100)
+  local okShadow = pcall(scene.register, V.mod, "shadow",
+    StadiumBackground.shadow, 100)
+  installed = okBackground and okEnvironment and okBattlers and okShadow
   if installed and V.mod.events and type(V.mod.events.on) == "function" then
     V.mod.events:on("battle.ended", releaseVoxelHost)
   end
