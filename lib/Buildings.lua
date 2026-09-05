@@ -1506,6 +1506,10 @@ function Buildings.build(S, map, data, perRow)
               built = models[key]
             end
             Buildings.stamp(S, map, built, tx, ty, bw, bh, t)
+            if S.outdoor and tileset.id == "OVERWORLD" then
+              V.require("FacadeEntrances").stamp(S, map, data, perRow,
+                                                tx, ty, bw, bh, t)
+            end
           end
         end
       end

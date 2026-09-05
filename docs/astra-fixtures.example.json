@@ -34,5 +34,7 @@
   "ASTRA_CURRENT_UPSTREAM": "<path/to/clean-current-upstream>",
   "ASTRA_SHIP_STOOL_BASELINE": "<path/to/astra_ship_stool_baseline>",
   "ASTRA_CABIN_BASELINE": "<path/to/astra21-baseline>",
-  "ASTRA_CABIN_ATLAS": "<path/to/ship.rgba>"
+  "ASTRA_CABIN_ATLAS": "<path/to/ship.rgba>",
+  "ASTRA_FOLLOWUP_BASELINE": "<path/to/submitted-pr45-baseline>",
+  "ASTRA_ENTRANCE_ATLASES": "<path/to/overworld-and-plateau-rgba-directory>"
 }

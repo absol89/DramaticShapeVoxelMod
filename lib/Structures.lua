@@ -423,7 +423,14 @@ function Structures.forMap(map)
         hideBareRing = hullRingOnly or nil,
         runs = {}, skip = {}, ground = {}, doorFold = {}, objectQuads = {},
         grassQuads = {}, flowerQuads = {}, roundStamps = {}, figures = {} }
+  -- These source scrolls are mounted relief, not another folded wall band.
+  if map.id == "OAKS_LAB" or map.id == "FIGHTING_DOJO" then
+    V.require("HangingScrolls").build(S, map)
+  end
   Buildings.build(S, map, pixels(tileset), perRow)
+  if tileset.id == "PLATEAU" then
+    V.require("FacadeEntrances").build(S, map, pixels(tileset), perRow)
+  end
 
   -- Fold doors into their buildings. A door cell is WALKABLE (the player
   -- steps onto it to warp), so it resolves to ground and punches a hole in
@@ -553,6 +560,9 @@ function Structures.forMap(map)
 
   -- ---- model each region: carve out per-pixel objects, volume the rest --
   local data = pixels(tileset)
+  if tileset.id == "CAVERN" then
+    V.require("CaveExitVisuals").build(S, map, data, perRow)
+  end
   for _, region in ipairs(regions) do
     local leftover = region.tiles
     if data then
