@@ -1,6 +1,6 @@
 ## Absol follow-up: building backs, entrances, cave exits and scrolls (2026-09-05)
 
-Separate follow-up to merged PR #45, integrated with master16bb7cc.
+Separate follow-up to merged PR #45, integrated with master38e389c (1.10.3).
 No live installation is included in this source change.
 
 - `data/voxel_heights.lua`: 29 exterior families use rear wall courses instead of
@@ -25,14 +25,44 @@ preservation. Historical snapshot tests restore only the historical rear materia
 configuration in memory; a separate 19,496,504-check suite tests all29 live rear
 families. The ship source comparison normalizes CRLF/LF only.
 
-Final source audit:75/77 portable commands passed, plus3/3 inherited Stadium
+Pre-1.10.3 candidate audit:75/77 portable commands passed, plus3/3 inherited Stadium
 suites; all108 production Lua files compile. The two failures (voxel seam AO
 and legacy Legendary visuals) reproduce on the submitted PR45 baseline.
+
+The 1.10.3 integration preserves upstream startup/portrait/platform changes.
+Both updated portrait and platform regression tests pass; all108 production
+Lua files compile. Follow-up geometry files remain byte-identical to the
+validated candidate.
 
 Native comparison uses a private Windows Gen1Recomp0.2.27 runtime and copied save.
 Inspection cameras may occupy non-walkable positions; they are visual evidence,
 not an occupancy or route-traversal claim. Exact0.2.53 and Quest headset validation
 remain pending. No whole-game performance measurement is claimed.
+
+## Oak intro vertical placement: 2026-09-05
+
+Battle Art marks its 96px custom Oak intro portrait with an 8px vertical
+offset. The paired Gen1Recomp intro change applies it only while oakPic is the
+active picture, so Pokemon, player, rival, battle portraits and ROM Oak retain
+their positions. Both Gen 1 and Gen 2 intro renderers honor the field.
+
+## iOS Voxel Companion sandbox fix: 2026-09-05
+
+VoxelCompanion no longer indexes the forbidden love.system namespace while
+building its informational platform field. The existing sandbox-safe LÖVE 12
+Metal renderer probe identifies iOS; other platforms use neutral UNKNOWN
+metadata. This field does not select rendering behavior. A regression test
+uses a sandbox proxy that throws on love.system access and passes both paths.
+
+## Oak portraits and player animation default: 2026-09-05
+
+PLAYER ANIM defaults to GEN 1 (saved selections retained); TRAINER ART remains
+GEN 1. Oak trainer lookup prefers front-static/<trainer generation>/prof.oak.png
+and falls back to prof-oak.png, then ROM. The public intro.oak_speech.build hook
+uses that same resolver for the Gen 1 new-game portrait. Generated assets are
+untouched. Routing tests cover all three generations, legacy/missing assets,
+intro replacement, ROM mode and existing Choose Your Hero behavior; they pass.
+Modified Lua files compile. Phone/gameplay confirmation remains pending.
 
 ## PR 45 integration: 2026-09-05
 

@@ -1742,6 +1742,21 @@ end)
 -- next() first, so a sprite-replacing mod loaded before this one still gets
 -- the last word on WHICH art is used; this only changes which SIDE is asked
 -- for.
+-- The intro caches Oak before building its steps. Use the public build hook
+-- to replace that portrait without changing generated ROM assets or scripts.
+mod.hooks:wrap("intro.oak_speech.build", function(next, steps, speech)
+  local out = next(steps, speech)
+  local oak = BattleArt.trainerImage("prof.oak")
+  if speech and oak then
+    speech.oakPic, speech.oakTrueColor = oak, true
+    -- The custom trainer sheets are 96px tall. The intro's ROM-authentic
+    -- 7-tile bottom alignment otherwise starts them at y=-8 and clips Oak's
+    -- hair. Current engines apply this only while oakPic is the active image.
+    speech.oakPicOffsetY = 8
+  end
+  return out
+end)
+
 mod.hooks:wrap("pokemon.sprite", function(next, path, ctx)
   local out = next(path, ctx)
   if not (ctx and ctx.kind == "battle" and ctx.side == "back") then
@@ -1843,7 +1858,7 @@ mod.hooks:wrap("world.tod", function(next, tod, ctx)
   return DayNight.tod()
 end)
 
-mod.exports.version = "1.10.2"
+mod.exports.version = "1.10.3"
 mod.exports.battlePresentation = BattlePresentation.export()
 mod.exports.battleStage = BattleStage.export(OverworldBattle)
 mod.exports.voxel_companion = Companion.provider
