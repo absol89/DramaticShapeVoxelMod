@@ -33,7 +33,7 @@ BattleArt.playerAnimationSetting = ModSetting.new(
   "playerAnimatedSet", "PLAYER ANIM",
   { "png", "gen1", "gen2", "gen3", "gen4", "gen5", "ash", "gary", "red",
     "ash_front", "misty_front", "brock_front", "bulma_front", "gary_front", "rom" },
-  { "PNG", "GEN 1", "GEN 2", "GEN 3", "GEN 4", "GEN 5", "ASH", "GARY", "RED",
+  { "PNG", "GEN 1", "GEN 2", "GEN 3", "GEN 4", "GEN 5", "ASH", "GARY", "RED/GREEN",
     "ASH FRONT", "MISTY FRONT", "BROCK FRONT", "BULMA FRONT", "GARY FRONT", "ROM" }, 9)
 -- One owner for species pictures. BATTLE ART keeps this mod's selected front
 -- and back collections in charge, including its imported shiny children.
@@ -459,13 +459,93 @@ end
 -- complete generation set without renaming files. Deliberately do not fall
 -- through to another generation (or to the old flat folder): a missing class
 -- is useful and predictable as a per-trainer ROM fallback.
+local function currentGameSave()
+  local ok, Game = pcall(require, "src.core.Game")
+  if ok and type(Game) == "table" then
+    return Game.save
+  end
+  return nil
+end
+
+local function chooseYourHeroBucket()
+  local ok, other = pcall(function()
+    return V.mod.find and V.mod.find("choose_your_hero")
+  end)
+  if ok and other and other.save and other.save.get then
+    local readOK, bucket = pcall(function()
+      return {
+        player = other.save:get("player", "red"),
+        rival = other.save:get("rival", "blue"),
+      }
+    end)
+    if readOK then return bucket end
+  end
+  local save = currentGameSave()
+  local md = save and save.modData
+  if type(md) ~= "table" then return nil end
+  local bucket = md.choose_your_hero
+  if type(bucket) == "table" then return bucket end
+  return nil
+end
+
+local function chooseYourHeroRival()
+  local bucket = chooseYourHeroBucket()
+  if type(bucket) == "table" and type(bucket.rival) == "string" then
+    return bucket.rival
+  end
+  return "blue"
+end
+
+local function chooseYourHeroPlayer()
+  local bucket = chooseYourHeroBucket()
+  if type(bucket) == "table" and type(bucket.player) == "string" then
+    return bucket.player
+  end
+  return "red"
+end
+BattleArt.chooseYourHeroPlayer = chooseYourHeroPlayer
+BattleArt.chooseYourHeroRival = chooseYourHeroRival
+
+function BattleArt.effectivePlayerAnimationSet()
+  local selected = BattleArt.playerAnimationSetting:get()
+  -- Old saves that still store GREEN are the combined RED/GREEN row.
+  if selected == "green" then selected = "red" end
+  if selected == "red" then
+    return chooseYourHeroPlayer() == "green" and "green" or "red"
+  end
+  return selected
+end
+
+function BattleArt.effectivePlayerArtSet()
+  return BattleArt.playerArtSetting:get()
+end
+
+local function yellowRivalFile(name)
+  if type(name) ~= "string" then return nil end
+  if name == "rival" then return "rival1f" end
+  if name:match("^rival[123]$") then return name .. "f" end
+  return nil
+end
+
 function BattleArt.trainerImage(name)
   if BattleArt.setting:get() == "rom" then return nil end
   local generation = BattleArt.trainerSetting:get()
-  local rel = ("assets/battle/front-static/%s/%s.png"):format(
-    generation, name)
-  local path = V.mod.assets:path(rel)
-  return prepare(path, displayMode())
+  local function load(file)
+    local rel = ("assets/battle/front-static/%s/%s.png"):format(
+      generation, file)
+    local path = V.mod.assets:path(rel)
+    if not path then return nil end
+    return prepare(path, displayMode())
+  end
+  if chooseYourHeroRival() == "yellow" then
+    local femName = yellowRivalFile(name)
+    if femName then
+      -- nil leaves the companion's engine-installed Yellow portrait intact.
+      -- Falling back to the standard rival file would turn her back into Blue.
+      return load(femName)
+    end
+  end
+  return load(name)
 end
 
 -- The normal player trainer intro has its own collection, independent of
@@ -473,7 +553,7 @@ end
 -- keep custom species and opponent trainers while retaining the original
 -- player portrait. Oak and Old Man remain separately named scripted roles.
 function BattleArt.playerTrainerImage()
-  local set = BattleArt.playerArtSetting:get()
+  local set = BattleArt.effectivePlayerArtSet()
   if set == "rom" then return nil end
   local function load(name)
     local rel = "assets/battle/back-static/" .. name
@@ -481,6 +561,9 @@ function BattleArt.playerTrainerImage()
     return prepare(path, displayMode())
   end
   if set == "png" then return load("player.png") end
+  if set == "green" then
+    return load("greenplayer.png") or load("player.png")
+  end
   -- A named collection may be incomplete without making every battle fall
   -- all the way back to ROM. player.png is the collection-independent BYO
   -- fallback; only its own absence reaches the engine portrait.

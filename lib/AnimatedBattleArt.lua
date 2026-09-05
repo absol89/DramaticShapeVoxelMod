@@ -209,7 +209,9 @@ local function updatePlayerTrainer(battle, mode)
     restoreTrainer(battle)
     return
   end
-  local selected = BattleArt.playerAnimationSetting:get()
+  local selected = BattleArt.effectivePlayerAnimationSet
+    and BattleArt.effectivePlayerAnimationSet()
+    or BattleArt.playerAnimationSetting:get()
   if selected == "png" then
     updateStaticPlayerTrainer(battle, mode)
     return
