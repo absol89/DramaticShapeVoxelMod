@@ -1,7 +1,7 @@
 ## Absol follow-up: building backs, entrances, cave exits and scrolls (2026-09-05)
 
-Separate follow-up based on submitted PR #45 head 5363e270761f81d787774650230bb1f787694c10.
-The existing PR is unchanged; this pass has not been pushed or installed.
+Separate follow-up to merged PR #45, integrated with master16bb7cc.
+No live installation is included in this source change.
 
 - `data/voxel_heights.lua`: 29 exterior families use rear wall courses instead of
   mirrored front doors/signage. Occupancy, front art and the authored roof remain.
@@ -33,6 +33,16 @@ Native comparison uses a private Windows Gen1Recomp0.2.27 runtime and copied sav
 Inspection cameras may occupy non-walkable positions; they are visual evidence,
 not an occupancy or route-traversal claim. Exact0.2.53 and Quest headset validation
 remain pending. No whole-game performance measurement is claimed.
+
+## PR 45 integration: 2026-09-05
+
+Merged PR 45 atop 6e99ed5 without conflicts or content overrides. Review was
+limited to the six user-named integration files. Their Lua syntax checks pass,
+as do pillar cache/layout (25), terrain shading (34), disk storage (6), battle
+sidecars (37), and hosted trainer/ball tests. Cave-step and public-stair tests
+could not initialize because external ASTRA fixture paths were not configured.
+No new in-game validation was performed. The PR retains its documented 0.2.53
+playtest limitation. Release tag and installed mod are not changed by this merge.
 
 ## Flat Stadium trainer and Pokeball pass: 2026-09-05
 
