@@ -1,3 +1,17 @@
+## Stadium visibility follow-up: 2026-09-05
+
+The importer source shows visualActor() can return nil despite a loaded model:
+it is gated by readyFrame, send-out, and temporary battle visibility. Corrected
+Legendary sprite fallback to consult host.actors.player as well as the visible
+actor. Actual model rendering still uses visualActor(), preserving hiding and
+send-out behavior. The workspace mods/BATTLE_ART_VOXEL_FORK junction targets
+this checkout; the running process's source path could not be verified.
+
+Stadium depth, background API and models API tests pass, including a new
+loaded-but-hidden player regression. This is a code-confirmed fallback defect;
+confirmation that it resolves the user's persistent sprite symptom is pending
+an in-game retest after restart.
+
 ## Stadium player model regression: 2026-09-05
 
 Corrected the integration's unconditional Legendary player-card preference.

@@ -126,6 +126,7 @@ overworld.providerRender=function(battle, passes, ...)
 end
 for _, available in ipairs({true, false, true}) do
   playerModel=available
+  host.actors.player=available and actor or nil
   ctx.battlerPhase='prepare'
   local owned=api.battlers(fallback,ctx)
   assert(owned.sides.player=='provider' and owned.sides.enemy=='provider')
@@ -146,3 +147,18 @@ api.environment(fallback,ctx)
 assert(api.battlers(function() return 'released' end,ctx)=='released',
   'failed Legendary frame retained ownership')
 print('Legendary/Stadium model precedence and sprite fallback: ok')
+
+-- A loaded model can be temporarily invisible during send-out/hidden frames.
+providerFails=false
+playerModel=true
+host.actors.player=actor
+host.visualActor=function(_,side) if side=='enemy' then return actor end end
+ctx.battlerPhase='prepare'
+api.battlers(fallback,ctx)
+local before=actorCalls
+api.environment(fallback,ctx)
+assert(actorCalls==before+2, 'hidden player model was drawn early')
+ctx.battlerPhase='draw'
+local hidden=api.battlers(fallback,ctx).drawn
+assert(hidden.enemy and not hidden.player, 'hidden model replaced by a player sprite')
+print('Stadium loaded-but-hidden player keeps model ownership: ok')

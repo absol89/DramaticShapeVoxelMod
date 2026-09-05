@@ -333,11 +333,13 @@ local function legendaryPlayerCard(ctx)
   if not (OverworldBattle.legendaryTrainerEnabled
       and OverworldBattle.legendaryTrainerEnabled()) then return false end
   -- The standing trainer option must not replace a Pokemon model selected by
-  -- Stadium. Its live visual actor already reflects model availability; keep
-  -- the Legendary card only as the sprite fallback for a missing player model.
+  -- Stadium. visualActor may be nil during send-out, hiding, or before the
+  -- first ready frame even though the model is loaded. Those are visibility
+  -- decisions, not a request to replace the Pokemon with a sprite.
   local host = ctx and ctx.scene and ctx.scene.host
-  local actor = host and host.visualActor and host:visualActor("player")
-  return not (actor and actor.renderer)
+  local actor = host and host.actors and host.actors.player
+  local visible = host and host.visualActor and host:visualActor("player")
+  return not ((actor and actor.renderer) or (visible and visible.renderer))
 end
 
 local function drawHostedActors(sceneCtx, providerCtx)
