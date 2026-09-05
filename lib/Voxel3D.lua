@@ -405,7 +405,7 @@ end
 -- water pass reads (see beginWater); it is only ever made if something asks
 -- for one, so a session that never sees a lake never pays for it.
 local function releaseSlot(slotHeld)
-  for _, key in ipairs({ "canvas", "depth", "mirror", "cast" }) do
+  for _, key in ipairs({ "canvas", "depth", "mirror" }) do
     local obj = slotHeld[key]
     if obj and obj.release then pcall(obj.release, obj) end
     slotHeld[key] = nil
@@ -1189,72 +1189,6 @@ function Voxel3D.beginWater(paint)
   return held.mirror, held.depth
 end
 
--- ------- the cast's PLANAR reflection
---
--- The other way to get people into the water, and the one that works at the
--- camera this game is played at.
---
--- beginWater paints the cast into the reflection COPY, where the screen-space
--- march has to go and find it. That works when a ray reaches them, and at a
--- steep camera it largely does not: the horizon lean aims rays at the
--- distance, and a sprite is not in the depth buffer anyway, so what a ray
--- does find is smeared along whatever terrain stands behind the sprite.
---
--- This is the other half. The cast is drawn a SECOND time, reflected in the
--- water plane, into a canvas of its own, and the water shader samples that
--- canvas at each fragment's own screen position -- which is the right place
--- to look, because the reflection was drawn to exactly the place a mirror
--- would put it. There is no offset to tune and no correspondence to keep in
--- step.
---
--- The reflecting is done by VoxelScene, in WORLD space, one card at a time.
--- Not by mirroring the camera, which is the obvious way and is wrong here: a
--- character is a billboard leaning back to face the camera, so a mirrored
--- camera catches it leaning away and lands a foreshortened sliver in the
--- water. See billboardMatrix, where the position is reflected and the card
--- is flipped about its own feet instead.
---
--- Masking is free. The water shader runs on water fragments and nothing
--- else, so the reflection is confined to water exactly, with no stencil --
--- which matters, because DEPTH_FORMATS prefers a depth buffer with no
--- stencil in it and most drivers hand one over.
---
--- COLOUR ONLY, and no depth attachment: what would be tested against is the
--- world's depth, and this canvas holds a mirrored world that shares none of
--- it. The water shader's own depth test has already decided which water
--- fragments survive, and a reflection only ever lands on those.
---
--- Returns the canvas, or nil where one could not be made -- in which case
--- the water draws exactly as it did before this existed.
-function Voxel3D.beginCast()
-  if not (active and canvas and held) then return nil end
-  if not held.cast then
-    local ok, c = PixelCanvas.new(held.w, held.h)
-    if not (ok and c) then return nil end
-    pcall(c.setFilter, c, "nearest", "nearest")
-    pcall(c.setWrap, c, "clamp", "clamp")
-    held.cast = c
-  end
-  if not pcall(love.graphics.setCanvas, held.cast) then
-    pcall(love.graphics.setCanvas, depthTarget())
-    return nil
-  end
-  -- transparent, because the ALPHA is what tells the water shader where the
-  -- reflection actually is; everywhere else it must leave the water alone
-  love.graphics.clear(0, 0, 0, 0)
-  -- nothing to test against on a canvas with no depth
-  love.graphics.setDepthMode("always", false)
-  return held.cast
-end
-
--- Put the frame back. Safe after a beginCast that failed.
-function Voxel3D.endCast()
-  if not active then return end
-  pcall(love.graphics.setCanvas, depthTarget())
-  pcall(love.graphics.setDepthMode, "lequal", true)
-  love.graphics.setColor(1, 1, 1, 1)
-end
-
 -- Put the frame back: depth reattached, depth test and the scene shader as
 -- the pass had them. Safe to call after a beginWater that returned nil.
 function Voxel3D.endWater()
@@ -1297,6 +1231,21 @@ function Voxel3D.seams(on)
         on and VoxelGrid.DARK or 0)
 end
 
+-- Additive light geometry for the Legendary capture beam, trails and stars.
+-- Keep depth testing enabled so the effects still sit inside the world, but
+-- disable depth writes so a transparent glow cannot punch holes in geometry
+-- drawn later in the pass. Passing nil restores the ordinary scene state.
+function Voxel3D.blend(mode)
+  if not active then return end
+  if mode == "add" then
+    pcall(love.graphics.setBlendMode, "add", "alphamultiply")
+    pcall(love.graphics.setDepthMode, "lequal", false)
+  else
+    pcall(love.graphics.setBlendMode, "alpha", "alphamultiply")
+    pcall(love.graphics.setDepthMode, "lequal", true)
+  end
+end
+
 -- Whether what is drawn next may consult the glass mask. false for the
 -- length of a sprite-sheet pass, true to put it back.
 --
@@ -1306,14 +1255,10 @@ end
 -- on it, and at night that painted lamplight stripes down whoever was
 -- standing in the wrong part of their own sheet.
 function Voxel3D.glassMaskNow(mask)
-  Voxel3D.glassMask = mask
+  Voxel3D.glassMask=mask
   if not (active and activeShader) then return end
-  local current = mask or GlassMask.blank()
-  if not current then return end
-  pcall(activeShader.send, activeShader, "glassMask", current)
-  local ok, w, h = pcall(current.getDimensions, current)
-  pcall(activeShader.send, activeShader, "glassSize",
-        { ok and w or 1, ok and h or 1 })
+  local m=mask or GlassMask.blank()
+  if m then pcall(activeShader.send,activeShader,"glassMask",m); local ok,w,h=pcall(m.getDimensions,m); pcall(activeShader.send,activeShader,"glassSize",{ok and w or 1,ok and h or 1}) end
 end
 
 function Voxel3D.glass(on)
@@ -1554,23 +1499,7 @@ function Voxel3D.project(wx, wy, wz)
   -- convention, so both axes map the same way here -- no second flip
   local x = (cx / cw * 0.5 + 0.5) * canvasW
   local y = (cy / cw * 0.5 + 0.5) * canvasH
-  -- ...and the WINDOW depth of that point, fourth, for an overlay that has
-  -- to know whether the scene stands in front of it. Same expression the
-  -- water's own occlusion test uses on its self depth, so a value from here
-  -- compares directly against a sample of depthTexture below.
-  local cz = m[9] * wx + m[10] * wy + m[11] * wz + m[12]
-  return x, y, (Voxel3D.focusW or cw) / cw, (cz / cw) * 0.5 + 0.5
-end
-
--- The frame's depth texture, or nil where the driver gave us none.
---
--- It outlives the pass: endScene unbinds the canvas, it does not release the
--- attachment, so an overlay composited afterwards can still test against the
--- depth the pass wrote. beginOverlay binding the COLOUR canvas alone is what
--- makes the texture readable at all -- a target cannot be sampled while it is
--- attached, which is the same constraint beginWater takes the frame apart for.
-function Voxel3D.depthTexture()
-  return held and held.depth or nil
+  return x, y, (Voxel3D.focusW or cw) / cw
 end
 
 -- Re-bind the scene canvas for ordinary 2D drawing (no depth test), so

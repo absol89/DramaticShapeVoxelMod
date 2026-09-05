@@ -30,28 +30,24 @@ local WorldUnderlay = V.require("WorldUnderlay")
 local WorldFillProps = V.require("WorldFillProps")
 local GranitePillars = V.require("GranitePillars")
 local CommunityFlora = V.require("CommunityFlora")
+local CavePerimeter = V.require("CavePerimeter")
 local RenderDistance = V.require("RenderDistance")
-local ModSetting = V.require("ModSetting")
+local CharacterRenderers = V.require("CharacterRenderers")
 local PaletteFX = require("src.render.PaletteFX")
 local Map = require("src.world.Map")
 
 local VoxelScene = {}
 
--- Whether the hidden-character silhouette pass is drawn.
--- Keep this ON by default so the all-NPC silhouette behavior remains the
--- default introduced by the PR; users can disable the pass from OPTIONS.
-VoxelScene.SILHOUETTE_KEY = "silhouettes"
-VoxelScene.SILHOUETTE_LABEL = "SILHOUETTES"
-VoxelScene.silhouetteSetting = ModSetting.new(
-  VoxelScene.SILHOUETTE_KEY,
-  VoxelScene.SILHOUETTE_LABEL,
-  { true, false },
-  { "ON", "OFF" }
-)
-
-function VoxelScene.silhouettesEnabled()
-  return VoxelScene.silhouetteSetting:get() and true or false
-end
+-- Stable tables handed to sandboxed companion callbacks. The host keeps
+-- ownership of scene order/camera/depth; providers receive only the live
+-- render services needed to replace one character.
+local CHARACTER_HOST = {
+  Voxel3D = Voxel3D,
+  Mat4 = Mat4,
+  ShadowMap = ShadowMap,
+  FirstPerson = FirstPerson,
+  ChunkMesher = ChunkMesher,
+}
 
 -- What the active display mode actually paints with.
 --
@@ -168,6 +164,9 @@ end
 -- flat fill it has always had -- there is no gradient to see from down there,
 -- and the arena's look is not this rung's to change.
 local function skyFor(map)
+  if map and map.tileset and map.tileset.id == "CAVERN" then
+    return { .045, .030, .034, 1 }
+  end
   local sky = VoxelScene.skyColor(map, skyStrength(Voxel.angle))
   if not sky then return nil end
   return Sky.dress(sky)
@@ -292,41 +291,11 @@ end
 -- carries one pose into the other -- the lean eases out as the yaw eases in
 -- -- and cardBlend is zero for every camera that is not the first-person
 -- rig, the battle's placed shot included, so nothing else moves.
--- While set, billboardMatrix builds every card as its own REFLECTION in the
--- horizontal plane at this height. Ambient rather than threaded through the
--- four functions between here and the draw, which is how Voxel3D.glass and
--- Voxel3D.seams already switch a pass's character.
-local reflectPlane = nil
-
--- A card is a BILLBOARD, and that is why the reflection cannot simply be the
--- scene drawn through a mirrored camera.
---
--- The card leans back by exactly the camera's pitch so it reads face-on.
--- Mirror the CAMERA and it leans away instead, and what lands in the water
--- is a foreshortened sliver rather than a person -- correct for the flat
--- quad it really is, and useless as a reflection of the character it is
--- pretending to be. A billboard is a fake that only works from one side, so
--- reflecting it has to be faked too.
---
--- So the POSITION is reflected and the card keeps facing the camera. Its
--- feet move to the mirrored height (a point on the plane is its own image,
--- so the waterline still agrees), and the card is flipped about them, which
--- turns it upside down and takes its texture with it. Same lean, same size,
--- the right way up for a reflection.
 local function billboardMatrix(px, py, y, mirror)
   local Voxel = V.require("VoxelState")
   local b = FirstPerson.cardBlend()
   local yaw = b > 0 and (FirstPerson.cardYaw(px + 8, py + 8) * b) or 0
   local pitch = (Voxel.angle - math.pi / 2) * (1 - b)
-  if reflectPlane then
-    -- the mesh stands on its own y = 0, so scaling local y by -1 hangs it
-    -- from the anchor instead of standing it on it. CAST_RAISE lifts the
-    -- anchor off the true mirror toward the surface; see Water.
-    return Mat4.mul(
-      Mat4.billboard(px, py, 2 * reflectPlane - y + Water.CAST_RAISE,
-                     yaw, pitch, mirror),
-      Mat4.scale(1, -1, 1))
-  end
   return Mat4.billboard(px, py, y, yaw, pitch, mirror)
 end
 
@@ -608,15 +577,17 @@ end
 -- a hop rises off the ground instead of sliding north.
 -- Returns the pose list and, separately, the PLAYER's entry in it (nil
 -- during a Fly animation, which draws the player itself and is skipped
--- below). All posed objects will cast a silhouette when hidden by voxel
--- geometry. The player is additionally suppressed while the first-person
--- camera is inside their card.
+-- below). Only that one entry gets the see-through treatment: NPCs and the
+-- ghosts standing on a neighbour map are left to honest occlusion, because
+-- it is only your own character you cannot afford to lose behind a roof.
 local poseBuf = {}
 
 local function poseSlot(i)
   local p = poseBuf[i]
   if not p then p = {}; poseBuf[i] = p end
   p.isPlayer = nil
+  p.role = nil
+  p.entity = nil
   return p
 end
 
@@ -627,6 +598,8 @@ local function posesOf(state, spriteColors)
     local sprite, vx, vy, facing, phase, flip = g.npc:pose()
     n = n + 1
     local p = poseSlot(n)
+    p.entity = g.npc
+    p.isPlayer, p.role = false, "npc"
     p.sprite, p.px, p.py = sprite, vx + g.ox, g.npc.py + g.oy
     p.facing, p.phase, p.flip = facing, phase, flip
     p.gh = groundAt(g.map or state.map, g.npc.cellX, g.npc.cellY)
@@ -638,6 +611,9 @@ local function posesOf(state, spriteColors)
       local sprite, vx, vy, facing, phase, flip = e:pose()
       n = n + 1
       local p = poseSlot(n)
+      p.entity = e
+      p.isPlayer = e == state.player
+      p.role = p.isPlayer and "player" or "npc"
       p.sprite, p.px, p.py = sprite, vx, e.py
       p.facing, p.phase, p.flip = facing, phase, flip
       p.gh = groundAt(state.map, e.cellX, e.cellY)
@@ -647,7 +623,7 @@ local function posesOf(state, spriteColors)
         -- marked so the camera draw can leave the card out in first
         -- person, where it would fill the lens from inside; the SUN pass
         -- reads the same list and deliberately does not check the mark
-        me.isPlayer = true
+        me.isPlayer, me.role = true, "player"
       end
     end
   end
@@ -686,6 +662,63 @@ function VoxelScene.glintStep(g, cx, cy)
 end
 
 local glint = {}
+
+-- Resolve the engine-owned actor identity while still inside Battle Art's
+-- sandbox. Providers receive the stable string as well as the live entity,
+-- so they never have to infer an NPC type from a replacement image path.
+local function actorSpriteId(p)
+  local entity = p and p.entity or nil
+  if entity and type(entity.spriteId) == "string" then return entity.spriteId end
+  local def = entity and entity.def or nil
+  if def and type(def.sprite) == "string" then return def.sprite end
+  local spriteDef = entity and entity.spriteDef or nil
+  if spriteDef and type(spriteDef.id) == "string" then return spriteDef.id end
+  local entityRendererDef = entity and entity.sprite and entity.sprite.def or nil
+  if entityRendererDef and type(entityRendererDef.id) == "string" then
+    return entityRendererDef.id
+  end
+  local rendererDef = p and p.sprite and p.sprite.def or nil
+  if rendererDef and type(rendererDef.id) == "string" then return rendererDef.id end
+  return nil
+end
+
+-- One normalized record for every provider pass. In particular, `role` and
+-- `isPlayer` are host decisions rather than something a companion has to
+-- reconstruct from a sprite id (the Gen 1 Player has no NPC-style `def`).
+-- `actor` is an explicit alias for the live engine entity so providers can
+-- avoid depending on whichever legacy name a previous bridge happened to use.
+local function actorContext(state, p)
+  local entity = p and p.entity or nil
+  local isPlayer = p and p.isPlayer == true
+  if not isPlayer and state and entity ~= nil and entity == state.player then
+    isPlayer = true
+  end
+  local role = isPlayer and "player" or "npc"
+  if p then
+    p.isPlayer = isPlayer
+    p.role = role
+  end
+  return {
+    state = state,
+    pose = p,
+    actor = entity,
+    entity = entity,
+    actorId = entity and entity.id or nil,
+    role = role,
+    isPlayer = isPlayer,
+    spriteId = actorSpriteId(p),
+    player = state and state.player or nil,
+    sprite = p and p.sprite or nil,
+    px = p and p.px or nil,
+    py = p and p.py or nil,
+    phase = p and p.phase or nil,
+    flip = p and p.flip or nil,
+    groundHeight = p and p.gh or nil,
+    colors = p and p.colors or nil,
+    lift = p and p.lift or nil,
+    host = CHARACTER_HOST,
+  }
+end
 
 -- ------- the cast
 --
@@ -726,8 +759,14 @@ local function drawCast(state, posed, atlasFor)
   for _, p in ipairs(posed) do
     if not (p.isPlayer and hideMe)
        and RenderDistance.point(p.px + 8, p.py + 8, state.player) then
-      drawEntity(p.sprite, p.px, p.py, viewFacing(p), p.phase, p.flip, p.gh,
-                 p.colors, p.lift)
+      local facing = viewFacing(p)
+      local context = actorContext(state, p)
+      context.facing = facing
+      local claimed = CharacterRenderers.first("drawEntity", context)
+      if not claimed then
+        drawEntity(p.sprite, p.px, p.py, facing, p.phase, p.flip, p.gh,
+                   p.colors, p.lift)
+      end
     end
   end
   -- back on for everything textured from the atlas again -- figures, grass
@@ -735,16 +774,7 @@ local function drawCast(state, posed, atlasFor)
   Voxel3D.glass(true)
   -- Figures after the walkers, so a player standing in front of the couch
   -- wins the overlap -- the order the flat game draws them in.
-  --
-  -- Left out of a REFLECTION pass: a figure is not a card, it is a mesh in
-  -- its own local space placed by Mat4.figure, so the card flip above does
-  -- not reach it -- and it is a person drawn INTO a piece of furniture,
-  -- indoors, which is not somewhere water is.
   local figPull = billboardPull()
-  if reflectPlane then
-    Voxel3D.seams(true)
-    return
-  end
   eachFigure(state.map, 0, 0, function(mesh, model, caster)
     Voxel3D.draw(mesh, atlasFor(state.map), model, figPull,
                  ShadowMap.snug(caster))
@@ -757,6 +787,10 @@ local function drawCast(state, posed, atlasFor)
       end)
     end
   end
+  CharacterRenderers.all("afterActors", {
+    state = state, player = state.player, posed = posed,
+    atlasFor = atlasFor, host = CHARACTER_HOST,
+  })
   -- and the seams are back on for the terrain art that follows: grass and
   -- flowers are the world's own drawing, not people
   Voxel3D.seams(true)
@@ -834,35 +868,10 @@ function VoxelScene.drawWater(draws, cast)
   end
   local plain = not curved
   local reflected = false
-  -- The cast's planar reflection, drawn before the frame is taken apart --
-  -- beginWater rebinds canvases and detaches the depth buffer, and this
-  -- wants the frame intact. Mirrored about the WATER PLANE, read from
-  -- TileShape rather than restated here, so an override in
-  -- data/voxel_heights.lua moves the reflection with the water it belongs
-  -- to. nil where the canvas could not be made, which simply leaves the
-  -- water as it was.
-  -- Gated on depthReadable as well as the row, because the shader that
-  -- COMPOSITES this is the one that needs a readable depth target: without
-  -- it the water falls back to a plain terrain draw, nothing samples the
-  -- canvas, and the whole cast would have been drawn a second time for a
-  -- picture no one reads.
-  local castTex = nil
-  if cast and Water.enabled() and Water.CAST_ALPHA > 0
-     and Voxel3D.depthReadable() then
-    castTex = Voxel3D.beginCast()
-    if castTex then
-      -- cleared unconditionally, so a cast() that throws cannot leave every
-      -- later card in the frame drawn upside down under the pier
-      reflectPlane = (TileShape.heights() or {}).water or 0
-      pcall(cast)
-      reflectPlane = nil
-      Voxel3D.endCast()
-    end
-  end
   local function waterContext(reflect, depth)
     local w, h = Voxel3D.size()
     return {
-      reflect = reflect, depth = depth, cast = castTex,
+      reflect = reflect, depth = depth,
       vp = Voxel3D.vp, eye = Voxel3D.eye, curve = { Voxel3D.curveX or 0,
                                                     Voxel3D.curveZ or 0,
                                                     Voxel3D.curveK or 0 },
@@ -949,6 +958,7 @@ local function shadowSignature(state, terrain, nbMesh, posed, cx, cy, vw, vh)
   -- and the sprite cards swap frames as it circles them, so a turn on the
   -- spot re-fits and redraws exactly like a camera move ("" outside 1ST)
   put(FirstPerson.signature())
+  put(CharacterRenderers.revision())
   put(tostring(terrain))
   for i, nb in ipairs(state.neighbors or {}) do
     if RenderDistance.neighbor(nb, state.player) then
@@ -980,6 +990,18 @@ end
 local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
                            atlasFor, water, nbWater, visualShadows,
                            nbVisualShadows)
+  -- TEST26: CAVERN maps have no outdoor sun, and their dense stepped terrain
+  -- is the worst possible receiver/caster pair for a finite-resolution depth
+  -- map on mobile GPUs. The result is shadow acne that crawls across otherwise
+  -- static stone as the view moves. Drop only the live sun map in caves; the
+  -- normal baked face shading remains, and the existing fallback pass below
+  -- still draws simple grounding shadows beneath characters. Discarding here
+  -- also prevents an outdoor map from leaking through during a cave transfer.
+  local tileset = state and state.map and state.map.tileset
+  if tileset and tileset.id == "CAVERN" then
+    ShadowMap.discard()
+    return
+  end
   if not ShadowMap.available() then return end
   local sig = shadowSignature(state, terrain, nbMesh, posed, cx, cy, vw, vh)
   sig = sig .. "|community-tree:" .. CommunityFlora.shadowSignature(state)
@@ -1045,19 +1067,25 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
   end
   for _, p in ipairs(posed) do
     if RenderDistance.point(p.px + 8, p.py + 8, state.player) then
-      local def = p.sprite.def
-      -- viewFacing, exactly as the camera draw picks it (see viewFacing for
-      -- why the two passes must agree): in first person the sun's card
-      -- swaps frame as the eye circles, which costs a redraw the signature
-      -- already charges for (FirstPerson.signature) and keeps a card from
-      -- fringing against a mirror-flipped record of itself
-      local frame, mirror = frameFor(def, viewFacing(p), p.phase, p.flip)
-      local mesh = SpriteBillboards.shadowQuad(def, frame)
-      if mesh then
-        ShadowMap.draw(mesh, p.sprite:resolveImage(),
-                       ShadowMap.snug(
-                         Voxel3D.casterMatrix(p.px, p.py, p.gh + (p.lift or 0),
-                                               mirror)))
+      local facing = viewFacing(p)
+      local context = actorContext(state, p)
+      context.facing = facing
+      local claimed = CharacterRenderers.first("drawShadow", context)
+      if not claimed then
+        local def = p.sprite.def
+        -- viewFacing, exactly as the camera draw picks it (see viewFacing for
+        -- why the two passes must agree): in first person the sun's card
+        -- swaps frame as the eye circles, which costs a redraw the signature
+        -- already charges for (FirstPerson.signature) and keeps a card from
+        -- fringing against a mirror-flipped record of itself
+        local frame, mirror = frameFor(def, facing, p.phase, p.flip)
+        local mesh = SpriteBillboards.shadowQuad(def, frame)
+        if mesh then
+          ShadowMap.draw(mesh, p.sprite:resolveImage(),
+                         ShadowMap.snug(
+                           Voxel3D.casterMatrix(p.px, p.py,
+                             p.gh + (p.lift or 0), mirror)))
+        end
       end
     end
   end
@@ -1213,6 +1241,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- Drawn before terrain, depth alone decides where it remains visible.
   WorldUnderlay.draw(state, cx, cy, underlayColor)
   Voxel3D.draw(terrain, atlasFor(state.map), nil)
+  CavePerimeter.draw(state.map, atlasFor(state.map))
   local drawnVisuals, drawnNeighborVisuals = {}, {}
   for _, visual in ipairs(visualShadows or {}) do
     if ChunkMesher.visualObjectVisible(visual.id) then
@@ -1338,43 +1367,26 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- the panes' atlas positions stripe the cast with lamplight at night
   Voxel3D.glass(false)
 
-  -- The player's (and object's) silhouette goes down BEFORE the characters, so the only
+  -- The player's silhouette goes down BEFORE the characters, so the only
   -- thing it can meet in the depth buffer is the WORLD -- terrain, buildings,
   -- trees. Drawn after the solid pass it would meet the player's own card
   -- instead, and every fragment of a figure sits behind the one that just
   -- wrote it, so the silhouette would paint over the player at all times.
   -- Every character then draws on top as usual, which leaves the silhouette
   -- showing in exactly one situation: where the world hides them.
-  -- 
+  --
   -- Not in first person: the card it silhouettes is the one the camera is
   -- standing inside, and "the world is in front of the player" is every
   -- wall the player faces.
-  -- Draw silhouettes for objects hidden behind voxel geometry.
-  -- This must happen BEFORE the solid character pass so the ghost depth
-  -- test only sees terrain/buildings/trees and not the characters themselves.
-  -- fyi world tiles use 32 pixels per map cell, and this determines if a silhouette
-  -- is drawn based on how far an object is from the player. So 10 would be 320 pixels,
-VoxelScene.GHOST_RADIUS_CELLS = 15
-
-local ghostRadius = VoxelScene.GHOST_RADIUS_CELLS * 32
-local ghostRadiusSq = ghostRadius * ghostRadius
-if VoxelScene.silhouettesEnabled()
-   and me and not FirstPerson.hidePlayer() then
-  Voxel3D.beginGhost()
-
-  for _, p in ipairs(posed) do
-    if not (p.isPlayer and FirstPerson.hidePlayer()) then
-      local dx = p.px - me.px
-      local dy = p.py - me.py
-
-      if dx * dx + dy * dy <= ghostRadiusSq then
-        drawGhost(p)
-      end
+  if me and not FirstPerson.hidePlayer() then
+    local suppress = CharacterRenderers.first("suppressGhost",
+      actorContext(state, me))
+    if not suppress then
+      Voxel3D.beginGhost()
+      drawGhost(me)
+      Voxel3D.endGhost()
     end
   end
-
-  Voxel3D.endGhost()
-end
 
   -- Characters carry no wireframe out here, whatever the V-GRID row says.
   -- The seams are what makes the WORLD read as built out of voxels, and

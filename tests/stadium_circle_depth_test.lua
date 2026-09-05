@@ -52,6 +52,7 @@ local overworld = {
   end,
 }
 local modules = {
+  Mat4=assert(loadfile("lib/Mat4.lua"))(),
   UiBackplates={ arenaFill={get=function() return 'OFF' end},
     stadiumCircleScale=function() return circleScale end },
   OverworldBattle=overworld, Voxel3D={}, BackdropImage={},
@@ -107,3 +108,31 @@ assert(stage.radius==radius and stage.sink==.06 and pushes==0,
 providerFails=true
 assert(api.environment(fallback,ctx)==marks and fallbackCalls==1)
 print('stadium circle depth regression: ok')
+
+-- Combined Legendary card ownership and Stadium model depth path.
+providerFails=false
+failStage=false
+local legendary=true
+overworld.legendaryTrainerEnabled=function() return legendary end
+local render=overworld.providerRender
+overworld.providerRender=function(battle, passes, ...)
+  assert(passes.cards and passes.cards.player, 'Legendary player card omitted')
+  return render(battle, passes, ...)
+end
+ctx.battlerPhase='prepare'
+local owned=api.battlers(fallback,ctx)
+assert(owned.sides.player=='provider' and owned.sides.enemy=='provider')
+local before=actorCalls
+api.environment(fallback,ctx)
+assert(actorCalls==before+2, 'Legendary player also submitted as a model')
+ctx.battlerPhase='draw'
+local drawn=api.battlers(fallback,ctx).drawn
+assert(drawn.player and drawn.enemy)
+local beforeShadow=shadowCalls
+api.shadow(function() end,ctx)
+assert(shadowCalls==beforeShadow+1, 'hidden player model casts a duplicate shadow')
+providerFails=true
+api.environment(fallback,ctx)
+assert(api.battlers(function() return 'released' end,ctx)=='released',
+  'failed Legendary frame retained ownership')
+print('Legendary/Stadium integration: ok')

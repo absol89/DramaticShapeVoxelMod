@@ -22,6 +22,7 @@ function graphics.setCanvas(...) graphics.calls[#graphics.calls+1]={"canvas",...
 function graphics.draw(...) graphics.calls[#graphics.calls+1]={"draw",...} end
 
 local modules = {
+  Mat4=assert(loadfile("lib/Mat4.lua"))(),
   UiBackplates={
     arenaFill=setting, arenaArt=function() return mode=="GEN6" or mode=="PNG" end,
     bossEnabled=function() return false end,
@@ -159,3 +160,17 @@ ok(hostedState and hostedState.ready
   "hosted voxel anchors are published without exposing the normal shot")
 
 print(("%d checks passed (Stadium background provider)"):format(checks))
+
+-- Cave camera correction survives the depth/ownership integration.
+mode="OFF"
+local frame={eye={0,10,20},focus={0,0,0},
+  projection=modules.Mat4.perspective(math.rad(45),1,.1,1000)}
+assert(provider.camera(function() return frame end,ctx)==frame)
+map.tileset={id="CAVERN"}
+local corrected=provider.camera(function() return frame end,ctx)
+assert(corrected~=frame and corrected.eye[2]>=48)
+assert(corrected.vp==corrected.viewProjection and frame.eye[2]==10)
+assert(registered.camera and registered.shadow and registered.battlers.priority==1000)
+mode="WHITE"
+assert(provider.camera(function() return frame end,ctx)==frame)
+print("Stadium cave camera integration: ok")

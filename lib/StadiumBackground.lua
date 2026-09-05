@@ -1,6 +1,7 @@
 -- Battle Art ARENA FILL provider for Stadium 2 Importer's owned battle scene.
 -- Flat backgrounds retain Stadium ownership. Voxel mode submits circles and
 -- model actors into the shared voxel depth attachment before compositing.
+-- Legendary mode plants the player sprite in the same arena pass.
 
 local V = ...
 
@@ -8,6 +9,7 @@ local UiBackplates = V.require("UiBackplates")
 local Gen6Backdrop = V.require("Gen6Backdrop")
 local BossBackdrop = V.require("BossBackdrop")
 local Images = V.require("BackdropImage")
+local Mat4 = V.require("Mat4")
 local Voxel3D = V.require("Voxel3D")
 local OverworldBattle = V.require("OverworldBattle")
 
@@ -37,6 +39,26 @@ local function translate(x, y, z)
     0, 0, 0, 1,
   }
 end
+
+-- Stadium's ROM-authored field camera is only about ten Battle Art world
+-- pixels above its target after the N64 arena scale is applied. That works
+-- over Stadium's flat platform, but a CAVERN arena has real maze walls: the
+-- approved inner walls are 30px tall, so the same camera begins a fight from
+-- inside the masonry and the scene becomes one giant close-up brick.
+--
+-- TEST40 lifted that live Stadium eye in place. It cleared the wall, but a
+-- short or reversed host-camera cut then became a steep overhead view with
+-- the player on the enemy side of the frame. TEST44 gives cave battles one
+-- stable over-the-shoulder bearing instead. The eye remains above the wall
+-- line, is pulled back far enough to keep a moderate pitch, and always looks
+-- from the player's south/east side toward the enemy. The hook still runs
+-- before Stadium draws models, shadows and Battle Art terrain, so every layer
+-- receives the same corrected projection.
+StadiumBackground.CAVE_BATTLE_MIN_LIFT = 48
+StadiumBackground.CAVE_BATTLE_ELEVATION = math.rad(24)
+StadiumBackground.CAVE_BATTLE_BEARING = math.rad(28.5)
+StadiumBackground.CAVE_BATTLE_FOV = math.rad(46)
+StadiumBackground.CAVE_NARROW_FOV = math.rad(52)
 
 local CATCHER_SHADER = [[
 varying vec3 vSun;
@@ -138,6 +160,74 @@ local function battleMap(ctx)
   return game and game.overworld and game.overworld.map or nil
 end
 
+local function copyArray(source)
+  local out = {}
+  for i = 1, #source do out[i] = source[i] end
+  return out
+end
+
+local function cavernBattle(ctx)
+  if UiBackplates.arenaFill:get() ~= "OFF" then return false end
+  local map = battleMap(ctx)
+  return map and map.tileset and map.tileset.id == "CAVERN"
+end
+
+local function projectionAtFov(projection, fov)
+  local out = copyArray(projection)
+  local oldY = tonumber(out[6])
+  if not oldY or math.abs(oldY) <= 1e-6 then return out end
+  local newY = 1 / math.tan(fov / 2)
+  local ratio = newY / math.abs(oldY)
+  out[1] = (tonumber(out[1]) or 0) * ratio
+  out[6] = oldY < 0 and -newY or newY
+  return out
+end
+
+-- Cave-only stable composition for Stadium/Colosseum-hosted battles.
+-- Ordinary Battle Art owns its own BattleCam and never enters this hook;
+-- non-cave Stadium scenes immediately return the importer's original frame.
+function StadiumBackground.camera(next, ctx)
+  local frame = next(ctx)
+  if not cavernBattle(ctx) or type(frame) ~= "table" then return frame end
+
+  local eye, focus, projection = frame.eye, frame.focus, frame.projection
+  if not (type(eye) == "table" and type(focus) == "table"
+      and type(projection) == "table") then return frame end
+
+  local ex, ey, ez = tonumber(eye[1]), tonumber(eye[2]), tonumber(eye[3])
+  local fx, fy, fz = tonumber(focus[1]), tonumber(focus[2]), tonumber(focus[3])
+  if not (ex and ey and ez and fx and fy and fz) then return frame end
+
+  local arena = OverworldBattle.arena and OverworldBattle.arena() or nil
+  local lift = math.max(StadiumBackground.CAVE_BATTLE_MIN_LIFT, ey - fy)
+  -- Pull back with the lift instead of simply raising a short Stadium cut.
+  -- At 24 degrees the wall-clearing seat still reads as a battle camera, not
+  -- as the overhead diorama visible in TEST43.
+  local run = lift / math.tan(StadiumBackground.CAVE_BATTLE_ELEVATION)
+  local bearing = StadiumBackground.CAVE_BATTLE_BEARING
+  local correctedEye = {
+    fx + math.sin(bearing) * run,
+    fy + lift,
+    fz + math.cos(bearing) * run,
+  }
+  local fov = arena and arena.shape == "narrow"
+    and StadiumBackground.CAVE_NARROW_FOV
+    or StadiumBackground.CAVE_BATTLE_FOV
+  local correctedProjection = projectionAtFov(projection, fov)
+
+  local correctedView = Mat4.lookAt(correctedEye, { fx, fy, fz }, { 0, 1, 0 })
+  local correctedVp = Mat4.mul(correctedProjection, correctedView)
+  local out = {}
+  for key, value in pairs(frame) do out[key] = value end
+  out.eye = correctedEye
+  out.focus = { fx, fy, fz }
+  out.view = correctedView
+  out.projection = correctedProjection
+  out.vp = correctedVp
+  out.viewProjection = correctedVp
+  return out
+end
+
 local function selectedImage(map, battle)
   local boss = UiBackplates.arenaArt() and UiBackplates.bossEnabled()
     and BossBackdrop.image(map, battle) or nil
@@ -193,6 +283,7 @@ function StadiumBackground.draw(next, ctx)
 end
 
 local function releaseVoxelHost()
+  hostedDrawn = setmetatable({}, { __mode = "k" })
   if not hostedBattle then return end
   OverworldBattle.providerFinish()
   hostedBattle = nil
@@ -238,6 +329,11 @@ local function drawCircleStage(next, ctx)
   return a, b
 end
 
+local function legendaryPlayer()
+  return OverworldBattle.legendaryTrainerEnabled
+    and OverworldBattle.legendaryTrainerEnabled() or false
+end
+
 local function drawHostedActors(sceneCtx, providerCtx)
   local host = sceneCtx and sceneCtx.scene and sceneCtx.scene.host
   local renderer = rendererApi()
@@ -256,7 +352,8 @@ local function drawHostedActors(sceneCtx, providerCtx)
   for _, pass in ipairs({ "opaque", "additive" }) do
     for _, side in ipairs({ "enemy", "player" }) do
       local actor = host.visualActor and host:visualActor(side)
-      if actor and actor.renderer and host.modelMatrix then
+      if actor and actor.renderer and host.modelMatrix
+          and not (side == "player" and legendaryPlayer()) then
         local localModel, yaw = host:modelMatrix(side, actor)
         local model = renderer.matMul(worldFromStadium, localModel)
         local ok = actor.renderer:drawScene(pass, model, {
@@ -321,27 +418,30 @@ local function drawHostedStage(sceneCtx, providerCtx)
 end
 
 local function stadiumActorPasses(sceneCtx)
-  return {
+  local passes = {
     draw = function(providerCtx)
       drawHostedStage(sceneCtx, providerCtx)
       drawHostedActors(sceneCtx, providerCtx)
       return true
     end,
   }
+  if legendaryPlayer() then passes.cards = { player = true } end
+  return passes
 end
 
--- Claim only actual model actors; native trainer presentation remains owned
--- by Stadium. Failed voxel frames release the draw phase to the importer.
+-- Claim model actors plus the Legendary player card. Failed voxel frames
+-- release the draw phase to the importer.
 function StadiumBackground.battlers(next, ctx)
   if UiBackplates.arenaFill:get() ~= "OFF" then return next(ctx) end
-  local host = ctx.scene and ctx.scene.host
-  if not (host and rendererApi()) then return next(ctx) end
+  local host = ctx and ctx.scene and ctx.scene.host
+  if not host then return next(ctx) end
   if ctx.battlerPhase == "prepare" then
     hostedDrawn[host] = nil
     local sides = {}
     for _, side in ipairs({ "enemy", "player" }) do
       local actor = host.visualActor and host:visualActor(side)
-      sides[side] = actor and actor.renderer and "provider" or "host"
+      sides[side] = ((side == "player" and legendaryPlayer())
+        or (rendererApi() and actor and actor.renderer)) and "provider" or "host"
     end
     return { sides = sides }
   end
@@ -358,7 +458,8 @@ function StadiumBackground.shadow(next, ctx)
   if not (host and lightVP) then return next(ctx) end
   for _, side in ipairs({ "enemy", "player" }) do
     local actor = host.visualActor and host:visualActor(side)
-    if actor and actor.renderer and host.modelMatrix then
+    if actor and actor.renderer and host.modelMatrix
+          and not (side == "player" and legendaryPlayer()) then
       local model = host:modelMatrix(side, actor)
       actor.renderer:drawShadowMap(model, lightVP)
     end
@@ -398,6 +499,11 @@ function StadiumBackground.environment(next, ctx)
     releaseVoxelHost()
     return drawCircleStage(next, ctx)
   end
+  local host = ctx.scene and ctx.scene.host
+  if host and legendaryPlayer() then
+    hostedDrawn[host] = hostedDrawn[host] or {}
+    hostedDrawn[host].player = true
+  end
   -- Keep the existing importer marks/attack projection contract unchanged.
   -- Circles and actors are already in the voxel color/depth pass.
   return ctx.marks
@@ -411,13 +517,15 @@ function StadiumBackground.install()
       and type(scene.register) == "function") then return false end
   local okBackground = pcall(scene.register, V.mod, "background",
     StadiumBackground.draw, 100)
+  local okCamera = pcall(scene.register, V.mod, "camera",
+    StadiumBackground.camera, 100)
   local okEnvironment = pcall(scene.register, V.mod, "environment",
     StadiumBackground.environment, 100)
   local okBattlers = pcall(scene.register, V.mod, "battlers",
-    StadiumBackground.battlers, 100)
+    StadiumBackground.battlers, 1000)
   local okShadow = pcall(scene.register, V.mod, "shadow",
     StadiumBackground.shadow, 100)
-  installed = okBackground and okEnvironment and okBattlers and okShadow
+  installed = okBackground and okCamera and okEnvironment and okBattlers and okShadow
   if installed and V.mod.events and type(V.mod.events.on) == "function" then
     V.mod.events:on("battle.ended", releaseVoxelHost)
   end

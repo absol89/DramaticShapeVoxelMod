@@ -54,6 +54,7 @@ local AnimatedBattleArt = V.require("AnimatedBattleArt")
 local Gen6Backdrop = V.require("Gen6Backdrop")
 local Voxel3D = V.require("Voxel3D")
 local ChunkMesher = V.require("ChunkMesher")
+local CharacterRenderers = V.require("CharacterRenderers")
 
 local OverworldBattle = {}
 local session = nil
@@ -694,6 +695,7 @@ function OverworldBattle.finish()
   -- a later battle can never inherit the previous trainer or hand position.
   local endingBattle = session and session.battle or nil
   if endingBattle then endingBattle._red3dTrainerHandoffLatched = nil end
+  CharacterRenderers.setBattle(false, nil)
   _G.RED3D_TRAINER_INTRO_ACTIVE = false
   _G.RED3D_TRAINER_BATTLE_STATE = nil
   _G.RED3D_BATTLE_HAND_WORLD = nil
@@ -1088,9 +1090,12 @@ function OverworldBattle.sideTexture(battle, side)
   -- the player's Pokemon resumes this normal texture path immediately after
   -- the send-out phase. If the companion mod is absent, the original trainer
   -- remains untouched as a compatibility fallback.
+  local providerTrainer = CharacterRenderers.battleActive()
+    and CharacterRenderers.has("drawBattleTrainer")
+  local legacyTrainer = rawget(_G, "RED3D_TRAINER_INTRO_ACTIVE") == true
+    and type(rawget(_G, "RED3D_DIRECT_BATTLE_DRAW")) == "function"
   if side == "player" and battle.showPlayerBack and battle.playerBackPic
-      and rawget(_G, "RED3D_TRAINER_INTRO_ACTIVE") == true
-      and type(rawget(_G, "RED3D_DIRECT_BATTLE_DRAW")) == "function" then
+      and (providerTrainer or legacyTrainer) then
     return nil
   end
   if not sideVisible(battle, side) then return nil end
@@ -1215,13 +1220,17 @@ function OverworldBattle.textures(battle)
     battle._red3dTrainerHandoffLatched = nil
   end
   local trainerCallback = rawget(_G, "RED3D_DIRECT_BATTLE_DRAW")
+  local providerTrainer = CharacterRenderers.has("drawBattleTrainer")
   local trainerBattleOk = legendaryTrainer
     and battle._red3dTrainerHandoffLatched == true
-    and type(trainerCallback) == "function"
+    and (providerTrainer or type(trainerCallback) == "function")
     and not battle.safari and not battle.demo
     and battle.player ~= nil and battle.enemy ~= nil
-  _G.RED3D_TRAINER_INTRO_ACTIVE = trainerBattleOk and true or false
-  _G.RED3D_TRAINER_BATTLE_STATE = trainerBattleOk and battle or nil
+  CharacterRenderers.setBattle(trainerBattleOk and providerTrainer, battle)
+  local legacyTrainerOk = trainerBattleOk and not providerTrainer
+    and type(trainerCallback) == "function"
+  _G.RED3D_TRAINER_INTRO_ACTIVE = legacyTrainerOk and true or false
+  _G.RED3D_TRAINER_BATTLE_STATE = legacyTrainerOk and battle or nil
 
   local out = {}
   local okE, enemy = pcall(OverworldBattle.sideTexture, battle, "enemy")
@@ -1537,9 +1546,12 @@ function OverworldBattle.install()
     -- finished staged shot (most visible when BACK SPRITES is enabled).
     -- Gate it on the live callback so Battle Art keeps a complete fallback
     -- whenever the optional 3D-character mod is not present.
+    local providerTrainer = CharacterRenderers.battleActive()
+      and CharacterRenderers.has("drawBattleTrainer")
+    local legacyTrainer = rawget(_G, "RED3D_TRAINER_INTRO_ACTIVE") == true
+      and type(rawget(_G, "RED3D_DIRECT_BATTLE_DRAW")) == "function"
     if self.showPlayerBack and self.playerBackPic
-        and rawget(_G, "RED3D_TRAINER_INTRO_ACTIVE") == true
-        and type(rawget(_G, "RED3D_DIRECT_BATTLE_DRAW")) == "function" then
+        and (providerTrainer or legacyTrainer) then
       return
     end
     if OverworldBattle.backPinned() and onlySide ~= "enemy" then

@@ -80,6 +80,10 @@ local FALLBACK_HEIGHTS = {
   -- the drawing's own straight run is only a couple of rows, because a GB
   -- cell spends most of itself on the opening
   can = 9,
+  -- A cuttable overworld tree becomes this round ownership class only while
+  -- the Legendary cut-tree option is active. Battle Art's default keeps the
+  -- original authored prop class and therefore remains byte-for-byte in look.
+  sapling = 16,
   -- round scenery drawn ONE cell wide and TWO cells TALL, standing on one
   -- cell of plot: the Pokemon Centers' potted plants. Carved as one
   -- 16x32x16 hull in the SOUTH (pot) cell -- the drawing's upper cell is
@@ -117,12 +121,6 @@ local FALLBACK_HEIGHTS = {
   stair_w = 16,
   stair_down_e = 16,
   stair_down_w = 16,
-  -- the caves' ladders.  A standee pool like `bike` and `signpost` -- the
-  -- drawing stands up and voxelizes per pixel -- with its own name so the
-  -- profile reads honestly and the depth is its own (Structures'
-  -- PINNED_DEPTH).  NOT a staircase: pinning these cells `stair_e` threw a
-  -- four-step flight across them, which is the bug this replaces
-  ladder = 16,
 }
 
 -- class -> how the mesher draws it (see the header). The last three are
@@ -153,6 +151,7 @@ local ART = {
   canopy = "canopy",
   stump = "cylinder",
   can = "cylinder",
+  sapling = "cylinder",
   planter = "planter",
   billboard = "billboard",
   -- signposts share the billboard treatment but as their own pool at a
@@ -212,7 +211,6 @@ local ART = {
   stair_w = "stair",
   stair_down_e = "stair",
   stair_down_w = "stair",
-  ladder = "billboard",
 }
 
 local spec = nil          -- the loaded data file, or false when absent
@@ -220,6 +218,16 @@ local cache = {}          -- tileset id -> resolved shape list
 local figCache = {}       -- tileset id -> parsed figure masks, or false
 local mntCache = {}       -- tileset id -> parsed mounted masks, or false
 local bgCache = {}        -- tileset id -> prop background shades, or false
+
+local communityVisuals
+local function customCutTrees()
+  if communityVisuals == nil then
+    local ok, value = pcall(V.require, "CommunityVisuals")
+    communityVisuals = ok and value or false
+  end
+  return communityVisuals and communityVisuals.customCutTrees
+         and communityVisuals.customCutTrees() or false
+end
 
 -- The shape profile ships with the mod (data/voxel_heights.lua) and is read
 -- through the mod's own file loader rather than package.path: a mod's
@@ -386,7 +394,12 @@ function TileShape.forMap(map)
     end
   end
 
-  local shapes = { classes = {}, cond = authoredConditions(entry, heights) }
+  local shapes = { classes = {}, cond = authoredConditions(entry, heights),
+                   saplingTiles = {} }
+  for _, tile in ipairs(type(entry) == "table"
+      and type(entry.sapling_tiles) == "table" and entry.sapling_tiles or {}) do
+    shapes.saplingTiles[tile] = true
+  end
   for class in pairs(FALLBACK_HEIGHTS) do
     shapes.classes[class] = shapeFor(class, heights)
   end
@@ -432,6 +445,14 @@ end
 -- map:tileAt(tx, ty), passed in because every caller already has it.
 function TileShape.at(map, shapes, tile, tx, ty)
   local s = shapes[tile]
+  -- The source Battle Art profile pins these four graphics as its original
+  -- thin prop. Reclassify them only for the opt-in Legendary renderer; this
+  -- lets one install keep a true Battle Art A/B path while still feeding the
+  -- proven TEST455 round-tree handoff when requested.
+  if shapes.saplingTiles and shapes.saplingTiles[tile]
+      and customCutTrees() then
+    return shapes.classes.sapling
+  end
   -- conditional pins first: they are authored answers that need the
   -- POSITION to resolve, so they outrank both the flat pin on the same
   -- tile and the cell rules below (see authoredConditions)

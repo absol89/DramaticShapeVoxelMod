@@ -215,6 +215,17 @@ love = {
 local namespace = {}
 function namespace.require(name)
   return assert(({
+    Pokeball = {},
+    PokeballSettings = { active = function() return false end },
+    CommunityFlora = {
+      shadowSignature = function() return "" end,
+      castShadows = function() end,
+      battleProps = function() end,
+    },
+    CharacterRenderers = {
+      battleActive = function() return false end,
+      battleHandWorld = function() return nil end,
+    },
     Mat4 = Mat4,
     Voxel3D = Voxel3D,
     ShadowMap = ShadowMap,
@@ -305,4 +316,27 @@ equal(countDraws(colorDraws, currentSign), 0,
 equal(countDraws(shadowDraws, neighborSign), 0,
   "alternate arena does not reuse neighbor sidecars")
 
-print(("%d checks passed (BattleScene visual sidecars)"):format(checks))
+-- Model casters must reach the adapter once even when sprites are unlit.
+-- A direct instance call bypasses its depth conversion and used to double
+-- submit the model in lit scenes.
+local adapterCalls, directCalls = 0, 0
+local placement = {
+  instance = { drawShadow = function() directCalls = directCalls + 1 end },
+  modelMatrix = {},
+}
+StadiumModels.placements = function() return { player = placement } end
+StadiumModels.drawShadow = function(value, matrix)
+  equal(value, placement, "shadow adapter receives the model placement")
+  equal(matrix, ShadowMap.clipVP, "shadow adapter receives the source depth matrix")
+  adapterCalls = adapterCalls + 1
+  return true
+end
+for _, unlit in ipairs({ false, true }) do
+  UiBackplates.spritesUnlit = function() return unlit end
+  adapterCalls, directCalls = 0, 0
+  check(BattleScene.render(state, arena(nil), nil, 4), "model shadow scene renders")
+  equal(adapterCalls, 1, "one model shadow submission regardless of sprite lighting")
+  equal(directCalls, 0, "scene never bypasses the model shadow adapter")
+end
+
+print(("%d checks passed (BattleScene visual sidecars and model shadows)"):format(checks))

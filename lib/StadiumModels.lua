@@ -177,6 +177,41 @@ function StadiumModels.sync(battle)
   return true
 end
 
+-- A provider instance is not yet proof that Battle Art can place it. Some
+-- compatibility providers return a live shell for a species but cannot expose
+-- the positive bind height required to build its world matrix. Treating that
+-- shell as ownership releases the player's flat picture from the native UI
+-- anchor; placements() then declines the unusable model and the picture falls
+-- through as a camera-facing billboard. That is the moving giant Pikachu.
+local function drawableMetrics(actor, side)
+  if not (actor and actor.instance) then return nil end
+  local metrics = safeCall(actor.instance, "metrics")
+  if type(metrics) == "table" and tonumber(metrics.height)
+      and tonumber(metrics.height) > 0 then
+    return metrics
+  end
+
+  -- Some scene-neutral importer builds can draw the player model before they
+  -- publish metrics for it. Legendary Visuals' approved median is 52.25 raw
+  -- units at 14 world pixels, so use that exact neutral reference until the
+  -- provider reports the real bind height. Restrict this bridge to the player
+  -- side: opponent fallback behavior remains Battle Art's established path.
+  if side == "player" and type(actor.instance.draw) == "function" then
+    return { height = 52.25, floor = 0, legendaryFallback = true }
+  end
+  return nil
+end
+
+-- Whether one side has a placement-ready model, rather than merely an enabled
+-- provider or allocated instance. A drawable player shell may use the approved
+-- Legendary median until its provider publishes real bind metrics; the enemy
+-- side retains Battle Art's existing fallback behavior.
+function StadiumModels.owns(battle, side)
+  if side ~= "player" and side ~= "enemy" then return false end
+  if not StadiumModels.sync(battle) then return false end
+  return drawableMetrics(actors[side], side) ~= nil
+end
+
 local function updatePresentation(battle, side, actor)
   if not actor.instance then return end
   local battler = battle and battle[side]
@@ -252,14 +287,12 @@ local function atan2(y, x)
   return 0
 end
 
-local function modelMatrix(arena, groundY, battle, side, actor)
+local function modelMatrix(arena, groundY, battle, side, actor, metrics)
   local point = arena and arena[side]
   local target = arena and arena[side == "player" and "enemy" or "player"]
   if not (point and target and actor.instance) then return nil end
-  local metrics = safeCall(actor.instance, "metrics")
-  if not (metrics and tonumber(metrics.height) and metrics.height > 0) then
-    return nil
-  end
+  metrics = metrics or drawableMetrics(actor, side)
+  if not metrics then return nil end
 
   local worldHeight = math.max(5, math.min(18,
     14 * math.sqrt(metrics.height / 52.25)))
@@ -270,9 +303,32 @@ local function modelMatrix(arena, groundY, battle, side, actor)
   local floor = tonumber(metrics.floor) or 0
   local hover = math.min(math.max(floor, 0), metrics.height * 0.5)
   local yaw = atan2(target[1] - point[1], target[2] - point[2])
-  return Mat4.mul(Mat4.translate(point[1], groundY, point[2]),
+  local model = Mat4.mul(Mat4.translate(point[1], groundY, point[2]),
     Mat4.mul(Mat4.rotateY(yaw),
       Mat4.mul(Mat4.scale(k, k, k), Mat4.translate(0, -(floor - hover), 0))))
+
+  -- Legendary capture choreography is published on the live BattleState so
+  -- the optional Stadium model follows the same intake as Battle Art's card.
+  -- This is a world-space presentation transform only; the provider instance
+  -- and authoritative battler remain untouched.
+  local intake = side == "enemy" and battle
+    and battle.dramaticShape3DBallIntake or nil
+  if type(intake) == "table" and intake.active then
+    local shrinkK = math.max(0.03, math.min(1, tonumber(intake.scale) or 1))
+    local pull = math.max(0, math.min(1, tonumber(intake.pull) or 0))
+    local ax, ay, az = point[1], groundY + worldHeight * 0.55, point[2]
+    local bx = tonumber(intake.ballX) or ax
+    local by = tonumber(intake.ballY) or ay
+    local bz = tonumber(intake.ballZ) or az
+    local shrink = Mat4.mul(Mat4.translate(ax, ay, az),
+      Mat4.mul(Mat4.scale(shrinkK, shrinkK, shrinkK),
+               Mat4.translate(-ax, -ay, -az)))
+    model = Mat4.mul(Mat4.translate((bx - ax) * pull,
+                                    (by - ay) * pull,
+                                    (bz - az) * pull),
+                     Mat4.mul(shrink, model))
+  end
+  return model
 end
 
 -- Return only sides that can replace a Pokemon card this frame. Trainer
@@ -283,8 +339,12 @@ function StadiumModels.placements(arena, groundY, textures, battle)
   for _, side in ipairs({ "enemy", "player" }) do
     local texture = textures and textures[side]
     local actor = actors[side]
-    if texture and not texture.trainer and actor.instance then
-      local matrix = modelMatrix(arena, groundY, battle, side, actor)
+    local metrics = drawableMetrics(actor, side)
+    local captured = side == "enemy" and battle
+      and battle.dramaticShape3DBallHide == true
+    if captured then texture = nil end
+    if texture and not texture.trainer and metrics then
+      local matrix = modelMatrix(arena, groundY, battle, side, actor, metrics)
       if matrix then
         out[side] = { side = side, actor = actor, instance = actor.instance,
                       modelMatrix = matrix }
