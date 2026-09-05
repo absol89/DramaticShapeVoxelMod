@@ -117,10 +117,11 @@ local function mask()
 end
 
 local function neighbors(cx, cy, cells)
-  local n = cells[cx .. "|" .. (cy - 1)] == true
-  local s = cells[cx .. "|" .. (cy + 1)] == true
-  local w = cells[(cx - 1) .. "|" .. cy] == true
-  local e = cells[(cx + 1) .. "|" .. cy] == true
+  -- Cells contain published base heights, including the valid height zero.
+  local n = cells[cx .. "|" .. (cy - 1)] ~= nil
+  local s = cells[cx .. "|" .. (cy + 1)] ~= nil
+  local w = cells[(cx - 1) .. "|" .. cy] ~= nil
+  local e = cells[(cx + 1) .. "|" .. cy] ~= nil
   return n, s, w, e
 end
 
@@ -174,13 +175,18 @@ local function pierRhythm(cells)
   return piers
 end
 
-local function build(map)
+local function build(cells)
   local layout = CommunityVisuals.layout()
   if layout == "default" then return false end
-  local id = mapKey(map)
-  local cells = (rawget(_G, "__bav_granite_pillars") or {})[id] or {}
-  local bases = rawget(_G, "__bav_granite_pillar_base") or {}
-  local vertices, indices, quads = {}, {}, 0
+  local vertices, indices = {}, {}
+  local function quad(first)
+    indices[#indices + 1] = first
+    indices[#indices + 1] = first + 1
+    indices[#indices + 1] = first + 2
+    indices[#indices + 1] = first
+    indices[#indices + 1] = first + 2
+    indices[#indices + 1] = first + 3
+  end
 
   local function box(mx, mz, base, hx, hz, y0, y1, v0, v1, shade, bevel)
     bevel = math.min(bevel or 0, math.min(hx, hz) * .18)
@@ -197,11 +203,12 @@ local function build(map)
       local face = ((i <= 2 or i >= 7) and 1 or .84) * shade
         * (diagonal and .94 or 1)
       local u0, u1 = diagonal and .02 or 0, diagonal and .08 or 1
+      local first = #vertices + 1
       vertices[#vertices+1] = { b[1],base+y1,b[2],u1,v0,face }
       vertices[#vertices+1] = { a[1],base+y1,a[2],u0,v0,face }
       vertices[#vertices+1] = { a[1],base+y0,a[2],u0,v1,face*.96 }
       vertices[#vertices+1] = { b[1],base+y0,b[2],u1,v1,face*.96 }
-      Voxel3D.pushQuad(indices, quads); quads = quads + 1
+      quad(first)
     end
     -- Upward faces must never reuse the vertical strip that contains the
     -- recessed lantern. TEST4 let v0/v1 from the shaft flow across this fan;
@@ -213,20 +220,25 @@ local function build(map)
              capV0 + ((p[2] - (mz - hz)) / (hz * 2)) * capSpan
     end
     local centerU, centerV = capU0 + capSpan * .5, capV0 + capSpan * .5
+    -- Reuse the fan's center and rim vertices. The old quad-per-triangle
+    -- representation duplicated the rim and submitted eight zero-area
+    -- triangles per cap. Positions, winding, UVs and lighting stay identical.
+    local center = #vertices + 1
+    vertices[center] = { mx,base+y1,mz,centerU,centerV,shade*1.05 }
     for i = 1, 8 do
-      local a, b = c[i], c[i % 8 + 1]
-      local au, av = capUV(a)
-      local bu, bv = capUV(b)
-      vertices[#vertices+1] = { mx,base+y1,mz,centerU,centerV,shade*1.05 }
-      vertices[#vertices+1] = { a[1],base+y1,a[2],au,av,shade*1.05 }
-      vertices[#vertices+1] = { b[1],base+y1,b[2],bu,bv,shade*1.05 }
-      vertices[#vertices+1] = { b[1],base+y1,b[2],bu,bv,shade*1.05 }
-      Voxel3D.pushQuad(indices, quads); quads = quads + 1
+      local a = c[i]
+      local u, v = capUV(a)
+      vertices[#vertices+1] = { a[1],base+y1,a[2],u,v,shade*1.05 }
+    end
+    for i = 1, 8 do
+      indices[#indices+1] = center
+      indices[#indices+1] = center + i
+      indices[#indices+1] = center + i % 8 + 1
     end
   end
 
   local function baseAt(cx, cy)
-    return bases[id .. ":" .. (cx * 16 + 8) .. "|" .. (cy * 16 + 8)] or 0
+    return cells[cx .. "|" .. cy] or 0
   end
 
   local function pillar(cx, cy, scale, skipTop)
@@ -271,18 +283,60 @@ local function build(map)
   return Voxel3D.newMesh(vertices, indices)
 end
 
+-- The mesher registers candidates before publishing their ground heights.
+-- Only published owners can be drawn: masked neighbor rings have no base.
+local function publishedBase(id, key, bases)
+  local x, z = key:match("^(-?%d+)|(-?%d+)$")
+  if not x then return nil end
+  return bases[id .. ":" .. (tonumber(x) * 16 + 8) .. "|"
+                      .. (tonumber(z) * 16 + 8)]
+end
+
+local function sameSource(record, id, owners, bases, layout, color)
+  if not record or record.layout ~= layout or record.color ~= color then
+    return false
+  end
+  local count = 0
+  for key in pairs(owners) do
+    local base = publishedBase(id, key, bases)
+    if base ~= nil then
+      if record.cells[key] ~= base then return false end
+      count = count + 1
+    end
+  end
+  return count == record.count
+end
+
+local function release(record)
+  if record and record.mesh and record.mesh.release then
+    pcall(record.mesh.release, record.mesh)
+  end
+end
+
 function P.draw(map, ox, oz)
   if not map or not CommunityVisuals.customPillars() then return end
   local id = mapKey(map)
-  local cells = (rawget(_G, "__bav_granite_pillars") or {})[id]
-  if not cells then return end
-  local count = 0
-  for _ in pairs(cells) do count = count + 1 end
-  local signature = table.concat({ count, CommunityVisuals.layout(),
-                                   CommunityVisuals.pillarColor() }, "|")
+  local owners = (rawget(_G, "__bav_granite_pillars") or {})[id] or {}
+  local bases = rawget(_G, "__bav_granite_pillar_base") or {}
+  local layout, color = CommunityVisuals.layout(), CommunityVisuals.pillarColor()
   local record = P.cache[id]
-  if not record or record.signature ~= signature then
-    record = { signature = signature, mesh = build(map) }
+  if not sameSource(record, id, owners, bases, layout, color) then
+    local cells, count = {}, 0
+    for key in pairs(owners) do
+      local base = publishedBase(id, key, bases)
+      if base ~= nil then cells[key], count = base, count + 1 end
+    end
+    local mesh = false
+    if count > 0 then
+      mesh = build(cells)
+      -- A transient upload failure must remain retryable. Keep ownership of
+      -- the old allocation until a replacement succeeds, but do not draw it
+      -- at a position/height that no longer agrees with the scene.
+      if not mesh then return end
+    end
+    release(record)
+    record = { cells = cells, count = count, layout = layout, color = color,
+               mesh = mesh }
     P.cache[id] = record
   end
   if not record.mesh then return end
@@ -295,11 +349,16 @@ function P.draw(map, ox, oz)
   Voxel3D.glassMaskNow(oldMask)
 end
 
-function P.invalidate()
-  for _, record in pairs(P.cache) do
-    if record.mesh and record.mesh.release then pcall(record.mesh.release, record.mesh) end
+-- Match the terrain cache's live neighborhood instead of retaining GPU
+-- meshes for every map visited during a long session.
+function P.setLive(live)
+  for id, record in pairs(P.cache) do
+    if not live[id] then release(record); P.cache[id] = nil end
   end
-  P.cache = {}
+end
+
+function P.invalidate()
+  P.setLive({})
 end
 
 return P

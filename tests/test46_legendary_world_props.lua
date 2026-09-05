@@ -128,7 +128,7 @@ assert(flora:find("MOUND.SAPLING_TILES", 1, true)
        "TEST455 sapling visibility allow-list is incomplete")
 assert(mesher:find("or CommunityVisuals.customCutTrees()", 1, true),
        "cut trees may incorrectly restore from disk without registry ownership")
-assert(cache:find("Disk.CACHE_REVISION = 25", 1, true)
+assert((tonumber(cache:match("Disk%.CACHE_REVISION%s*=%s*(%d+)")) or 0) >= 25
        and cache:find("CommunityVisuals.cutTrees:get()", 1, true)
        and cache:find("CommunityVisuals.signs:get()", 1, true),
        "world-prop cache separation is incomplete")

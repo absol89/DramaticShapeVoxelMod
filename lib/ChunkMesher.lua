@@ -451,6 +451,24 @@ end
 --
 -- Omitted, water stays in the terrain mesh exactly as it always did, which
 -- is what the headless geometry() below and the sun's own pass both want.
+-- Detailed material faces subdivide a tile, but its ambient-light field still
+-- spans the whole tile. Sample that field at each emitted corner instead of
+-- restarting the full dark-to-light ramp on every stone or timber board.
+-- Coordinates follow the PARENT face's corner order; reversing either extent
+-- handles north/east walls without changing the child geometry's winding.
+local function shadeRect(c, shade, axisU, u0, u1, axisV, v0, v1, tone)
+  if type(shade) ~= "table" then return shade * tone end
+  local out = {}
+  for i = 1, 4 do
+    local u = math.max(0, math.min(1, (c[i][axisU] - u0) / (u1 - u0)))
+    local v = math.max(0, math.min(1, (c[i][axisV] - v0) / (v1 - v0)))
+    local lower = shade[1] + (shade[2] - shade[1]) * u
+    local upper = shade[4] + (shade[3] - shade[4]) * u
+    out[i] = (lower + (upper - lower) * v) * tone
+  end
+  return out
+end
+
 local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local push = sink.push
   local waterPush = waterSink and waterSink.push or nil
@@ -567,12 +585,14 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   -- of leaving it looking pasted over the top.
   local aoProp = { 0, 0, 0, 0 }
   local function groundShades(c, shade)
-    if type(shade) == "table" then return shade end
+    local perCorner = type(shade) == "table"
     local y1, y2, y3, y4 = c[1][2], c[2][2], c[3][2], c[4][2]
     if math.min(y1, y2, y3, y4) >= AO_RISE then return shade end
     for i = 1, 4 do
       local t = c[i][2] / AO_RISE
-      aoProp[i] = shade * (t >= 1 and 1 or (1 - AO_GROUND * (1 - t)))
+      -- Compose with model contact shading and preserve the facade sign.
+      local base = perCorner and shade[i] or shade
+      aoProp[i] = base * (t >= 1 and 1 or (1 - AO_GROUND * (1 - t)))
     end
     return aoProp
   end
@@ -740,10 +760,18 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     push(c, { uv, uv, uv, uv }, shade)
   end
 
-  local function shadeTimes(shade, k)
-    if type(shade) ~= "table" then return shade * k end
-    return { shade[1] * k, shade[2] * k,
-             shade[3] * k, shade[4] * k }
+  local function topSolid(c, uv, shade, tone, x0, z0)
+    pushSolid(c, uv, shadeRect(c, shade, 1, x0, x0 + 8,
+                             3, z0, z0 + 8, tone))
+  end
+
+  local function sideSolid(c, uv, shade, tone, d, x0, z0, y0, y1)
+    local axis = (d == 5 or d == 6) and 1 or 3
+    local a0 = axis == 1 and x0 or z0
+    local a1 = a0 + 8
+    if d == 1 or d == 6 then a0, a1 = a1, a0 end
+    pushSolid(c, uv, shadeRect(c, shade, axis, a0, a1,
+                             2, y0, y1, tone))
   end
 
   -- Stable world-space variation.  It is evaluated only while the chunk is
@@ -1099,9 +1127,9 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     local uvLight = rockUV(tile, ROCK_TEXEL.light)
 
     -- Recessed stone bed: every gap exposes this instead of the old art.
-    pushSolid({ { x0, h, z0 }, { x1, h, z0 },
+    topSolid({ { x0, h, z0 }, { x1, h, z0 },
                 { x1, h, z1 }, { x0, h, z1 } },
-              uvDark, shadeTimes(shade, 0.82))
+              uvDark, shade, 0.82, x0, z0)
 
     local gap = 0.16
     local firstRow = math.floor((z0 - 5) / 4) - 1
@@ -1127,9 +1155,9 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
               local uv = variation > 0.82 and uvLight
                          or variation < 0.16 and uvShadow or uvBody
               local tone = 0.91 + rockNoise(col, row, 4) * 0.13
-              pushSolid({ { sx, h + 0.12, sz }, { ex, h + 0.12, sz },
+              topSolid({ { sx, h + 0.12, sz }, { ex, h + 0.12, sz },
                           { ex, h + 0.12, ez }, { sx, h + 0.12, ez } },
-                        uv, shadeTimes(shade, tone))
+                        uv, shade, tone, x0, z0)
             end
           end
         end
@@ -1244,9 +1272,9 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     local uvShadow = rockUV(KANTO_PATH_SWATCH_TILE, ROCK_TEXEL.shadow)
     local uvBody = rockUV(KANTO_PATH_SWATCH_TILE, ROCK_TEXEL.body)
     local uvLight = rockUV(KANTO_PATH_SWATCH_TILE, ROCK_TEXEL.light)
-    pushSolid({ { x0, h, z0 }, { x1, h, z0 },
+    topSolid({ { x0, h, z0 }, { x1, h, z0 },
                 { x1, h, z1 }, { x0, h, z1 } },
-              uvJoint, shadeTimes(shade, 0.965))
+              uvJoint, shade, 0.965, x0, z0)
 
     local gap = 0.10
     local firstRow = math.floor((z0 - 13) / 12) - 1
@@ -1268,9 +1296,9 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
               local uv = variation > 0.84 and uvLight
                          or variation < 0.13 and uvShadow or uvBody
               local tone = 0.985 + rockNoise(col, row, 433) * 0.03
-              pushSolid({ { sx, h + 0.025, sz }, { ex, h + 0.025, sz },
+              topSolid({ { sx, h + 0.025, sz }, { ex, h + 0.025, sz },
                           { ex, h + 0.025, ez }, { sx, h + 0.025, ez } },
-                        uv, shadeTimes(shade, tone))
+                        uv, shade, tone, x0, z0)
             end
           end
         end
@@ -1330,8 +1358,8 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     local uvBody = rockUV(KANTO_WOOD_TILE, ROCK_TEXEL.body)
     local uvLight = rockUV(KANTO_WOOD_TILE, ROCK_TEXEL.light)
 
-    pushSolid(woodRect(axis, across0, across1, along0, along1, h),
-              uvDark, shadeTimes(shade, 0.92))
+    topSolid(woodRect(axis, across0, across1, along0, along1, h),
+              uvDark, shade, 0.92, x0, z0)
 
     local boardDepth, boardLength, gap, salt = 3.2, 13.0, 0.11, 220
     local firstRow = math.floor((along0 - boardDepth) / boardDepth) - 1
@@ -1362,17 +1390,17 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
               local uv = variation > 0.88 and uvLight
                          or variation < 0.12 and uvShadow or uvBody
               local tone = 0.94 + rockNoise(col, row, salt + 3) * 0.11
-              pushSolid(woodRect(axis, sc, ec, sa, ea, h + 0.06),
-                        uv, shadeTimes(shade, tone))
+              topSolid(woodRect(axis, sc, ec, sa, ea, h + 0.06),
+                        uv, shade, tone, x0, z0)
 
               if ec - sc > 2.6 and rockNoise(col, row, salt + 4) > 0.48 then
                 local grainA = sa + (ea - sa) * 0.68
                 local grainC0, grainC1 = sc + 0.65, ec - 0.65
                 if grainC1 > grainC0 then
-                  pushSolid(woodRect(axis, grainC0, grainC1,
+                  topSolid(woodRect(axis, grainC0, grainC1,
                                      grainA, math.min(ea, grainA + 0.055),
                                      h + 0.065),
-                            uvShadow, shadeTimes(shade, tone * 0.94))
+                            uvShadow, shade, tone * 0.94, x0, z0)
                 end
               end
             end
@@ -1398,11 +1426,11 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     local axis0 = (d == 5 or d == 6) and x0 or z0
     local axis1 = axis0 + 8
 
-    pushSolid({ faceAxisPoint(d, x0, z0, axis0, y0, 0),
+    sideSolid({ faceAxisPoint(d, x0, z0, axis0, y0, 0),
                 faceAxisPoint(d, x0, z0, axis1, y0, 0),
                 faceAxisPoint(d, x0, z0, axis1, y1, 0),
                 faceAxisPoint(d, x0, z0, axis0, y1, 0) },
-              uvDark, shadeTimes(shade, 0.76))
+              uvDark, shade, 0.76, d, x0, z0, y0, y1)
 
     local rows = 2
     local rowH = (y1 - y0) / rows
@@ -1440,22 +1468,22 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                        or variation < 0.16 and uvShadow or uvBody
             local tone = 0.91 + rockNoise(col, row, 30 + d) * 0.12
 
-            pushSolid({ fbl, fbr, ftr, ftl }, uv,
-                      shadeTimes(shade, tone))
-            pushSolid({ btl, btr, ftr, ftl }, uvLight,
-                      shadeTimes(shade, 0.96))
-            pushSolid({ bbr, bbl, fbl, fbr }, uvShadow,
-                      shadeTimes(shade, 0.82))
+            sideSolid({ fbl, fbr, ftr, ftl }, uv,
+                      shade, tone, d, x0, z0, y0, y1)
+            sideSolid({ btl, btr, ftr, ftl }, uvLight,
+                      shade, 0.96, d, x0, z0, y0, y1)
+            sideSolid({ bbr, bbl, fbl, fbr }, uvShadow,
+                      shade, 0.82, d, x0, z0, y0, y1)
 
             -- Do not bevel an artificial tile clip: when the same stone
             -- continues into the neighbour, both pieces meet seamlessly.
             if xs + gap >= axis0 - 0.001 then
-              pushSolid({ bbl, btl, ftl, fbl }, uvShadow,
-                        shadeTimes(shade, 0.86))
+              sideSolid({ bbl, btl, ftl, fbl }, uvShadow,
+                        shade, 0.86, d, x0, z0, y0, y1)
             end
             if xe - gap <= axis1 + 0.001 then
-              pushSolid({ btr, bbr, fbr, ftr }, uvBody,
-                        shadeTimes(shade, 0.88))
+              sideSolid({ btr, bbr, fbr, ftr }, uvBody,
+                        shade, 0.88, d, x0, z0, y0, y1)
             end
           end
         end
@@ -1477,11 +1505,11 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     local axis0 = (d == 5 or d == 6) and x0 or z0
     local axis1 = axis0 + 8
 
-    pushSolid({ faceAxisPoint(d, x0, z0, axis0, y0, 0),
+    sideSolid({ faceAxisPoint(d, x0, z0, axis0, y0, 0),
                 faceAxisPoint(d, x0, z0, axis1, y0, 0),
                 faceAxisPoint(d, x0, z0, axis1, y1, 0),
                 faceAxisPoint(d, x0, z0, axis0, y1, 0) },
-              uvDark, shadeTimes(shade, 0.74))
+              uvDark, shade, 0.74, d, x0, z0, y0, y1)
 
     local courseH = 4
     local gap = 0.16
@@ -1588,22 +1616,22 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                        or variation < 0.13 and uvShadow or uvBody
             local tone = 0.87 + rockNoise(col, row, 60 + d) * 0.15
 
-            pushSolid({ fbl, fbr, ftr, ftl }, uv,
-                      shadeTimes(shade, tone))
-            pushSolid({ btl, btr, ftr, ftl }, uvLight,
-                      shadeTimes(shade, 0.94))
-            pushSolid({ bbr, bbl, fbl, fbr }, uvShadow,
-                      shadeTimes(shade, 0.80))
+            sideSolid({ fbl, fbr, ftr, ftl }, uv,
+                      shade, tone, d, x0, z0, y0, y1)
+            sideSolid({ btl, btr, ftr, ftl }, uvLight,
+                      shade, 0.94, d, x0, z0, y0, y1)
+            sideSolid({ bbr, bbl, fbl, fbr }, uvShadow,
+                      shade, 0.80, d, x0, z0, y0, y1)
 
             -- A stone clipped only by the hidden 8px source-tile boundary
             -- resumes in the neighbour without receiving a fake end bevel.
             if xs + gap >= axis0 - 0.001 then
-              pushSolid({ bbl, btl, ftl, fbl }, uvShadow,
-                        shadeTimes(shade, 0.84))
+              sideSolid({ bbl, btl, ftl, fbl }, uvShadow,
+                        shade, 0.84, d, x0, z0, y0, y1)
             end
             if xe - gap <= axis1 + 0.001 then
-              pushSolid({ btr, bbr, fbr, ftr }, uvBody,
-                        shadeTimes(shade, 0.87))
+              sideSolid({ btr, bbr, fbr, ftr }, uvBody,
+                        shade, 0.87, d, x0, z0, y0, y1)
             end
           end
         end
@@ -1928,6 +1956,8 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
         elseif run then
           local topTile = s.topTile
             or map:tileAt(tx, ChunkMesher.flatTopRow(run, ty))
+          -- Ship portholes belong on vertical faces; tile 16 is plain white.
+          if map.tileset.id == "SHIP" and s.class == "wall" then topTile = 16 end
           local caveKind = caveSurfaceKind(s, tile)
           if caveKind then
             caveNaturalTop(tx, ty, x0, z0, h, VOLUME_TOP_SHADE, caveKind)
@@ -1976,6 +2006,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
             end
             topTile = S.tileAt[keyOf(tx, row)]
           end
+          if map.tileset.id == "SHIP" and s.class == "wall" then topTile = 16 end
           -- water's surface, and only water's: the recessed sheet itself,
           -- never the ground's shoreline bands around it. A cell an object
           -- stands on took the branch above and paints synthesized GROUND,
@@ -2630,7 +2661,9 @@ local function runJob(job)
   local registryVisuals = CommunityVisuals.customTrees()
     or CommunityVisuals.customCutTrees()
     or CommunityVisuals.customPillars()
-  local cached = not annotatedVisuals and not registryVisuals
+  -- The moving vessel is a session mesh, also needed after disk restoration.
+  local sessionVessel = map.id == "VERMILION_DOCK" and V.require("ShipHull").enabled(map)
+  local cached = not annotatedVisuals and not registryVisuals and not sessionVessel
     and MeshDisk.loadTerrain(map, job.slot, job.masks) or nil
   if cached then
     mesh = meshFromRaw(cached.terrain)

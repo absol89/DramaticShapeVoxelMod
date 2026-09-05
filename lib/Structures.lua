@@ -2302,6 +2302,43 @@ local function stairCell(S, map, data, cx, cy, s)
   -- corners run bottom-left, bottom-right, top-right, top-left as seen
   -- from outside (the mesher's side convention); art rect in cell space
   local function face(c1, c2, c3, c4, ax0, ay0, ax1, ay1, shade)
+    if s.warpStair then
+      -- Newly authored public stairs use shared/nonadjacent atlas tiles.
+      -- Split both source seams and the eight-pixel world-curve lattice;
+      -- the historical Red/Ship path below remains exactly as authored.
+      local us, vs = { 0, 1 }, { 0, 1 }
+      local function cuts(out, a, b)
+        if math.abs(b-a) < .000001 then return end
+        local lo,hi=math.min(a,b),math.max(a,b)
+        for edge=(math.floor(lo/8)+1)*8,hi-.000001,8 do out[#out+1]=(edge-a)/(b-a) end
+      end
+      cuts(us,ax0,ax1);cuts(vs,ay1,ay0)
+      for axis=1,3 do cuts(us,c1[axis],c2[axis]);cuts(vs,c1[axis],c4[axis]) end
+      local function ordered(values)
+        table.sort(values);local out={}
+        for _,v in ipairs(values) do if #out==0 or v-out[#out]>.000001 then out[#out+1]=v end end
+        return out
+      end
+      us,vs=ordered(us),ordered(vs)
+      local function point(u,v)
+        local p={};for axis=1,3 do p[axis]=c1[axis]+u*(c2[axis]-c1[axis])+v*(c4[axis]-c1[axis]) end;return p
+      end
+      for j=1,#vs-1 do for i=1,#us-1 do
+        local a,b,c,d=us[i],us[i+1],vs[j],vs[j+1]
+        local sx=ax0+(ax1-ax0)*(a+b)/2
+        local sy=ay1+(ay0-ay1)*(c+d)/2
+        local bx,by=math.floor(sx/8),math.floor(sy/8)
+        local tile=S.tileAt[keyOf(cx*2+bx,cy*2+by)]
+        local function source(u,v)
+          local x=math.max(.05,math.min(7.95,ax0+(ax1-ax0)*u-bx*8))
+          local y=math.max(.05,math.min(7.95,ay1+(ay0-ay1)*v-by*8))
+          return {((tile%perRow)*8+x)/atlasW,(math.floor(tile/perRow)*8+y)/atlasH}
+        end
+        quads[#quads+1]={point(a,c),point(b,c),point(b,d),point(a,d),
+          uv={source(a,c),source(b,c),source(b,d),source(a,d)},shade=shade}
+      end end
+      return
+    end
     local u0, v0 = uv(ax0, ay0)
     local u1, v1 = uv(ax1, ay1)
     quads[#quads + 1] = { c1, c2, c3, c4,
@@ -2421,14 +2458,17 @@ end
 
 function Structures.buildStairs(S, map, x0, x1, y0, y1)
   local data = pixels(map.tileset)
+  local steps = map.def and map.def.tileset == "CAVERN" and V.require("CaveSteps")
   for cy = math.floor(y0 / 2), math.floor(y1 / 2) do
     for cx = math.floor(x0 / 2), math.floor(x1 / 2) do
       local s = S.shapeAt[keyOf(cx * 2, cy * 2)]
-      if s and s.art == "stair" then
+      local shelfStep = steps and steps.match(map,cx,cy)
+      if shelfStep or (s and s.art == "stair") then
         -- claim the cell whichever way the quads go: the mesher must not
         -- box or floor it.  A rising flight stands on the map's common
         -- floor; a stairwell IS the hole, so nothing is painted under it
         local down = s.class == "stair_down_e" or s.class == "stair_down_w"
+          or s.class == "stair_down_n" or s.class == "ladder_down"
         for dy = 0, 1 do
           for dx = 0, 1 do
             local tk = keyOf(cx * 2 + dx, cy * 2 + dy)
@@ -2436,7 +2476,17 @@ function Structures.buildStairs(S, map, x0, x1, y0, y1)
             if not down then S.ground[tk] = false end
           end
         end
-        if data then stairCell(S, map, data, cx, cy, s) end
+        if data then
+          if shelfStep then
+            steps.build(S,map,data,cx,cy)
+          elseif s.class == "ladder_up" or s.class == "ladder_down" then
+            V.require("CaveLadders").build(S, map, data, cx, cy, s)
+          elseif s.class == "stair_n" or s.class == "stair_down_n" then
+            V.require("InteriorStairs").build(S, map, data, cx, cy, s)
+          else
+            stairCell(S, map, data, cx, cy, s)
+          end
+        end
       end
     end
   end

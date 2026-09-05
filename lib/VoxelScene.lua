@@ -29,6 +29,7 @@ local FirstPerson = V.require("FirstPerson")
 local WorldUnderlay = V.require("WorldUnderlay")
 local WorldFillProps = V.require("WorldFillProps")
 local GranitePillars = V.require("GranitePillars")
+local ShipHull = V.require("ShipHull")
 local CommunityFlora = V.require("CommunityFlora")
 local CavePerimeter = V.require("CavePerimeter")
 local RenderDistance = V.require("RenderDistance")
@@ -188,7 +189,19 @@ local YAW = {
 -- The ground height a cell stands at, so a character on a ledge stands on
 -- top of it rather than sunk into it. Uses the same bottom-left collision
 -- tile the engine walks on (Map:cellTile).
-local function groundAt(map, cellX, cellY)
+local function groundAt(map, cellX, cellY, px, py)
+  -- Cave shelf flights are traversed, unlike instant warp stairs. Read the
+  -- same contact point the character mesh and shadow use, including frames
+  -- before the engine advances cellX/cellY. All other support stays exact.
+  if map.def and map.def.tileset == "CAVERN" then
+    local steps = V.require("CaveSteps")
+    local wx,wz = (px or cellX*16)+8,(py or cellY*16)+8
+    local h = steps.support(map,wx,wz)
+    if h ~= nil then return h end
+    if px and py and steps.match(map,cellX,cellY) then
+      cellX,cellY = math.floor(wx/16),math.floor(wz/16)
+    end
+  end
   -- Off the map, cellTile border-extends into the map's borderBlock --
   -- which on maps ringed with trees is a RAISED tile. The only entity
   -- ever standing off-map is the player mid seam-step (placed one cell
@@ -266,10 +279,10 @@ end
 -- ground along the sun line (Voxel3D.shadowMatrix). Runs inside
 -- beginShadows, which supplies the translucent black; the texture is only
 -- consulted for its alpha, so no palette work is needed.
-local function drawShadow(sprite, px, py, facing, phase, flip, gh, lift)
+local function drawShadow(sprite, px, py, facing, phase, flip, gh, lift, visualAnchorY)
   local def = sprite.def
   local frame, mirror = frameFor(def, facing, phase, flip)
-  local mesh = SpriteBillboards.shadowQuad(def, frame)
+  local mesh = SpriteBillboards.shadowQuad(def, frame, visualAnchorY)
   if not mesh then return end
   Voxel3D.draw(mesh, sprite:resolveImage(),
                Voxel3D.shadowMatrix(px, py, gh, lift, mirror))
@@ -357,7 +370,7 @@ end
 -- `lift` raises the figure off the ground plane (ledge hops arc UP in 3D,
 -- where the 2D path could only slide the sprite north).
 local function drawEntity(sprite, px, py, facing, phase, flip, gh, colors,
-                          lift)
+                          lift, visualAnchorY)
   local def = sprite.def
   local tex = sprite:resolveImage()
   if colors and not def.trueColor then
@@ -371,7 +384,7 @@ local function drawEntity(sprite, px, py, facing, phase, flip, gh, colors,
   -- at every tilt level the sprite reads face-on like the flat game.
   -- No camera-tracking yaw: every sprite leans in parallel.
   local frame, mirror = frameFor(def, facing, phase, flip)
-  local mesh = SpriteBillboards.mesh(def, frame)
+  local mesh = SpriteBillboards.mesh(def, frame, visualAnchorY)
   if not mesh then return false end
   -- Camera-ward pull (applied per vertex in the shader, along each
   -- vertex's own eye ray, so it is a PURE depth bias with zero screen
@@ -403,7 +416,7 @@ VoxelScene.drawEntity = drawEntity
 local function drawGhost(p)
   local def = p.sprite.def
   local frame, mirror = frameFor(def, viewFacing(p), p.phase, p.flip)
-  local mesh = SpriteBillboards.shadowQuad(def, frame)
+  local mesh = SpriteBillboards.shadowQuad(def, frame, p.visualAnchorY)
   if not mesh then return end
   local tex = p.sprite:resolveImage()
   if p.colors and not def.trueColor then
@@ -472,6 +485,7 @@ local function rebuildNeighborhood(state)
   cachedMasks = masks
   ChunkMesher.setLive(live)
   TerrainAtlas.setLive(live)
+  if GranitePillars.setLive then GranitePillars.setLive(live) end
 end
 
 -- Request everything `state`'s frame wants and evict what it no longer
@@ -588,7 +602,28 @@ local function poseSlot(i)
   p.isPlayer = nil
   p.role = nil
   p.entity = nil
+  p.visualAnchorY = nil
   return p
+end
+
+-- A visual contact adjustment for the original static starter balls only.
+-- Actor coordinates, collision support and the 2D SpriteRenderer stay exact.
+local starterBalls = {
+  OAKSLAB_EEVEE_POKE_BALL = true,
+  OAKSLAB_CHARMANDER_POKE_BALL = true,
+  OAKSLAB_SQUIRTLE_POKE_BALL = true,
+  OAKSLAB_BULBASAUR_POKE_BALL = true,
+}
+local function tableItemAnchor(map, entity, sprite, gh)
+  local d = entity.def
+  if map.id ~= "OAKS_LAB" or not d or not starterBalls[d.name]
+      or d.sprite ~= "SPRITE_POKE_BALL" or d.movement ~= "STAY"
+      or gh ~= 6 or entity.moving or entity.cellY ~= 3
+      or entity.cellX < 6 or entity.cellX > 8
+      or entity.cellX ~= d.x or entity.cellY ~= d.y
+      or entity.px ~= entity.cellX * 16 or entity.py ~= entity.cellY * 16
+      or map:isWalkableCell(entity.cellX, entity.cellY) then return nil end
+  return SpriteBillboards.tableAnchor(sprite.def)
 end
 
 local function posesOf(state, spriteColors)
@@ -602,7 +637,8 @@ local function posesOf(state, spriteColors)
     p.isPlayer, p.role = false, "npc"
     p.sprite, p.px, p.py = sprite, vx + g.ox, g.npc.py + g.oy
     p.facing, p.phase, p.flip = facing, phase, flip
-    p.gh = groundAt(g.map or state.map, g.npc.cellX, g.npc.cellY)
+    p.gh = groundAt(g.map or state.map, g.npc.cellX, g.npc.cellY, vx, g.npc.py)
+    p.visualAnchorY = tableItemAnchor(g.map or state.map, g.npc, sprite, p.gh)
     p.lift = g.npc.py - vy
     p.colors = spriteColors(g.map or state.map)
   end
@@ -616,7 +652,8 @@ local function posesOf(state, spriteColors)
       p.role = p.isPlayer and "player" or "npc"
       p.sprite, p.px, p.py = sprite, vx, e.py
       p.facing, p.phase, p.flip = facing, phase, flip
-      p.gh = groundAt(state.map, e.cellX, e.cellY)
+      p.gh = groundAt(state.map, e.cellX, e.cellY, vx, e.py)
+      p.visualAnchorY = tableItemAnchor(state.map, e, sprite, p.gh)
       p.lift, p.colors = e.py - vy, colors
       if e == state.player then
         me = p
@@ -765,7 +802,7 @@ local function drawCast(state, posed, atlasFor)
       local claimed = CharacterRenderers.first("drawEntity", context)
       if not claimed then
         drawEntity(p.sprite, p.px, p.py, facing, p.phase, p.flip, p.gh,
-                   p.colors, p.lift)
+                   p.colors, p.lift, p.visualAnchorY)
       end
     end
   end
@@ -960,6 +997,7 @@ local function shadowSignature(state, terrain, nbMesh, posed, cx, cy, vw, vh)
   put(FirstPerson.signature())
   put(CharacterRenderers.revision())
   put(tostring(terrain))
+  put(ShipHull.signature(state))
   for i, nb in ipairs(state.neighbors or {}) do
     if RenderDistance.neighbor(nb, state.player) then
       put(tostring(nbMesh[i]))
@@ -969,6 +1007,7 @@ local function shadowSignature(state, terrain, nbMesh, posed, cx, cy, vw, vh)
     if RenderDistance.point(p.px + 8, p.py + 8, state.player) then
       put(p.sprite.def.image)
       put(p.px); put(p.py); put(p.gh); put(p.lift or 0)
+      put(p.visualAnchorY or "")
       put(p.facing); put(p.phase); put(p.flip and 1 or 0)
     end
   end
@@ -1009,6 +1048,7 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
   if not ShadowMap.begin(cx, cy, vw, vh) then return end
 
   ShadowMap.draw(terrain, atlasFor(state.map), nil)
+  ShipHull.draw(state, atlasFor(state.map), true)
   for _, visual in ipairs(visualShadows or {}) do
     ShadowMap.draw(visual.mesh, atlasFor(state.map), nil)
   end
@@ -1079,7 +1119,7 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
         -- already charges for (FirstPerson.signature) and keeps a card from
         -- fringing against a mirror-flipped record of itself
         local frame, mirror = frameFor(def, facing, p.phase, p.flip)
-        local mesh = SpriteBillboards.shadowQuad(def, frame)
+        local mesh = SpriteBillboards.shadowQuad(def, frame, p.visualAnchorY)
         if mesh then
           ShadowMap.draw(mesh, p.sprite:resolveImage(),
                          ShadowMap.snug(
@@ -1242,6 +1282,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   WorldUnderlay.draw(state, cx, cy, underlayColor)
   Voxel3D.draw(terrain, atlasFor(state.map), nil)
   CavePerimeter.draw(state.map, atlasFor(state.map))
+  ShipHull.draw(state, atlasFor(state.map), false)
   local drawnVisuals, drawnNeighborVisuals = {}, {}
   for _, visual in ipairs(visualShadows or {}) do
     if ChunkMesher.visualObjectVisible(visual.id) then
@@ -1317,7 +1358,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
     for _, p in ipairs(posed) do
       if RenderDistance.point(p.px + 8, p.py + 8, state.player) then
         drawShadow(p.sprite, p.px, p.py, viewFacing(p), p.phase, p.flip, p.gh,
-                   p.lift)
+                   p.lift, p.visualAnchorY)
       end
     end
     Voxel3D.endShadows()

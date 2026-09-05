@@ -472,11 +472,23 @@ end
 -- (the objects cover every drawn pixel of the tabletop), continued
 -- from the sibling tables' pattern in the drawing's own shades.
 -- tools/building_voxels.py `build_desk_set` is the reference twin.
+-- The sprite fixes a support's columns and elevation. Only its depth is
+-- inferred: keep the authored foot zones, with air between their ends.
+-- Unannotated furniture and every building retain the full extrusion.
+local function withinSupports(supports, x, sy, z)
+  if not supports or sy < supports.fromRow then return true end
+  for _, zone in ipairs(supports.zones) do
+    if x >= zone.x[1] and x <= zone.x[2]
+       and z >= zone.z[1] and z <= zone.z[2] then return true end
+  end
+  return false
+end
+
 local function deskSetModel(sp, pr, t)
   local W, H, D = sp.W, sp.H, pr.D
   local ground = pr.ground
   local col, inside = sp.col, sp.inside
-  local vox = {}
+  local vox, detail, surfaces = {}, {}, {}
   local function key(x, y, z) return (y * D + z) * W + x end
   local function put(x, y, z, i) vox[key(x, y, z)] = i end
 
@@ -516,6 +528,16 @@ local function deskSetModel(sp, pr, t)
         local z0 = p.z or r0
         local atY = p.at or plane
         local thick = p.thick or 1
+        -- Optional continuation from an explicit pixel of this drawing.
+        -- Round furniture needs the lit rim on its unseen side as well;
+        -- the donor is authored source art, never a generated colour.
+        local sample = p.sample
+        local sampleIndex = sample and (sample[2] * W + sample[1])
+        if sampleIndex then
+          assert(sample[1] >= 0 and sample[1] < W and sample[2] >= 0
+            and sample[2] < H and inside[sampleIndex],
+            "flat donor must belong to source artwork")
+        end
         if atY > ytop then ytop = atY end
         for sy = r0, p.rows[2] do
           local z = z0 + (sy - r0)
@@ -523,7 +545,7 @@ local function deskSetModel(sp, pr, t)
             for sx = x0, x1 do
               if inside[sy * W + sx] then
                 for y = math.max(0, atY - thick + 1), atY do
-                  put(sx, y, z, sy * W + sx)
+                  put(sx, y, z, sampleIndex or (sy * W + sx))
                 end
               end
             end
@@ -572,6 +594,13 @@ local function deskSetModel(sp, pr, t)
             end
           end
         end
+      elseif p.kind == "iso" and p.case then
+        local faces, top = V.require("ComputerCase").build(sp,p,plane + (p.rise or 0),
+          function(x,y,z,i)
+            if z>=0 and z<D then put(x,y,z,i);detail[key(x,y,z)]=true end
+          end)
+        ytop=math.max(ytop,top)
+        for _,q in ipairs(faces)do surfaces[#surfaces+1]=q end
       elseif p.kind == "iso" then
         -- An ISO part is drawn in 2:1 isometric -- a box TURNED 45
         -- degrees to the map, so one rhombus carries its top, its front
@@ -651,6 +680,29 @@ local function deskSetModel(sp, pr, t)
         -- blocks the global pass. Same mechanism as a recess: the front
         -- voxel is simply not placed.
         local ins = p.inset
+        local casing = p.case and p.case.sample
+        local caseIndex = casing and (casing[2] * W + casing[1])
+        if caseIndex then assert(inside[caseIndex], "case donor must belong to source artwork") end
+        local function lidRow(z)
+          -- A round cushion's closing top outline need not be the
+          -- first fascia row: both are painted in the source ellipse.
+          if z == pz + pd - 1 then return p.topFront or fr0 end
+          if p.stretch then
+            return math.min(tr0 + math.floor((z - pz) * (tr1 - tr0 + 1)
+                                              / (pd - 1)), tr1)
+          end
+          return math.min(tr0 + z - pz, tr1)
+        end
+        -- Optional source-shaped seats keep their rounded plan instead of
+        -- searching ahead into a wider row. Their apron and feet stay
+        -- inside that same plan. Equipment lids retain their existing fill.
+        local function bodyAt(sx, sy, z)
+          if p.silhouette and not inside[lidRow(z) * W + sx] then return false end
+          -- The drawing fixes each leg's columns and elevation, but not
+          -- its depth. Authored support zones place those pixels as feet
+          -- below the apron rather than extruding them into long runners.
+          return withinSupports(p.supports, sx, sy, z)
+        end
         for sx = x0, x1 do
           -- the lid: the part's drawn top laid across its depth from the
           -- back, last row continuing forward; the front lid row is the
@@ -661,19 +713,15 @@ local function deskSetModel(sp, pr, t)
           -- last row as a long smear off the back band's edge.
           for z = pz, pz + pd - 1 do
             local front = z == pz + pd - 1
-            local sy
-            if front then
-              sy = fr0
-            elseif p.stretch then
-              sy = math.min(tr0 + math.floor((z - pz) * (tr1 - tr0 + 1)
-                                             / (pd - 1)), tr1)
-            else
-              sy = math.min(tr0 + z - pz, tr1)
+            local sy = lidRow(z)
+            if not p.silhouette then
+              while sy <= tr1 and not inside[sy * W + sx] do sy = sy + 1 end
             end
-            while sy <= tr1 and not inside[sy * W + sx] do sy = sy + 1 end
-            local ok = sy <= tr1 or (front and inside[fr0 * W + sx])
+            local ok = p.silhouette and inside[sy * W + sx]
+                       or (not p.silhouette and
+                           (sy <= tr1 or (front and inside[fr0 * W + sx])))
             if ok and z >= 0 and z < D then
-              put(sx, ytp, z, (front and fr0 or sy) * W + sx)
+              put(sx, ytp, z, (front and (p.topFront or fr0) or sy) * W + sx)
             end
           end
           -- the body: facade rows anchored to the part's own base
@@ -683,11 +731,13 @@ local function deskSetModel(sp, pr, t)
             if inside[i] then
               local ix = interiorAt(sx, sy, x0, x1)
               for z = pz, pz + pd - 1 do
-                if z >= 0 and z < D then
+                if z >= 0 and z < D and bodyAt(sx, sy, z) then
+                  local sunk = (ins and sx >= ins.x[1] and sx <= ins.x[2]
+                                and sy >= ins.rows[1] and sy <= ins.rows[2]) or pr.recess[i]
                   if z == pz + pd - 1 then
-                    local sunk = ins and sx >= ins.x[1] and sx <= ins.x[2]
-                                 and sy >= ins.rows[1] and sy <= ins.rows[2]
-                    if not sunk and not pr.recess[i] then put(sx, y, z, i) end
+                    if not sunk then put(sx, y, z, i) end
+                  elseif caseIndex then
+                    put(sx,y,z,(sunk and z == pz + pd - 2) and i or caseIndex)
                   elseif z == pz then
                     put(sx, y, z, i)
                   else
@@ -773,7 +823,9 @@ local function deskSetModel(sp, pr, t)
                end
                return vox[key(x, y, z)]
              end,
-             W = W, ytop = ytop, zmin = 0, zmax = D - 1 }
+             W = W, ytop = ytop, zmin = 0, zmax = D - 1,
+             detail = next(detail) and function(x,y,z)return detail[key(x,y,z)] end or nil,
+             surfaces = #surfaces > 0 and surfaces or nil }
   end
 
   -- No base piece at all: the drawing IS its parts (the house stool -- a
@@ -787,7 +839,9 @@ local function deskSetModel(sp, pr, t)
                end
                return vox[key(x, y, z)]
              end,
-             W = W, ytop = ytop, zmin = 0, zmax = D - 1 }
+             W = W, ytop = ytop, zmin = 0, zmax = D - 1,
+             detail = next(detail) and function(x,y,z)return detail[key(x,y,z)] end or nil,
+             surfaces = #surfaces > 0 and surfaces or nil }
   end
 
   -- The desk's top plane. Usually the drawing states it: the fascia and
@@ -937,7 +991,9 @@ local function deskSetModel(sp, pr, t)
              if x < 0 or x >= W or y < 0 or z < 0 or z >= D then return nil end
              return vox[key(x, y, z)]
            end,
-           W = W, ytop = ytop, zmin = 0, zmax = D - 1 }
+           W = W, ytop = ytop, zmin = 0, zmax = D - 1,
+             detail = next(detail) and function(x,y,z)return detail[key(x,y,z)] end or nil,
+             surfaces = #surfaces > 0 and surfaces or nil }
 end
 
 -- The voxel model as a lookup: `at(x, y, z)` is the index of the sprite
@@ -945,6 +1001,16 @@ end
 -- order -- roof first, so it overwrites the walls it intersects, and walls
 -- are trimmed to its underside so nothing pokes through the surface.
 local function model(sp, pr, t)
+  if t.bicycle then return V.require("BikeDisplay").model(sp,pr,t) end
+  if t.plant == "facility_palm" then
+    return V.require("FacilityPalm").model(sp,pr,t)
+  end
+  if t.pipe == "bill_pipe" then
+    return V.require("BillPipe").model(sp,pr,t)
+  end
+  if t.machine == "bill_transporter" then
+    return V.require("BillMachine").model(sp,pr,t)
+  end
   if t.parts then return deskSetModel(sp, pr, t) end
   local W, H, D = sp.W, sp.H, pr.D
   local slab, roofRows = t.slab, t.roofRows
@@ -1044,7 +1110,8 @@ local function model(sp, pr, t)
       -- voxel over their own plot
       sy, i = sy - 1, i - W
     end
-    if not sp.inside[i] then return nil end
+    if not sp.inside[i]
+        or (t.supports and not withinSupports(t.supports, x, sy, z)) then return nil end
     if z == D - 1 then
       if pr.recess[i] then return nil end
       return i
@@ -1081,6 +1148,7 @@ local function emit(m, sp, atlasW, atlasH)
   for y = 0, ytop do
     Budget.tick()
     for z = zmin, zmax do
+      Budget.tick()
       local base = (y * zn + (z - zmin)) * W
       for x = 0, W - 1 do
         local v = m.at(x, y, z)
@@ -1095,6 +1163,7 @@ local function emit(m, sp, atlasW, atlasH)
   for y = 0, ytop do
     Budget.tick()
     for z = zmin, zmax do
+      Budget.tick()
       for x = 0, W - 1 do
         if ci(x, y, z) and not (ci(x + 1, y, z) and ci(x - 1, y, z)
             and ci(x, y + 1, z) and ci(x, y - 1, z)
@@ -1103,6 +1172,43 @@ local function emit(m, sp, atlasW, atlasH)
         end
       end
     end
+  end
+
+  local function detailed(x,y,z)return m.detail and m.detail(x,y,z) end
+
+  -- Local contact shading samples only cells OUTSIDE this exposed face.
+  -- A flat wall never shadows itself; a frame, eave or concave roof joint
+  -- does. This uses the existing shade attribute, with no extra draw pass.
+  -- Keep the range gentle: even the most enclosed corner retains 76% of
+  -- its directional light, so the source palette remains readable.
+  local function cornerAO(x, y, z, ax, ay, az, bx, by, bz)
+    local a = ci(x + ax, y + ay, z + az) ~= nil
+    local b = ci(x + bx, y + by, z + bz) ~= nil
+    if a and b then return 3 end
+    local diagonal = ci(x + ax + bx, y + ay + by, z + az + bz) ~= nil
+    return (a and 1 or 0) + (b and 1 or 0) + (diagonal and 1 or 0)
+  end
+
+  -- Corner order in the positive merge-axis / second-axis plane:
+  -- lower-left, lower-right, upper-right, upper-left. Z faces use X/Y,
+  -- Y faces X/Z, and X faces Z/Y; emission below restores face winding.
+  local function faceAO(x, y, z, dx, dy, dz)
+    x, y, z = x + dx, y + dy, z + dz
+    if dz ~= 0 then
+      return cornerAO(x,y,z,-1,0,0,0,-1,0), cornerAO(x,y,z,1,0,0,0,-1,0),
+             cornerAO(x,y,z,1,0,0,0,1,0), cornerAO(x,y,z,-1,0,0,0,1,0)
+    elseif dy ~= 0 then
+      return cornerAO(x,y,z,-1,0,0,0,0,-1), cornerAO(x,y,z,1,0,0,0,0,-1),
+             cornerAO(x,y,z,1,0,0,0,0,1), cornerAO(x,y,z,-1,0,0,0,0,1)
+    else
+      return cornerAO(x,y,z,0,0,-1,0,-1,0), cornerAO(x,y,z,0,0,1,0,-1,0),
+             cornerAO(x,y,z,0,0,1,0,1,0), cornerAO(x,y,z,0,0,-1,0,1,0)
+    end
+  end
+  local function contactShade(shade, a, b, c, d)
+    if a == 0 and b == 0 and c == 0 and d == 0 then return shade end
+    return { shade * (1 - 0.08 * a), shade * (1 - 0.08 * b),
+             shade * (1 - 0.08 * c), shade * (1 - 0.08 * d) }
   end
 
   -- u/v of a run: `n` texels starting at sprite pixel `i`, stepping along
@@ -1130,11 +1236,13 @@ local function emit(m, sp, atlasW, atlasH)
   local function runX(y, z, dx, dy, dz, x)
     local i0 = ci(x, y, z)
     local strip, n = nil, 1
+    local a, b, c, d = faceAO(x, y, z, dx, dy, dz)
+    local lowerSlope, upperSlope = b - a, c - d
     local cap = runCap(x)
     while n < cap do
       local nx = x + n
       local i = ci(nx, y, z)
-      if not i or ci(nx + dx, y + dy, z + dz) then break end
+      if not i or detailed(nx,y,z) or ci(nx + dx, y + dy, z + dz) then break end
       local prev = ci(nx - 1, y, z)
       if sp.ay[i] ~= sp.ay[prev] then break end
       local d = sp.ax[i] - sp.ax[prev]
@@ -1147,9 +1255,19 @@ local function emit(m, sp, atlasW, atlasH)
       else
         break
       end
+      local e, f, g, h = faceAO(nx, y, z, dx, dy, dz)
+      -- A longer quad must reproduce every intermediate AO sample.
+      -- Otherwise a frame inside a flat-colour strip loses its shadow.
+      -- Both edges must have the same slope, too: a bilinear saddle is
+      -- not reproduced by the two triangles of a longer quad.
+      if lowerSlope ~= upperSlope or e ~= b or h ~= c
+          or f - b ~= lowerSlope or g - c ~= upperSlope then
+        break
+      end
+      b, c = f, g
       n = n + 1
     end
-    return i0, strip == true, n
+    return i0, strip == true, n, a, b, c, d
   end
 
   -- ---- faces along +-Z (the facade, the roof's rims): merge along x ----
@@ -1158,21 +1276,24 @@ local function emit(m, sp, atlasW, atlasH)
     for y = 0, ytop do
       Budget.tick()
       for z = zmin, zmax do
+        Budget.tick()
         local x = 0
         while x < W do
-          if ci(x, y, z) and not ci(x, y, z + d) then
-            local i, strip, n = runX(y, z, 0, 0, d, x)
+          if x % 8 == 0 then Budget.tick() end
+          if ci(x, y, z) and not detailed(x,y,z) and not ci(x, y, z + d) then
+            local i, strip, n, a, b, c, e = runX(y, z, 0, 0, d, x)
             local u0, u1, v0, v1 = uvOf(i, strip, n)
             local zf = d == 1 and (z + 1) or z
             if d == 1 then
               put({ x, y, zf }, { x + n, y, zf },
                   { x + n, y + 1, zf }, { x, y + 1, zf },
                   { { u0, v1 }, { u1, v1 }, { u1, v0 }, { u0, v0 } },
-                  shade, true)
+                  contactShade(shade, a, b, c, e), true)
             else
               put({ x + n, y, zf }, { x, y, zf },
                   { x, y + 1, zf }, { x + n, y + 1, zf },
-                  { { u1, v1 }, { u0, v1 }, { u0, v0 }, { u1, v0 } }, shade)
+                  { { u1, v1 }, { u0, v1 }, { u0, v0 }, { u1, v0 } },
+                  contactShade(shade, b, a, e, c))
             end
             x = x + n
           else
@@ -1191,20 +1312,24 @@ local function emit(m, sp, atlasW, atlasH)
       -- the underside of the bottom layer is the ground it stands on
       if not (d == -1 and y == 0) then
         for z = zmin, zmax do
+          Budget.tick()
           local x = 0
           while x < W do
-            if ci(x, y, z) and not ci(x, y + d, z) then
-              local i, strip, n = runX(y, z, 0, d, 0, x)
+            if x % 8 == 0 then Budget.tick() end
+            if ci(x, y, z) and not detailed(x,y,z) and not ci(x, y + d, z) then
+              local i, strip, n, a, b, c, e = runX(y, z, 0, d, 0, x)
               local u0, u1, v0, v1 = uvOf(i, strip, n)
               local yf = d == 1 and (y + 1) or y
               if d == 1 then
                 put({ x, yf, z }, { x + n, yf, z },
                     { x + n, yf, z + 1 }, { x, yf, z + 1 },
-                    { { u0, v0 }, { u1, v0 }, { u1, v1 }, { u0, v1 } }, shade)
+                    { { u0, v0 }, { u1, v0 }, { u1, v1 }, { u0, v1 } },
+                    contactShade(shade, a, b, c, e))
               else
                 put({ x, yf, z + 1 }, { x + n, yf, z + 1 },
                     { x + n, yf, z }, { x, yf, z },
-                    { { u0, v1 }, { u1, v1 }, { u1, v0 }, { u0, v0 } }, shade)
+                    { { u0, v1 }, { u1, v1 }, { u1, v0 }, { u0, v0 } },
+                    contactShade(shade, e, c, b, a))
               end
               x = x + n
             else
@@ -1220,14 +1345,24 @@ local function emit(m, sp, atlasW, atlasH)
   for _, d in ipairs({ 1, -1 }) do
     for y = 0, ytop do
       for x = 0, W - 1 do
+        Budget.tick()
         local z = zmin
         while z <= zmax do
+          if z % 8 == 0 then Budget.tick() end
           local i = ci(x, y, z)
-          if i and not ci(x + d, y, z) then
+          if i and not detailed(x,y,z) and not ci(x + d, y, z) then
             local n, cap = 1, runCap(z)
+            local a, b, c, e = faceAO(x, y, z, d, 0, 0)
+            local lowerSlope, upperSlope = b - a, c - e
             while n < cap and z + n <= zmax do
               local j = ci(x, y, z + n)
-              if j ~= i or ci(x + d, y, z + n) then break end
+              if j ~= i or detailed(x,y,z+n) or ci(x + d, y, z + n) then break end
+              local f, g, h, k = faceAO(x, y, z + n, d, 0, 0)
+              if lowerSlope ~= upperSlope or f ~= b or k ~= c
+                  or g - b ~= lowerSlope or h - c ~= upperSlope then
+                break
+              end
+              b, c = g, h
               n = n + 1
             end
             local u0, u1, v0, v1 = uvOf(i, false, n)
@@ -1236,12 +1371,12 @@ local function emit(m, sp, atlasW, atlasH)
               put({ xf, y, z + n }, { xf, y, z },
                   { xf, y + 1, z }, { xf, y + 1, z + n },
                   { { u0, v1 }, { u1, v1 }, { u1, v0 }, { u0, v0 } },
-                  SHADE.side)
+                  contactShade(SHADE.side, b, a, e, c))
             else
               put({ xf, y, z }, { xf, y, z + n },
                   { xf, y + 1, z + n }, { xf, y + 1, z },
                   { { u0, v1 }, { u1, v1 }, { u1, v0 }, { u0, v0 } },
-                  SHADE.side)
+                  contactShade(SHADE.side, a, b, c, e))
             end
             z = z + n
           else
@@ -1252,6 +1387,11 @@ local function emit(m, sp, atlasW, atlasH)
     end
   end
 
+  for _,q in ipairs(m.surfaces or {})do
+    Budget.tick()
+    local u0,u1,v0,v1=uvOf(q.source,false,1)
+    put(q[1],q[2],q[3],q[4],{{u0,v1},{u1,v1},{u1,v0},{u0,v0}},q.shade)
+  end
   return quads
 end
 
@@ -1279,6 +1419,8 @@ function Buildings.build(S, map, data, perRow)
   if not data then return end
   local tileset = map.tileset
   local s = profile()
+  local vessel = s and s.tilesets and s.tilesets[tileset.id] and s.tilesets[tileset.id].ship_hull
+  if vessel then V.require("ShipHull").prepare(S,map,data,perRow,vessel,read,emit) end
   local list = s and s.buildings and s.buildings[tileset.id]
   if not list then return end
 
@@ -1413,20 +1555,41 @@ function Buildings.stamp(S, map, quads, tx, ty, bw, bh, t)
     vote(tx + bw, ty + r)
   end
 
+  -- A complete furniture drawing may contain its own visible floor. Retain
+  -- that exact authored pattern when removing its folded apron exposes it;
+  -- nearest-edge voting can otherwise borrow a different carpet behind it.
+  local groundTiles = t and t.groundTiles
+  if groundTiles then
+    assert(#groundTiles > 0 and #groundTiles[1] > 0, "empty furniture floor pattern")
+  end
   for r = 0, bh - 1 do
     for c = 0, bw - 1 do
       local k = keyOf(tx + c, ty + r)
-      if keep and keep[S.tileAt[k]] then
+      local floorTile = best or false
+      if t and t.bicycle == "floor" then
+        -- Uncover the shop's alternating floor in global tile coordinates.
+        floorTile = (tx + c + ty + r) % 2 == 0 and 15 or 31
+      end
+      if groundTiles then
+        local row = groundTiles[r % #groundTiles + 1]
+        floorTile = assert(row[c % #row + 1], "missing furniture floor tile")
+      end
+      if t and t.bicycle == "wall" then
+        -- Keep the original wall shape/support. Replace only its private
+        -- paint with the measured striped panel, which also prevents the
+        -- legacy mounted-sprite scan from drawing a second bicycle.
+        S.tileAt[k] = 6
+      elseif keep and keep[S.tileAt[k]] then
         -- unclaimed by request: the tile keeps its pin (the plant's
         -- cutout pool) and the standee scan finds it there. Only the
         -- ground is set now, so the scan's own claim of these tiles has
         -- the building's floor to paint when no flat tile touches a
         -- cluster ringed by its own furniture.
-        S.ground[k] = best or false
+        S.ground[k] = floorTile
       else
         S.shapeAt[k] = shape
         S.skip[k] = true
-        S.ground[k] = best or false
+        S.ground[k] = floorTile
       end
     end
   end
@@ -1470,7 +1633,13 @@ function Buildings.stamp(S, map, quads, tx, ty, bw, bh, t)
       -- multiplication preserves the sign; Voxel3D restores its magnitude
       -- for lighting and discards it only from behind. No vertex-format or
       -- auxiliary-mesh change is needed.
-      shade = -math.abs(shade)
+      if type(shade) == "table" then
+        -- The template is shared with scenery placements. Never mutate it.
+        shade = { -math.abs(shade[1]), -math.abs(shade[2]),
+                  -math.abs(shade[3]), -math.abs(shade[4]) }
+      else
+        shade = -math.abs(shade)
+      end
     end
     out[#out + 1] = {
       { q[1][1] + mx, q[1][2], q[1][3] + mz },

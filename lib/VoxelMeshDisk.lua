@@ -65,7 +65,9 @@ local STATIC_PLAYTHROUGH = "bavc_static_mesh_v2"
 -- TEST39 lowers true inner maze walls to 30px and restores every walkable
 -- ledge top to its authored height so actors share the visible floor plane.
 -- Jagged TEST38 masonry, ordinary floors and the distant perimeter are locked.
-Disk.CACHE_REVISION = 25
+-- Revision 30 integrates source-driven furniture, stairs, ladders and ship
+-- surfaces while retaining this branch's current disk-record layout.
+Disk.CACHE_REVISION = 30
 -- Patch releases which do not change emitted vertices must keep the existing
 -- world cache usable. This token matches the first static-mesh-cache-v2 build;
 -- CACHE_REVISION, not the public mod version, owns geometry compatibility.
