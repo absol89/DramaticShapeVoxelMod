@@ -680,6 +680,22 @@ end
 
 function OverworldBattle.stageShot()
   if not session or session.broken then return nil end
+  -- Stadium projects every slot, including species with no imported model.
+  -- Publish the same logical anchors its animation-layer transform uses.
+  local finder=V.mod and V.mod.find
+  local handle=type(finder)=="function" and finder("STADIUM2_IMPORTER")
+  local api=handle and handle.exports and handle.exports.scene
+  local scene=api and api.current and api.current()
+  local anchors=scene and scene.uiAnchors
+  if scene and scene.battle==session.battle and scene.readyFrame and not scene.defect
+      and anchors and anchors.player and anchors.enemy then
+    local p,e=anchors.player,anchors.enemy
+    local dx,dy=e[1]-p[1],e[2]-p[2]
+    local scale=math.max(.5,math.min(2,math.sqrt(dx*dx+dy*dy)/math.sqrt(98*98+40*40)))
+    return {player={p[1],p[2]},enemy={e[1],e[2]},
+      animationScale=scale,backPinned=false,
+      trainerDrawn=session.providerShot and session.providerShot.trainerDrawn}
+  end
   return session.apiHosted and session.providerShot or session.shot
 end
 

@@ -1,3 +1,22 @@
+## Sprite FX anchors and background ordering: 2026-09-05
+
+stageShot now publishes the active Stadium scene's logical uiAnchors and exact
+animationProjection scale through BattleStage. FX consumers therefore remain
+in the host-projected animation layer for species without skeletal models,
+instead of redirecting to a surface with missing bone coordinates. Explicit
+host scale/backPinned metadata takes precedence over ordinary Battle Art values.
+
+The backdrop shader places plates at far depth; Stadium image drawing uses
+lequal without depth writes and preserves the host depth attachment. Found an
+additional installed-only edit using always/depth-write plus next(ctx) after
+the image; it would block models and repaint the sky. That installed edit is
+replaced by the source fix and retained in a backup.
+
+Five targeted LuaJIT suites pass. A real LOVE GPU test draws foreground green
+geometry first, then GEN6/PNG red plates: pixel readback retains green geometry
+and replaces blue sky with red. In-game FX and artwork confirmation pending.
+No Stadium Battle FX companion changes are needed. Master/tag unchanged.
+
 ## Flat hosted frame/HUD follow-up: 2026-09-05
 
 Captured diagnostic: BLUE/BOTH statusAvailable=true, suppressed=false, but

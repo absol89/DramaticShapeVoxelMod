@@ -261,7 +261,7 @@ local function drawImage(g, image, width, height)
     pcall(blur.send, blur, "texel", { 1 / iw, 1 / ih })
     pcall(blur.send, blur, "radius", Voxel3D.BACKDROP_BLUR_RADIUS)
   end
-  if g.setDepthMode then g.setDepthMode("always", false) end
+  if g.setDepthMode then g.setDepthMode("lequal", false) end
   if g.setBlendMode then g.setBlendMode("alpha", "alphamultiply") end
   if g.setColor then g.setColor(1, 1, 1, 1) end
   local dx, dy, sx, sy = Voxel3D.backdropTransform(iw, ih, x, y, scale,
@@ -285,7 +285,7 @@ function StadiumBackground.draw(next, ctx)
   local battle = ctx.scene and ctx.scene.battle or OverworldBattle.battle()
   local image = selectedImage(battleMap(ctx), battle)
   if not image then return next(ctx) end
-  g.clear(0, 0, 0, 1, true, true)
+  -- The host already cleared its target. Preserve existing model depth.
   if drawImage(g, image, target.width, target.height) then return true end
   return next(ctx)
 end

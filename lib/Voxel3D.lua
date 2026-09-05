@@ -462,6 +462,12 @@ local BACKDROP_BLUR = [[
   uniform vec2 texel;
   uniform float radius;
 
+  vec4 position(mat4 transform_projection, vec4 vertex_position) {
+    vec4 clip = transform_projection * vertex_position;
+    clip.z = clip.w;
+    return clip;
+  }
+
   vec4 effect(vec4 color, Image image, vec2 uv, vec2 screen) {
     vec2 d = texel * radius;
     vec4 sum = Texel(image, uv) * 4.0;
