@@ -82,13 +82,7 @@ local OBJECT_DEPTH = 6             -- voxel thickness of a detected prop
 -- space is the drawing, and at the 5 voxels `prop` gives, the side faces
 -- of neighbouring strokes close every gap in it off-axis
 local PINNED_DEPTH = { billboard = 10, prop = 5, stool = 10, cutout = 1,
-                       console = 10, post = 6, signpost = 2, bike = 2,
-                       -- the caves' ladders, on the `bike` reasoning: what a
-                       -- ladder and a bicycle have in common is that both are
-                       -- mostly the air inside them, and a fatter pool closes
-                       -- that off.  Its own pool rather than sharing one, so a
-                       -- ladder never clusters with a bicycle beside it
-                       ladder = 2 }
+                       console = 10, post = 6, signpost = 2, bike = 2 }
 
 local MAX_ROWS = 6                 -- volume height cap: 48px
 
@@ -255,6 +249,82 @@ function Structures.buildCommunityFence(S, map, postCells)
       box(x - 1, 4, z + 2, x + 1, 6, z + 14)
       box(x - 1, 8, z + 2, x + 1, 10, z + 14)
     end
+  end
+  return true
+end
+
+-- TEST46, transplanted from the corrected TEST437 world-prop pass: retain
+-- the engine-authored white sign face and its real label. This builder adds
+-- only a grained wooden frame/support behind it, so readability and every
+-- companion visual-object hook remain owned by the existing billboard path.
+function Structures.buildLegendarySigns(S, map, x0, x1, y0, y1, data)
+  if not CommunityVisuals.customSigns() then return false end
+  if not (map.tileset and map.tileset.id == "OVERWORLD" and data) then
+    return false
+  end
+
+  local cells = {}
+  for cy = math.floor(y0 / 2), math.floor(y1 / 2) do
+    for cx = math.floor(x0 / 2), math.floor(x1 / 2) do
+      local tiles, whole = {}, true
+      for dy = 0, 1 do
+        for dx = 0, 1 do
+          local tx, ty = cx * 2 + dx, cy * 2 + dy
+          local k = keyOf(tx, ty)
+          local s = S.shapeAt[k]
+          if not (s and s.art == "billboard" and s.class == "signpost") then
+            whole = false
+          end
+          tiles[#tiles + 1] = { tx, ty }
+        end
+      end
+      if whole then cells[#cells + 1] = { cx = cx, cy = cy, tiles = tiles } end
+    end
+  end
+  if not cells[1] then return false end
+
+  local atlasW, atlasH = data:getDimensions()
+  local perRow, woodTile = map.tileset.tilesPerRow or 16, 60
+  local ax = (woodTile % perRow) * 8
+  local ay = math.floor(woodTile / perRow) * 8
+  local uv = {
+    dark = { (ax + 0.5) / atlasW, (ay + 0.5) / atlasH },
+    body = { (ax + 3.5) / atlasW, (ay + 2.5) / atlasH },
+    light = { (ax + 6.5) / atlasW, (ay + 1.5) / atlasH },
+  }
+  local grain = {
+    { (ax + 0.5) / atlasW, (ay + 7.5) / atlasH },
+    { (ax + 7.5) / atlasW, (ay + 7.5) / atlasH },
+    { (ax + 7.5) / atlasW, (ay + 0.5) / atlasH },
+    { (ax + 0.5) / atlasW, (ay + 0.5) / atlasH },
+  }
+  local quads = S.objectQuads
+  local function quad(a, b, c, d, tone, shade, textured)
+    local p = uv[tone]
+    local q = { a, b, c, d, u = p[1], v = p[2], shade = shade,
+                legendarySign = true }
+    if textured then q.uv = grain end
+    quads[#quads + 1] = q
+  end
+  local function box(xa, ya, za, xb, yb, zb, textured)
+    quad({xa,ya,zb},{xb,ya,zb},{xb,yb,zb},{xa,yb,zb},"body",0.96,textured)
+    quad({xb,ya,za},{xa,ya,za},{xa,yb,za},{xb,yb,za},"dark",0.72,textured)
+    quad({xa,yb,za},{xb,yb,za},{xb,yb,zb},{xa,yb,zb},"light",1.00,textured)
+    quad({xa,ya,za},{xa,ya,zb},{xa,yb,zb},{xa,yb,za},"dark",0.80,false)
+    quad({xb,ya,zb},{xb,ya,za},{xb,yb,za},{xb,yb,zb},"body",0.88,false)
+  end
+
+  for _, node in ipairs(cells) do
+    Budget.tick()
+    local x, z = node.cx * 16 + 8, node.cy * 16 + 8
+    -- Exact corrected TEST437 placement: all timber sits behind or outside
+    -- the forward authored slab and therefore cannot cover its white pixels.
+    box(x - 6.8, 0.0, z - 1.25, x - 4.7, 10.0, z + 2.65, true)
+    box(x + 4.7, 0.0, z - 1.25, x + 6.8, 10.0, z + 2.65, true)
+    box(x - 8.2, 5.7, z - 1.05, x - 6.4, 15.8, z + 2.85, true)
+    box(x + 6.4, 5.7, z - 1.05, x + 8.2, 15.8, z + 2.85, true)
+    box(x - 8.2, 14.6, z - 1.05, x + 8.2, 16.4, z + 2.85, true)
+    box(x - 8.2, 5.7, z - 1.05, x + 8.2, 7.4, z + 2.85, true)
   end
   return true
 end
@@ -495,6 +565,7 @@ function Structures.forMap(map)
 
   -- ---- profile-pinned billboards (signs): forced per-pixel slabs ----
   if data then
+    Structures.buildLegendarySigns(S, map, x0, x1, y0, y1, data)
     local seenB = {}
     for ty = y0, y1 do
       for tx = x0, x1 do
@@ -1460,6 +1531,17 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
     gsig = table.concat(g, ",")
   end
   local tsid = tostring(map.tileset.id or map.tileset.image or "?")
+  local mapKey = map.id or (map.def and map.def.id) or tostring(map)
+  local saplings = rawget(_G, "__ds_sapling_cells") or {}
+  _G.__ds_sapling_cells = saplings
+  local priorSaplings = saplings[mapKey]
+  local rounds = rawget(_G, "__ds_round_cells") or {}
+  _G.__ds_round_cells = rounds
+  rounds[mapKey] = rounds[mapKey] or {}
+  if priorSaplings then
+    for cellKey in pairs(priorSaplings) do rounds[mapKey][cellKey] = nil end
+  end
+  saplings[mapKey] = {}
 
   -- the stump class's drawn-ellipse height, hand-authored per tileset
   -- (the profile's stump_cap, in art rows), and the can class's three: the
@@ -1620,6 +1702,8 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
         local tall = s.class == "can" and canHeight or nil
         local well = s.class == "can" and canWell or nil
         local taper = s.class == "can" and canTaper or nil
+        local enhancedSapling = s.class == "sapling"
+                                and CommunityVisuals.customCutTrees()
         local ground = false
         if data then
           local sig = tsid .. (cap and ("|c" .. cap) or "")
@@ -1643,6 +1727,7 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
             and S.tileAt[keyOf(cx * 2 + 1, cy * 2 + 1)] == 81
           if granitePillar then sig = sig .. "|community_granite_pillar_v1" end
           if communityTree then sig = sig .. "|community_n64_memory_tree_v1" end
+          if enhancedSapling then sig = sig .. "|community_cut_tree_test47" end
           local tpl = roundCache[sig]
           if not tpl then
             local tq, tbg = roundTemplate(S, map, data, cx, cy, groundTiles, 16, cap, nil, nil, base, tall, well, taper, true)
@@ -1666,6 +1751,19 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
             local mk = map.id or (map.def and map.def.id) or tostring(map)
             reg[mk] = reg[mk] or {}
             reg[mk][cx .. "|" .. cy] = lift
+          end
+          if enhancedSapling then
+            -- TEST455's proven young-tree handoff, plus the Battle Art-only
+            -- communityTree marker so ChunkMesher publishes the true base to
+            -- CommunityFlora's registry rather than the granite-pillar one.
+            local lift = 10
+            stamp.lift = lift
+            stamp.hideCrown = true
+            stamp.keepTree = true
+            stamp.communityTree = true
+            rounds[mapKey][cx .. "|" .. cy] = lift
+            saplings[mapKey][cx .. "|" .. cy] = true
+            _G.__ds_tree_lift = true
           end
           S.roundStamps[#S.roundStamps + 1] = stamp
         end

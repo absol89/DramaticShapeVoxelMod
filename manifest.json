@@ -1,7 +1,7 @@
 {
   "id": "BATTLE_ART_VOXEL_FORK",
-  "name": "BATTLE ART VOXEL FORK",
-  "version": "1.10.2",
+  "name": "BATTLE ART VOXEL FORK - TEST49 Select Camera Crash Fix",
+  "version": "1.10.0-test49-select-camera-log-hotfix-compat253",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
@@ -15,13 +15,12 @@
     "DRAMATIC_SHAPE",
     "DRAMALESS_SHAPE",
     "potato_voxel",
-	"STADIUM2_OVERWORLD_MODELS",
 	"VOXEL_ASCENDANT"
   ],
   "permissions": [
     "engine_internals"
   ],
   "affects_link": false,
-  "description": "Adds generations of sprites to 3D-battles, with either a voxel background, or nostalgic arena fill options like white, or gen6 location art. Added new provider api things to allow stadium mods and other UI mods to use Battle Art sprites, and handle battle options and imports. Press 3 to toggle voxel modes, or check in the options menu for VOXEL: Full, 15, 35, 50, 75, OFF. World fill is a cyan, dark or black filler, which can be turned off if provided by Kanto First Person. That mod needs to be at version 1.60 or newer, and you need to add the battle art version you use to their main.lua in tested versions.",
+  "description": "Battle Art build for Gen1Recomp 0.2.53. TEST49 preserves TEST48's Select/Back camera ladder, TEST47's supported city sapling and all approved visual, cave, battle-camera, capture/audio, Poké Ball, granite-pillar, sign and world-prop work. It removes the optional logger dependency that crashed after a camera step, so Select/Back safely cycles 15, 35, 50 and 75 degree tilts, first person, third person and off during normal overworld gameplay.",
   "github": "absol89/DramaticShapeVoxelMod"
 }

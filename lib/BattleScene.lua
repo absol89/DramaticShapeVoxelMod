@@ -47,10 +47,352 @@ local Gen6Backdrop = V.require("Gen6Backdrop")
 local Images = V.require("BackdropImage")
 local BossBackdrop = V.require("BossBackdrop")
 local AntiAlias = V.require("AntiAlias")
+local CommunityFlora = V.require("CommunityFlora")
+local CharacterRenderers = V.require("CharacterRenderers")
 local PaletteFX = require("src.render.PaletteFX")
 local Map = require("src.world.Map")
 
 local BattleScene = {}
+BattleScene.capture = nil
+
+-- ------- NORMAL BATTLE 3D POKE BALL -- TEST2
+--
+-- Unlike LET'S GO, a normal Gen 1 throw is driven by BattleState.ballChain.
+-- TEST2 mirrors that chain with the SAME real Pokeball prop used by CatchThrow.
+-- The vanilla 2D ball is intentionally left intact for this test: the goal is
+-- to prove the event timing + 3D draw path before suppressing the old sprite.
+local Pokeball = V.require("Pokeball")
+local PokeballSettings = V.require("PokeballSettings")
+-- TEST64B: this local must be declared HERE, before every function that uses it.
+-- startNormalBall(), normalBallTick(), and monCards() now all close over the
+-- exact same normalBall upvalue.
+local normalBall = nil
+
+function BattleScene.startNormalBall(ballId, caught, shakes, owner)
+  if not PokeballSettings.active() then return false end
+  -- Never compete with the dedicated LET'S GO capture renderer.
+  if BattleScene.capture then return false end
+  -- New throw owns the slot; clear any retained successful ball from the
+  -- previous encounter/throw before creating the next prop.
+  normalBall = nil
+  local ok, ball = pcall(Pokeball.new, ballId or "POKE_BALL")
+  if not ok or not ball then return false end
+  normalBall = {
+    ball = ball,
+    id = ballId or "POKE_BALL",
+    caught = caught and true or false,
+    shakes = tonumber(shakes) or 0,
+    t = 0,
+    last = nil,
+    shakeDone = 0,
+    phase = "throw",
+    finished = false,
+    captureOpened = false,
+    captureClosed = false,
+    caughtEvent = false,
+    escapeEvent = false,
+    captureFxT = 0,
+    hideEnemyForCapture = false,
+    postCloseHideT = nil,
+    owner = owner, -- TEST66: owning BattleState, shared with Stadium Battle FX
+  }
+  ball.spin = 5.0
+  ball.tumble = 8.0
+  return true
+end
+
+local function clearExternalIntake(n)
+  local owner = n and n.owner
+  if type(owner) == "table" then
+    owner.dramaticShape3DBallIntake = nil
+    owner.dramaticShape3DBallHide = nil
+  end
+end
+
+function BattleScene.cancelNormalBall()
+  clearExternalIntake(normalBall)
+  normalBall = nil
+end
+
+function BattleScene.finishNormalBattleBall()
+  clearExternalIntake(normalBall)
+  normalBall = nil
+end
+
+-- TEST19: sync the real 3D prop to the engine's capture sub-animations.
+function BattleScene.normalBallAnimEvent(moveId)
+  local n = normalBall
+  if not (n and n.ball) then return false end
+
+  if moveId == "POOF_ANIM" or moveId == "HIDEPIC_ANIM" then
+    if not n.captureOpened then
+      n.captureOpened = true
+      n.captureClosed = false
+      n.phase = "capture_open"
+      n.captureFxT = PokeballSettings.captureDuration()
+      n.ball:open()
+    end
+    return true
+  end
+
+  if moveId == "SHAKE_ANIM" then
+    -- TEST42: one SHAKE_ANIM contains every capture shake. Enter the closed,
+    -- grounded state here, but do not rock yet: AnimPlayer emits one
+    -- SFX_TINK event for each real shake, after any animation load frames.
+    -- LegendaryPokeballs forwards those timed events below.
+    n.phase = "shake_wait"
+    n.captureOpened = true
+    n.captureClosed = true
+    n.captureFxT = 0
+    n.hideEnemyForCapture = true
+    n.ball:close()
+    return true
+  end
+
+  if moveId == "SHOWPIC_ANIM" and not n.caught then
+    n.hideEnemyForCapture = false
+    n.postCloseHideT = nil
+    if not n.escapeEvent then
+      n.escapeEvent = true
+      n.escapePendingT = 0.04
+      n.phase = "escape_pending"
+    end
+    return true
+  end
+
+  return false
+end
+
+-- TEST42: AnimPlayer:pollEffects exposes SFX_TINK on the exact 60 Hz frame
+-- that BattleState plays the native shake sound. There can be several of
+-- these inside one SHAKE_ANIM, so each event owns one and only one 3D rock.
+function BattleScene.normalBallTimedEvent(effect)
+  local n = normalBall
+  if not (n and n.ball) then return false end
+  if effect ~= "SFX_TINK" or n.shakeDone >= n.shakes then return false end
+
+  n.phase = "shake"
+  n.captureOpened = true
+  n.captureClosed = true
+  n.captureFxT = 0
+  n.hideEnemyForCapture = true
+  n.ball:close()
+  n.shakeDone = n.shakeDone + 1
+  n.ball:rock((n.shakeDone % 2 == 1) and 1 or -1)
+  return true
+end
+
+function BattleScene.normalBallCaughtEvent()
+  local n = normalBall
+  if not (n and n.ball and n.caught) then return false end
+  if n.caughtEvent then return true end
+
+  n.caughtEvent = true
+  n.finished = true
+  n.phase = "caught"
+  n.ball:close()
+  n.ball.spin, n.ball.tumble = 0, 0
+  n.ball:catchClick()
+  return true
+end
+
+local function normalBallTick(arena, groundY)
+  local n = normalBall
+  if n and not PokeballSettings.active() then
+    BattleScene.cancelNormalBall()
+    return
+  end
+  if not (n and n.ball and arena and arena.player and arena.enemy) then return end
+
+  local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.clock()
+  local dt = n.last and math.max(0, math.min(0.08, now - n.last)) or (1/60)
+  n.last = now
+  n.t = n.t + dt
+
+  -- TEST56: Pokeball.lua can now safely know whether it is actually airborne.
+  n.ball.phase = n.phase
+  if n.captureFxT and n.captureFxT > 0 then
+    n.captureFxT = math.max(0, n.captureFxT - dt)
+
+    -- TEST63: the Pokemon now physically shrinks and travels into the open
+    -- ball during the full intake window. Do not blink it out halfway through.
+    -- Hide only when it is essentially at the ball mouth.
+    if n.captureOpened and not n.captureClosed and n.captureFxT <= 0.035 then
+      n.hideEnemyForCapture = true
+    end
+
+    if n.captureFxT <= 0 and n.captureOpened and not n.captureClosed then
+      n.hideEnemyForCapture = true
+    end
+  end
+
+  if n.postCloseHideT then
+    n.postCloseHideT = n.postCloseHideT - dt
+    if n.postCloseHideT <= 0 then
+      n.postCloseHideT = nil
+      n.hideEnemyForCapture = true
+    end
+  end
+
+  n.ball:update(dt)
+
+  -- TEST66: public visual bridge on the live BattleState.
+  -- Stadium Battle FX owns the skinned 3D Pokemon, so publish the intake
+  -- choreography where that independent renderer can read it without either
+  -- mod requiring the other's private Lua namespace.
+  if type(n.owner) == "table" then
+    if n.captureOpened and not n.captureClosed and n.captureFxT and n.captureFxT > 0 then
+      local remain = math.max(0, math.min(1, n.captureFxT / PokeballSettings.captureDuration()))
+      local raw = 1 - remain
+      local q = raw * raw * (3 - 2 * raw)
+      n.owner.dramaticShape3DBallIntake = {
+        active = true,
+        progress = q,
+        scale = math.max(0.055, 1 - 0.945*q),
+        pull = q*q,
+        hide = n.hideEnemyForCapture == true,
+        ballX = n.ball.pos[1],
+        ballY = n.ball.pos[2] + (Pokeball.R or 2.2)*0.18*(n.ball.scale or 1),
+        ballZ = n.ball.pos[3],
+      }
+    else
+      n.owner.dramaticShape3DBallIntake = nil
+    end
+
+    -- TEST70: keep the visible enemy hidden AFTER the active intake bridge
+    -- clears. In TEST69 the bridge became nil on the exact close frame, so
+    -- Stadium recomputed mon.visible/full scale for a frame before the
+    -- engine's own capture hide caught up, causing the obvious "pop".
+    --
+    -- Hold the hide through shakes / successful catch. Release it only when
+    -- the failed-capture escape sequence begins.
+    local escaping = n.phase == "escape" or n.phase == "escape_pending"
+                     or n.escapeEvent == true
+    n.owner.dramaticShape3DBallHide =
+      (n.hideEnemyForCapture == true and not escaping) and true or nil
+  end
+
+  -- TEST21: SHOWPIC begins slightly before the Pokemon is visibly out.
+  -- Delay only the 3D breakout so those two visual moments land together.
+  if n.escapePendingT then
+    n.escapePendingT = n.escapePendingT - dt
+    if n.escapePendingT <= 0 then
+      n.escapePendingT = nil
+      n.finished = true
+      n.phase = "escape"
+      n.ball:burst()
+      if n.ball.breakoutBurst then n.ball:breakoutBurst() end
+    end
+  end
+
+  local p, e = arena.player, arena.enemy
+  local R = (Pokeball.R or 2.2) * ((n.ball and n.ball.scale) or 1)
+
+  -- TEST105: normal-battle catch ball starts from the persistent 3D trainer.
+  -- RED 3D PLAYER already exports the live battle hand world position every
+  -- frame as RED3D_BATTLE_HAND_WORLD.  Use only X/Z from that point for the
+  -- launch origin, while preserving Dramatic Shape's proven enemy target,
+  -- catch timing, opening, smoke, shakes and outcome choreography.
+  --
+  -- If the trainer bridge is absent for any reason, fall back to the stock
+  -- player battle slot so this remains safe with other character setups.
+  local startX, startZ = p[1], p[2]
+  local startY = groundY + R + 6.5
+  local ashHand = CharacterRenderers.battleHandWorld()
+                  or rawget(_G, "RED3D_BATTLE_HAND_WORLD")
+  if type(ashHand) == "table"
+      and tonumber(ashHand[1]) and tonumber(ashHand[3]) then
+    startX = tonumber(ashHand[1])
+    startZ = tonumber(ashHand[3])
+    -- Keep the launch around Ash's hand height when available, but clamp it
+    -- above the arena so a stale/odd skeleton sample cannot bury the ball.
+    if tonumber(ashHand[2]) then
+      startY = math.max(groundY + R + 4.0, tonumber(ashHand[2]))
+    end
+  end
+
+  -- Same 0.72s throw arc, now from Ash to the enemy instead of from the
+  -- active Pokemon slot.  The longer travel distance should make the arc
+  -- read naturally with Ash standing far in the background.
+  local throwT = 0.72
+  -- TEST41: POOF/HIDEPIC is the engine's real contact/intake event and owns
+  -- the matching native sound. If it arrives before the cosmetic 0.72s arc
+  -- ends, finish the arc immediately instead of flying open; if it arrives
+  -- later, hold the closed ball at contact rather than starting the visual
+  -- intake ahead of the audio.
+  if n.t < throwT and not n.captureOpened then
+    local q = n.t / throwT
+    local s = q*q*(3-2*q)
+    n.ball.pos[1] = startX + (e[1]-startX) * s
+    n.ball.pos[3] = startZ + (e[2]-startZ) * s
+    n.ball.pos[2] = startY + ((groundY + R + 6.5)-startY) * s
+                    + math.sin(math.pi*q) * 10
+    n.ball.yaw = math.atan2((Voxel3D.eye and Voxel3D.eye[1] or 0)-n.ball.pos[1],
+                            (Voxel3D.eye and Voxel3D.eye[3] or 1)-n.ball.pos[3])
+    return
+  end
+
+  -- The cosmetic throw is complete, but contact is not guessed from this
+  -- module's clock anymore. Hold at the target until the engine announces
+  -- POOF/HIDEPIC through normalBallAnimEvent().
+  if not n.captureOpened then
+    n.ball.spin, n.ball.tumble = 0, 0
+    n.ball.pos[1], n.ball.pos[3] = e[1], e[2]
+    n.ball.pos[2] = groundY + R + 6.5
+    n.ball.yaw = math.atan2((Voxel3D.eye and Voxel3D.eye[1] or 0)-n.ball.pos[1],
+                            (Voxel3D.eye and Voxel3D.eye[3] or 1)-n.ball.pos[3])
+    return
+  end
+
+  if n.phase == "capture_open" and n.captureFxT and n.captureFxT > 0 then
+    n.ball.pos[1], n.ball.pos[3] = e[1], e[2]
+    n.ball.pos[2] = groundY + R + 6.5
+    n.ball.yaw = math.atan2((Voxel3D.eye and Voxel3D.eye[1] or 0)-n.ball.pos[1],
+                            (Voxel3D.eye and Voxel3D.eye[3] or 1)-n.ball.pos[3])
+    return
+  end
+
+  -- Rest under the foe after the intake beat.
+  -- choreography; later builds will sync opening/beam/breakout to vanilla.
+  n.ball.spin, n.ball.tumble = 0, 0
+  n.ball.pos[1], n.ball.pos[3] = e[1], e[2]
+  n.ball.pos[2] = groundY + R
+  n.ball.yaw = math.atan2((Voxel3D.eye and Voxel3D.eye[1] or 0)-n.ball.pos[1],
+                          (Voxel3D.eye and Voxel3D.eye[3] or 1)-n.ball.pos[3])
+
+  local after = n.t - throwT
+  -- TEST41: SHAKE_ANIM now drives every visible rock above. Retain only a
+  -- generous renderer-failure deadline for failed captures; successful
+  -- catches wait for BattleState's real locked-ball transition below.
+  local endAt = 0.55 + n.shakes*1.05 + 0.35
+
+  -- A successful catch no longer fires its flash/stars on this guessed
+  -- deadline. LegendaryPokeballs forwards BattleState's lockedBall edge to
+  -- normalBallCaughtEvent(), which is also where the engine confirms the
+  -- catch and plays its sound.
+
+  -- TEST19: engine events now own the visible finish. Keep a generous fallback
+  -- only so an unusual backend can never strand a failed 3D ball forever.
+  if not n.caught and not n.escapeEvent and after >= endAt + 1.60 then
+    n.escapeEvent = true
+    n.finished = true
+    n.phase = "escape"
+    n.ball:burst()
+  end
+
+  -- TEST4 lifecycle:
+  -- A successful catch must not disappear on a guessed wall-clock timer.
+  -- Keep it alive until BattleScene reset/new throw explicitly clears it.
+  -- Failed throws can still self-clean shortly after breakout.
+  if not n.caught and n.escapeEvent then
+    local life = endAt + 2.40
+    if after > life then normalBall = nil end
+  end
+end
+
+local function normalBallSig()
+  return normalBall and normalBall.ball and normalBall.ball:signature() or ""
+end
 
 -- The GB frame the battle screen is drawn in, and the frame BattleCam's rig
 -- is solved against.
@@ -219,14 +561,43 @@ local function monCards(arena, groundY, textures)
   for _, side in ipairs({ "enemy", "player" }) do
     local tex = textures[side]
     local cell = (side == "player") and arena.player or arena.enemy
+    if tex and tex.suppressCard then tex = nil end
+    if side == "enemy" and normalBall and normalBall.hideEnemyForCapture then
+      tex = nil
+    end
     if tex and tex.canvas and cell then
       local mirror = (side == "player") and not tex.trainer
                      and not tex.noMirror
+      local model = monMatrix(tex, cell[1], groundY, cell[2], mirror)
+      -- Shrink the opponent about its chest and pull it into the actual 3D
+      -- ball mouth during the intake window. This affects only the rendered
+      -- card; the battle's authoritative Pokemon object is untouched.
+      if side == "enemy" and normalBall and normalBall.captureOpened
+          and not normalBall.captureClosed
+          and normalBall.captureFxT and normalBall.captureFxT > 0
+          and normalBall.ball then
+        local duration = math.max(0.001, PokeballSettings.captureDuration())
+        local raw = 1 - math.max(0, math.min(1,
+          normalBall.captureFxT / duration))
+        local q = raw * raw * (3 - 2 * raw)
+        local k = math.max(0.06, 1 - 0.94 * q)
+        local ax, ay, az = cell[1], groundY + 8, cell[2]
+        local bx = normalBall.ball.pos[1]
+        local by = normalBall.ball.pos[2]
+          + (Pokeball.R or 2.2) * 0.18 * (normalBall.ball.scale or 1)
+        local bz = normalBall.ball.pos[3]
+        local pullQ = q * q
+        local shrink = Mat4.mul(Mat4.translate(ax, ay, az),
+          Mat4.mul(Mat4.scale(k, k, k), Mat4.translate(-ax, -ay, -az)))
+        model = Mat4.mul(Mat4.translate((bx - ax) * pullQ,
+                                       (by - ay) * pullQ,
+                                       (bz - az) * pullQ),
+                         Mat4.mul(shrink, model))
+      end
       out[#out + 1] = { tex = tex.canvas,
                         side = side,
                         noDayTint = tex.noDayTint,
-                        model = monMatrix(tex, cell[1], groundY, cell[2],
-                                          mirror) }
+                        model = model }
     end
   end
   return out
@@ -253,6 +624,9 @@ local function shadowSignature(state, arena, terrain, nbMesh, visuals,
                   -- from somewhere new must be re-cast from there
                   math.floor(ShadowMap.KX * 128),
                   math.floor(ShadowMap.KZ * 128) }
+  if normalBall and normalBall.ball then
+    parts[#parts + 1] = "legendaryBall:" .. normalBallSig()
+  end
   for _, visual in ipairs(visuals or {}) do
     parts[#parts + 1] = tostring(visual.mesh)
   end
@@ -271,6 +645,8 @@ local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
   if not ShadowMap.available() then return end
   local sig = shadowSignature(state, arena, terrain, nbMesh, visuals,
                               nbVisuals, token, #neighbors)
+  sig = sig .. "|community-tree:"
+    .. CommunityFlora.shadowSignature(state, arena.mid[1], arena.mid[2])
   if not ShadowMap.stale(sig) then return end
   if not ShadowMap.begin(cx, cy, vw, vh) then return end
 
@@ -306,6 +682,8 @@ local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
     ShadowMap.draw(ChunkMesher.flowers(nb.map), atlasFor(nb.map),
                    ShadowMap.snug(Mat4.translate(nb.ox, 0, nb.oy)))
   end
+  pcall(CommunityFlora.castShadows, state, ShadowMap, Mat4,
+        arena.mid[1], arena.mid[2])
 
   -- the mons themselves, as the same cards the camera will see. Their alpha
   -- is the silhouette, so what lands on the ground is the shape of the
@@ -318,26 +696,6 @@ local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
   -- are drawn below. That makes the contract symmetric: they neither receive
   -- somebody else's shadow nor cast/self-cast one of their own, independent
   -- of the selected arena fill.
-
-  -- Stadium model shadows (3D Pokemon models) -- always cast, even in flat fill
-  if type(models) == "table" and next(models) then
-    ShadowMap.sprites(true)
-    for side, placement in pairs(models) do
-      local ok, result = pcall(function()
-        if placement.instance and placement.instance.drawShadow then
-          return placement.instance:drawShadow({
-            modelMatrix = placement.modelMatrix,
-            lightViewProjection = ShadowMap.clipVP,
-          })
-        end
-      end)
-      if not ok then
-        -- Shadow casting failed for this model, fall back to card shadow
-      end
-    end
-    ShadowMap.sprites(false)
-  end
-
   if not UiBackplates.spritesUnlit() then
     ShadowMap.sprites(true)
     local modelShadows = {}
@@ -353,6 +711,10 @@ local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
       end
     end
     ShadowMap.sprites(false)
+  end
+
+  if normalBall and normalBall.ball then
+    pcall(normalBall.ball.cast, normalBall.ball, ShadowMap)
   end
 
   ShadowMap.finish(sig)
@@ -488,6 +850,7 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
   end
 
   local groundY = BattleScene.groundY(host, arena)
+  normalBallTick(arena, groundY)
   local cam, pitch
   local externalEye = externalCamera and externalCamera.eye
   local externalFocus = externalCamera and externalCamera.focus
@@ -533,12 +896,17 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
   Voxel3D.camera = cam
   Voxel3D.viewProjection(cx, cy, vw, vh)
   -- A Battle Presentation host supplies its independently selected actor
-  -- renderer here. In that mode the native cards must not also enter either
-  -- the shadow map or the colour pass.
+  -- renderer here. In that mode native cards ordinarily stay out of both the
+  -- shadow map and colour pass. A sprite-only provider can opt selected sides
+  -- back in through drawActors.cards; providerRender has already filtered the
+  -- texture table to those sides, so there is no duplicate host battler.
   local hostedActors = drawActors and true or false
   local drawActorPass = type(drawActors) == "table" and drawActors.draw
     or (type(drawActors) == "function" and drawActors or nil)
-  local cards = hostedActors and {} or monCards(arena, groundY, textures)
+  local hostedCards = type(drawActors) == "table"
+                      and type(drawActors.cards) == "table"
+  local cards = (not hostedActors or hostedCards)
+                and monCards(arena, groundY, textures) or {}
   local stadium = hostedActors and {}
     or StadiumModels.placements(arena, groundY, textures, battle)
   Voxel3D.camera = nil
@@ -643,6 +1011,9 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
                      Mat4.translate(nb.ox, 0, nb.oy))
       end
     end
+    Voxel3D.glass(false)
+    pcall(CommunityFlora.battleProps, host, neighbors, arena)
+    Voxel3D.glass(true)
     end
     -- The mons, standing on their tiles. Depth-tested like everything else,
     -- so a ledge or a tree between the camera and a Pokemon really is in
@@ -738,22 +1109,64 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
       if failedModels[card.side] then drawCard(card) end
     end
 
-    -- A companion 3D-player mod may own the trainer for the complete staged
-    -- battle. Draw it while this arena's camera and depth target are active.
-    if rawget(_G, "RED3D_TRAINER_INTRO_ACTIVE") == true then
+    -- Legendary standing-trainer bridge. The companion 3D-player mod exports
+    -- this callback from the same live voxel renderer, while OverworldBattle
+    -- publishes the normal-battle lifetime above. Calling it here keeps the
+    -- selected character depth-tested in the arena without changing Pokemon
+    -- placement, combat state, the camera, or Legendary Pokeball ownership.
+    local providerTrainer = false
+    if CharacterRenderers.battleActive() then
+      providerTrainer = CharacterRenderers.first("drawBattleTrainer", {
+        state = state, battle = battle, arena = arena, groundY = groundY,
+        host = { Voxel3D = Voxel3D, Mat4 = Mat4,
+                 ShadowMap = ShadowMap },
+        setHandWorld = function(value)
+          CharacterRenderers.setBattleHand(value)
+        end,
+      })
+    end
+    if not providerTrainer
+        and rawget(_G, "RED3D_TRAINER_INTRO_ACTIVE") == true then
       local direct = rawget(_G, "RED3D_DIRECT_BATTLE_DRAW")
       if type(direct) == "function" then
         _G.RED3D_BATTLE_ART_DIRECT_CALLS =
           (tonumber(_G.RED3D_BATTLE_ART_DIRECT_CALLS) or 0) + 1
         local okDirect, didDraw = pcall(direct, arena, groundY,
-                                        Voxel3D, Mat4)
+                                         Voxel3D, Mat4)
         _G.RED3D_BATTLE_ART_DIRECT_RESULT = okDirect
           and (didDraw and "DRAW OK" or "NO DRAW") or "CALL ERROR"
       end
-    elseif rawget(_G, "RED3D_DIRECT_BATTLE_STATUS") == "DRAW OK" then
+    elseif not providerTrainer
+        and rawget(_G, "RED3D_DIRECT_BATTLE_STATUS") == "DRAW OK" then
       _G.RED3D_DIRECT_BATTLE_STATUS = "BATTLE DONE"
     end
 
+    -- The Legendary capture prop shares this scene's depth buffer, camera,
+    -- lighting and shadows. Its intake beam follows the opponent's moving
+    -- chest so there is no flat duplicate ball or detached overlay.
+    if normalBall and normalBall.ball then
+      pcall(normalBall.ball.draw, normalBall.ball, BattleBillboard.PULL)
+      if normalBall.captureFxT and normalBall.captureFxT > 0
+          and arena and arena.enemy then
+        local duration = math.max(0.001, PokeballSettings.captureDuration())
+        local remain = math.max(0, math.min(1,
+          normalBall.captureFxT / duration))
+        local raw = 1 - remain
+        local q = raw * raw * (3 - 2 * raw)
+        local ax, ay, az = arena.enemy[1], groundY + 8, arena.enemy[2]
+        local bx = normalBall.ball.pos[1]
+        local by = normalBall.ball.pos[2]
+          + (Pokeball.R or 2.2) * 0.18 * (normalBall.ball.scale or 1)
+        local bz = normalBall.ball.pos[3]
+        local pullQ = q * q
+        pcall(normalBall.ball.drawBeam, normalBall.ball,
+          ax + (bx - ax) * pullQ,
+          ay + (by - ay) * pullQ,
+          az + (bz - az) * pullQ,
+          5.20 - 3.10 * q, 1.00 - 0.62 * q,
+          BattleBillboard.PULL)
+      end
+    end
     Voxel3D.glass(true)
     Voxel3D.seams(true)
     if flashing then Voxel3D.flatten(nil) end

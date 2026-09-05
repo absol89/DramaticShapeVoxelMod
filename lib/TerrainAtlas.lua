@@ -436,6 +436,58 @@ local COURT_ART = {
   "DBBBLBDD", "DBBBBBBD", "DBLBBBBD", "DDDDDDDD",
 }
 
+-- TEST36 warm brick / quiet cap atlas. Keep every ordinary top donor solid so
+-- the source-tile grid cannot become a confetti field. ChunkMesher supplies
+-- broad fixed facets instead. Tile 2 retains four cave-only colour swatches
+-- for the restored TEST25/26 cut-stone wall courses.
+local CAVE_BEDROCK_ART = {
+  "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB",
+  "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB",
+}
+local CAVE_FLOOR_ART = {
+  CAVE_BEDROCK_ART, CAVE_BEDROCK_ART, CAVE_BEDROCK_ART,
+}
+local CAVE_LEDGE_ART = {
+  CAVE_BEDROCK_ART, CAVE_BEDROCK_ART, CAVE_BEDROCK_ART,
+}
+local CAVE_WALL_ART = {
+  {
+    -- Tile 2 is an atlas-only four-colour swatch for raised wall geometry.
+    "DSBLBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB",
+    "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB",
+  },
+  CAVE_BEDROCK_ART,
+  CAVE_BEDROCK_ART,
+}
+local CAVE_FLOOR_VARIANT = { [32]=1, [33]=2, [42]=3 }
+local CAVE_LEDGE_VARIANT = { [5]=1, [41]=2 }
+local CAVE_WALL_VARIANT = { [2]=1, [3]=2, [12]=3 }
+local CAVE_WATER_ART = {
+  "SSSSSSSS", "SSBSSSSS", "SSSSSLSS", "SSSSSSSS",
+  "SLSSSSSS", "SSSSBSSS", "SSSSSSSS", "SSSBSSLS",
+}
+
+local CAVE_EARTH = {
+  dark={.145,.098,.080,1}, shadow={.205,.145,.112,1},
+  body={.285,.205,.155,1}, light={.355,.275,.215,1},
+}
+local CAVE_SHELF = {
+  dark={.125,.085,.073,1}, shadow={.205,.142,.118,1},
+  body={.305,.220,.178,1}, light={.395,.300,.240,1},
+}
+local CAVE_ROCK = {
+  dark={.095,.065,.061,1}, shadow={.180,.120,.108,1},
+  body={.285,.195,.162,1}, light={.375,.285,.225,1},
+}
+local CAVE_WATER = {
+  dark={.055,.085,.120,1}, shadow={.080,.135,.185,1},
+  body={.115,.190,.245,1}, light={.180,.285,.345,1},
+}
+local CAVE_HOLE = {
+  [1]={.365,.285,.230,1}, [2]={.255,.185,.150,1},
+  [3]={.140,.095,.085,1}, [4]={.025,.020,.024,1},
+}
+
 local PATH = {
   dark={.626,.566,.456,1}, shadow={.638,.578,.468,1},
   body={.650,.590,.480,1}, light={.662,.602,.492,1},
@@ -466,17 +518,19 @@ local function communityKey()
 end
 
 local function communityAtlas(map, colors, base, baked)
+  local tilesetId = map.tileset and map.tileset.id
+  local cave = tilesetId == "CAVERN"
   local enabled = CommunityVisuals.customGrass()
     or CommunityVisuals.customRoads() or CommunityVisuals.customWalls()
     or CommunityVisuals.customCourtyards()
-  if not enabled or not (map.tileset and map.tileset.id == "OVERWORLD") then
+  if not cave and (not enabled or tilesetId ~= "OVERWORLD") then
     return base, baked
   end
   if not (love.image and love.image.newImageData and love.graphics
           and love.graphics.newImage) then return base, baked end
 
   local perMap = map.renderer and map.renderer.gbcAtlas and map.id or ""
-  local key = map.tileset.image .. "#community#" .. communityKey()
+  local key = map.tileset.image .. "#community-test36-warm-brick-rough-cap#" .. communityKey()
     .. "#" .. paletteKey(colors or {}) .. perMap
   local held = community[key]
   if held then return held.image, held.data end
@@ -506,7 +560,62 @@ local function communityAtlas(map, colors, base, baked)
       end
     end
 
-    if CommunityVisuals.customWalls() then
+    local function recolor(tile, palette, raw)
+      if type(tile) ~= "number" or tile < 0 or tile >= total then return end
+      if not raw then return end
+      local ox, oy = (tile % perRow) * 8, math.floor(tile / perRow) * 8
+      for py = 0, 7 do
+        for px = 0, 7 do
+          local shade = shadeOf(raw:getPixel(ox + px, oy + py))
+          local c = palette[shade]
+          local _, _, _, alpha = data:getPixel(ox + px, oy + py)
+          data:setPixel(ox + px, oy + py, c[1], c[2], c[3], alpha)
+        end
+      end
+    end
+
+    if cave then
+      local shapes = V.require("TileShape").forMap(map)
+      local okRaw, raw = pcall(Assets.imageData, map.tileset.image)
+      if not okRaw then raw = nil end
+      for tile = 0, total - 1 do
+        local shape = shapes[tile]
+        local class = shape and shape.class
+        if class == "wall" then
+          local variant = CAVE_WALL_VARIANT[tile]
+            or ((tile % #CAVE_WALL_ART) + 1)
+          paint(tile, CAVE_WALL_ART[variant], CAVE_ROCK)
+        elseif class == "ledge" then
+          if tile == 21 or tile == 22 then
+            -- These are the drawn north/south stair plates. Preserve their
+            -- tread lines instead of replacing the whole tile with earth.
+            recolor(tile, CAVE_HOLE, raw)
+          else
+            local variant = CAVE_LEDGE_VARIANT[tile]
+              or ((tile % #CAVE_LEDGE_ART) + 1)
+            paint(tile, CAVE_LEDGE_ART[variant], CAVE_SHELF)
+          end
+        elseif class == "ground" then
+          if tile == 20 then
+            paint(tile, CAVE_WATER_ART, CAVE_WATER)
+          elseif tile == 47 or tile == 34 then
+            recolor(tile, CAVE_HOLE, raw)
+          else
+            local variant = CAVE_FLOOR_VARIANT[tile]
+              or ((tile % #CAVE_FLOOR_ART) + 1)
+            paint(tile, CAVE_FLOOR_ART[variant], CAVE_EARTH)
+          end
+        elseif class == "stair_e" or class == "stair_down_e"
+            or class == "relief" then
+          -- Preserve authored rung, stair and switch-plate silhouettes.
+          recolor(tile, CAVE_HOLE, raw)
+        end
+      end
+      -- Stable donor and four swatches used by cave side/perimeter meshes.
+      paint(2, CAVE_WALL_ART[1], CAVE_ROCK)
+    end
+
+    if not cave and CommunityVisuals.customWalls() then
       local shapes = V.require("TileShape").forMap(map)
       local masonry = MATERIAL[CommunityVisuals.wallColor()] or MATERIAL.granite
       for tile = 0, total - 1 do
@@ -517,12 +626,12 @@ local function communityAtlas(map, colors, base, baked)
       paint(13, ROCK_ART, masonry)
     end
 
-    if CommunityVisuals.customRoads() then
+    if not cave and CommunityVisuals.customRoads() then
       paint(57, PATH_ART, PATH)
       paint(60, WOOD_ART, WOOD)
     end
 
-    if CommunityVisuals.customCourtyards() then
+    if not cave and CommunityVisuals.customCourtyards() then
       -- The connected fence samples the same full TEST435 timber tile as the
       -- bridge. Keep that material available even when ROADS & BRIDGES stays
       -- on Battle Art; TEST2's four flat swatches produced the plain tan fence.
@@ -532,7 +641,7 @@ local function communityAtlas(map, colors, base, baked)
       paint(91, COURT_ART, COURT)
     end
 
-    if CommunityVisuals.customGrass() then
+    if not cave and CommunityVisuals.customGrass() then
       paint(44, GRASS_ART, GRASS)
       local tall = map.tileset.grassTile
       if type(tall) == "number" then tall = math.floor(tall) end
@@ -804,8 +913,10 @@ function TerrainAtlas.animate(map, colors, base, baked)
   -- on the tileset and palette alone, which is bounded by how many of those
   -- exist at all.
   local perMap = map.renderer and map.renderer.gbcAtlas and map.id or nil
+  local caveMaterial = map.tileset and map.tileset.id == "CAVERN"
+    and "#test36-warm-brick-rough-cap" or ""
   local key = map.tileset.image .. "#a#" .. paletteKey(colors or {})
-    .. "#community#" .. communityKey() .. (perMap or "")
+    .. "#community#" .. communityKey() .. caveMaterial .. (perMap or "")
   local entry = animated[key]
   if entry == nil then
     entry = newEntry(map, base, baked)

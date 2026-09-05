@@ -51,6 +51,8 @@ local function clearOwner(owner)
   owner._legendaryBallMove = nil
   owner._legendaryBallCaught = nil
   owner._legendaryBallCaughtFxSent = nil
+  owner._legendaryCaughtFanfareStarted = nil
+  owner._legendaryCaughtFanfareSource = nil
   owner._dsBallSequenceActive = nil
   owner._dsBallMove = nil
   owner._dsBallCaught = nil
@@ -119,6 +121,56 @@ function Bridge.install()
     BattleState.legendaryVisualsBallChain = true
   end
 
+  -- TEST43: the stock caught-message row starts Caught_Mon only after its
+  -- final letter has typed. Attach a play-once wrapper to that same row so
+  -- startMessage can begin the fanfare with the first visible letter; when
+  -- the row later reaches its native sound command it receives the already
+  -- running Source and cannot replay the jingle.
+  if type(BattleState.sayNextWaitSfx) == "function"
+      and not BattleState.legendaryVisualsCaughtFanfareQueue then
+    local previous = BattleState.sayNextWaitSfx
+    BattleState.sayNextWaitSfx = function(self, text, sfx, ...)
+      if staged() and self == activeOwner and self._legendaryBallCaught
+          and type(sfx) == "function" then
+        local function playOnce()
+          if self._legendaryCaughtFanfareStarted then
+            return self._legendaryCaughtFanfareSource
+          end
+          local source = sfx()
+          self._legendaryCaughtFanfareStarted = true
+          self._legendaryCaughtFanfareSource = source
+          return source
+        end
+
+        local result = previous(self, text, playOnce, ...)
+        local item = self.queue and self.nextInsert
+                     and self.queue[self.nextInsert]
+        if type(item) == "table" and item.waitForLearningSfx == playOnce then
+          item._legendaryCaughtFanfare = true
+        end
+        return result
+      end
+      return previous(self, text, sfx, ...)
+    end
+    BattleState.legendaryVisualsCaughtFanfareQueue = true
+  end
+
+  if type(BattleState.startMessage) == "function"
+      and not BattleState.legendaryVisualsCaughtFanfareStart then
+    local previous = BattleState.startMessage
+    BattleState.startMessage = function(self, item, ...)
+      if staged() and self == activeOwner and type(item) == "table"
+          and item._legendaryCaughtFanfare
+          and type(item.waitForLearningSfx) == "function" then
+        -- Fail open: if another audio mod rejects the early call, the native
+        -- end-of-text call remains armed and can retry exactly as before.
+        pcall(item.waitForLearningSfx)
+      end
+      return previous(self, item, ...)
+    end
+    BattleState.legendaryVisualsCaughtFanfareStart = true
+  end
+
   if type(AnimPlayer.start) == "function"
       and not AnimPlayer.legendaryVisualsBallStart then
     local previous = AnimPlayer.start
@@ -147,6 +199,34 @@ function Bridge.install()
       return previous(self, moveId, attackerIsPlayer, opts, ...)
     end
     AnimPlayer.legendaryVisualsBallStart = true
+  end
+
+  -- TEST42: SHAKE_ANIM is compiled once even when a catch rocks several
+  -- times. Its pollEffects stream contains one SFX_TINK on the precise frame
+  -- BattleState plays each native shake sound. Mirror those events into the
+  -- 3D prop without consuming or altering the engine's event table.
+  if type(AnimPlayer.pollEffects) == "function"
+      and not AnimPlayer.legendaryVisualsBallTimedEffects then
+    local previous = AnimPlayer.pollEffects
+    AnimPlayer.pollEffects = function(self, ...)
+      local events = previous(self, ...)
+      local owner = activeOwner
+      if owner and owner._legendaryBallSequence and staged()
+          and (owner._legendaryBallMove == "SHAKE_ANIM"
+               or owner._dsBallMove == "SHAKE_ANIM")
+          and type(events) == "table" then
+        local s = scene()
+        if s and s.normalBallTimedEvent then
+          for _, ev in ipairs(events) do
+            if type(ev) == "table" and ev.effect == "SFX_TINK" then
+              pcall(s.normalBallTimedEvent, ev.effect)
+            end
+          end
+        end
+      end
+      return events
+    end
+    AnimPlayer.legendaryVisualsBallTimedEffects = true
   end
 
   if type(BattleState.drawAnimLayer) == "function"

@@ -25,6 +25,16 @@ CommunityVisuals.trees = ModSetting.new(
   { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
 )
 
+CommunityVisuals.cutTrees = ModSetting.new(
+  "communityCutTrees", "CUT TREES",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
+)
+
+CommunityVisuals.signs = ModSetting.new(
+  "communitySigns", "SIGNS",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
+)
+
 CommunityVisuals.grass = ModSetting.new(
   "communityGrass", "GRASS",
   { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
@@ -49,6 +59,8 @@ CommunityVisuals.settings = {
   CommunityVisuals.pillars,
   CommunityVisuals.masonry,
   CommunityVisuals.trees,
+  CommunityVisuals.cutTrees,
+  CommunityVisuals.signs,
   CommunityVisuals.grass,
   CommunityVisuals.roads,
   CommunityVisuals.walls,
@@ -87,6 +99,14 @@ function CommunityVisuals.customTrees()
   return CommunityVisuals.trees:get() == "n64memory"
 end
 
+function CommunityVisuals.customCutTrees()
+  return CommunityVisuals.cutTrees:get() == "n64memory"
+end
+
+function CommunityVisuals.customSigns()
+  return CommunityVisuals.signs:get() == "n64memory"
+end
+
 
 function CommunityVisuals.customGrass()
   return CommunityVisuals.grass:get() == "n64memory"
@@ -115,6 +135,7 @@ function CommunityVisuals.invalidate()
   _G.__bav_granite_pillar_base = nil
   _G.__ds_round_cells = nil
   _G.__ds_round_base = nil
+  _G.__ds_sapling_cells = nil
   pcall(function() V.require("GranitePillars").invalidate() end)
   pcall(function() V.require("CommunityFlora").invalidate() end)
   pcall(function() V.require("TerrainAtlas").invalidate() end)

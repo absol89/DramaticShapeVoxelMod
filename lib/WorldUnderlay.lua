@@ -33,6 +33,7 @@ WorldUnderlay.setting = ModSetting.new(
 local COLORS = {
   cyan  = {   0 / 255,  71 / 255, 109 / 255, 1 }, -- #00476D
   black = {  24 / 255,  24 / 255,  24 / 255, 1 }, -- #181818
+  cave  = {  18 / 255,  12 / 255,  12 / 255, 1 }, -- deep earth below shafts
 }
 
 local DEFAULT_FILL = "cyan"
@@ -126,6 +127,9 @@ function WorldUnderlay.resolve(state, colors)
   if not WorldUnderlay.enabled() then return nil, "world:off" end
   local map = state and state.map
   local mapId = map and (map.id or (map.def and map.def.id))
+  if map and map.tileset and map.tileset.id == "CAVERN" then
+    return COLORS.cave, "cave:earth"
+  end
   if WorldUnderlay.selected() == "nature"
       and biomes.black and biomes.black[mapId] then
     return COLORS.black, "nature:black"

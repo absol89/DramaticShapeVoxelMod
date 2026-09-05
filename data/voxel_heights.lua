@@ -168,6 +168,7 @@ return {
     -- a round drawing stacked two cells high on one cell of plot (the
     -- Centers' potted plants): 32px of hull standing in its lower cell
     planter = 32,
+    sapling = 16,
     relief = 3,
     bookcase = 32,
     stair_e = 16,
@@ -228,6 +229,10 @@ return {
       -- black-outline segmented with the pixels the outline encloses
       -- kept, its drawn grass dither flooding away as background
       prop = { 45, 46, 61, 62 },
+      -- Metadata for TEST46's live A/B classification. TileShape keeps the
+      -- Battle Art `prop` pin above until CUT TREES is set to LEGENDARY
+      -- VISUALS, then resolves this exact quartet as the donor sapling class.
+      sapling_tiles = { 45, 46, 61, 62 },
       -- the ground painted under those pinned props, by the prop tile's
       -- own id: the bush stands on plain grass ($2C) -- the very tile
       -- Cut leaves behind (field.cutTreeSwaps' after-blocks) -- rather
