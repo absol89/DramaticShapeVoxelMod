@@ -64,6 +64,20 @@ for index, mode in ipairs({ "BOTH", "TEXTBOX", "HUD", "HIDE" }) do
     end
   end
 end
+-- The same gates apply to Stadium's native text pass in every arena mode.
+for _,fill in ipairs({"OFF","WHITE","BLUE","GEN6","PNG"}) do
+  for i,value in ipairs(ui.arenaFill.values) do if value==fill then ui.arenaFill.index=i end end
+  for i,mode in ipairs({"BOTH","TEXTBOX","HUD","HIDE"}) do
+    ui.battleUi:setIndex(i)
+    battle.dramaticShapeShot=nil
+    battle.stadium2ImporterGen1Shot={battleArtUI=true}
+    hudCalls,textCalls=0,0
+    battle:drawHUDs(0);battle:drawTextArea()
+    assert(hudCalls==0, "Stadium must not redraw the composed Battle Art HUD")
+    assert(textCalls==((mode=="BOTH" or mode=="TEXTBOX") and 1 or 0),fill..mode)
+  end
+end
+battle.stadium2ImporterGen1Shot=nil
 -- Visibility affects staged presentation only; ordinary engine UI still draws.
 battle.dramaticShapeShot = nil
 hudCalls, textCalls = 0, 0
@@ -105,3 +119,29 @@ end
 V.mod.options = { get = function(_, key) if key == "battleUi" then return "HUD" end end }
 assert(assert(loadfile("lib/UiBackplates.lua"))(V).battleUi:get() == "HUD")
 print("battle UI visibility: all modes, fills, palettes, fallback and persistence passed")
+
+-- Exercise the exported compositor: no panel calls, both status bands (also
+-- carrying intro party balls), and no native capture when hidden/foreign-owned.
+local captures,blits,pushes=0,0,0
+local g={getCanvas=function() return nil end,push=function() pushes=pushes+1 end,pop=function() pushes=pushes-1 end,
+ setCanvas=function() end,setShader=function() end,setDepthMode=function() end,
+ setBlendMode=function() end,setColor=function() end,scale=function() end,
+ newQuad=function() return {} end,draw=function() blits=blits+1 end}
+env.love={graphics=g}
+env.BattleHud.layerTexture=function(_,_,_,draw,color,shadow)
+ captures=captures+1;draw();assert(color==ui.hudUsesColor());return {}
+end
+battles.snapRects=function() return {},{enemy={x=0,y=0,scale=1},player={x=0,y=48,scale=1}} end
+battles.HUD_BAND={enemy={0,0,160,48},player={0,48,160,48}}
+loadSection("function OverworldBattle.drawHostedUI", "-- Lay the frosted glass")
+local ctx={battle=battle,canvas={},box={scale=1,ly=0},width=160,drawHUDs=function() end}
+for i,mode in ipairs({"BOTH","TEXTBOX","HUD","HIDE"}) do
+ ui.battleUi:setIndex(i);captures,blits=0,0
+ assert(battles.drawHostedUI(ctx))
+ local visible=mode=="BOTH" or mode=="HUD"
+ assert(captures==(visible and 1 or 0) and blits==(visible and 2 or 0))
+ assert(pushes==0)
+end
+ui.battleUi:setIndex(1);ctx.statusAvailable=false;captures=0
+assert(battles.drawHostedUI(ctx) and captures==0)
+print("hosted UI ownership and all arena fill gates: passed")

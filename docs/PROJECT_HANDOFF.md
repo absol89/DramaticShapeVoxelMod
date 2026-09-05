@@ -1,3 +1,70 @@
+## Flat Stadium trainer and Pokeball pass: 2026-09-05
+
+User confirms backgrounds, HUD and Stadium FX now work in all flat fills.
+Flat hosting previously skipped BattleScene's trainer and normal-ball pass.
+The Stadium overlay now invokes that shared pass, prepares the trainer lifecycle
+without capturing sprite cards, and publishes actual trainer draw success.
+Voxel3D can borrow an active host target without clearing or rebinding it;
+the host camera is translated into Battle Art arena coordinates. Both normal
+and flat passes use the same trainer callback, ball clock, meshes and beam.
+Graphics/camera state is restored on success and failure. OFF retains its path.
+
+Seven targeted LuaJIT suites pass, including borrowed-target preservation,
+translated camera, ball ticking and companion-error cleanup. These are mocked
+checks; in-game trainer/throw appearance still needs user verification.
+Master and tag are unchanged.
+
+## Sprite FX anchors and background ordering: 2026-09-05
+
+stageShot now publishes the active Stadium scene's logical uiAnchors and exact
+animationProjection scale through BattleStage. FX consumers therefore remain
+in the host-projected animation layer for species without skeletal models,
+instead of redirecting to a surface with missing bone coordinates. Explicit
+host scale/backPinned metadata takes precedence over ordinary Battle Art values.
+
+The backdrop shader places plates at far depth; Stadium image drawing uses
+lequal without depth writes and preserves the host depth attachment. Found an
+additional installed-only edit using always/depth-write plus next(ctx) after
+the image; it would block models and repaint the sky. That installed edit is
+replaced by the source fix and retained in a backup.
+
+Five targeted LuaJIT suites pass. A real LOVE GPU test draws foreground green
+geometry first, then GEN6/PNG red plates: pixel readback retains green geometry
+and replaces blue sky with red. In-game FX and artwork confirmation pending.
+No Stadium Battle FX companion changes are needed. Master/tag unchanged.
+
+## Flat hosted frame/HUD follow-up: 2026-09-05
+
+Captured diagnostic: BLUE/BOTH statusAvailable=true, suppressed=false, but
+nativeShot=true during Stadium HUD capture. The native Battle Art HUD wrapper
+therefore skipped capture as already snapped. Companion capture now clears
+both native/hosted shot markers temporarily and restores them even on errors.
+A ready, non-defective Stadium scene now also prevents Battle Art from rendering
+or publishing a second normal shot in flat modes. Failed/other scenes retain
+the normal fallback. This removes competing normal-frame composition while
+Stadium retains background-hook ownership for GEN6/PNG/WHITE/BLUE.
+
+Six targeted LuaJIT suites pass across the two repos, including stale-marker
+capture and frame-ownership regressions. A real LOVE 11.5 hidden-window GPU
+probe successfully executes WHITE, GEN6 and PNG background draws. That probe
+uses a generated image; it is not in-game or installed-asset visual validation.
+Deduplicated diagnostic records are retained to verify the next in-game run.
+
+## Issue 44: unified hosted UI, 2026-09-05
+
+BattlePresentation now exports drawHostedUI. The companion Gen1 compositor
+hands Battle Art a clean scene copy plus a scoped native HUD capture, bypassing
+Stadium glass panels in every arena mode. Native hosted textbox drawing uses
+Battle Art's fill/ink path; the native HUD pass is skipped after composition.
+HUD-only also suppresses Battle Art frosted backpanels. Existing foreign UI
+visibility claims remain respected. No battle model/camera logic was changed.
+
+Tests: visibility matrix across 4 modes and 5 fills, native/hosted text gates,
+HUD bands, settings/styles, and companion compose handoff pass under LuaJIT.
+The paired fix requires the importer gen1_battle.lua change. In-game visual
+checks, including prompts and party balls, remain pending. Master and tag are
+not moved by this fix.
+
 ## S.S. Anne cabin details: 2026-09-05
 
 Added white bulkhead tops, source-based hollow mugs and raised bunk bedding.

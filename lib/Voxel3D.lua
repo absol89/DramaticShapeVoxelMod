@@ -462,6 +462,12 @@ local BACKDROP_BLUR = [[
   uniform vec2 texel;
   uniform float radius;
 
+  vec4 position(mat4 transform_projection, vec4 vertex_position) {
+    vec4 clip = transform_projection * vertex_position;
+    clip.z = clip.w;
+    return clip;
+  }
+
   vec4 effect(vec4 color, Image image, vec2 uv, vec2 screen) {
     vec2 d = texel * radius;
     vec4 sum = Texel(image, uv) * 4.0;
@@ -870,7 +876,7 @@ end
 -- void transparent, which is what every rung below it wants.
 -- `slot` names which cached canvas to render into (see `slots` above);
 -- omitted is the free-roam world pass.
-function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow)
+function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow, borrowed)
   -- the wireframe variant when the player has it on AND it built; either
   -- answer falls through to the plain scene rather than to no scene
   local grid = VoxelGrid.enabled()
@@ -879,37 +885,43 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow)
     grid, sh = false, Voxel3D.shader()
   end
   if not sh then return false end
-  local name = slot or "world"
-  local slotHeld = slots[name]
-  if not (slotHeld and slotHeld.w == w and slotHeld.h == h) then
-    local ok, c = PixelCanvas.new(w, h)
-    if not ok then return false end
-    c:setFilter("nearest", "nearest")
-    if slotHeld then releaseSlot(slotHeld) end
-    -- the depth canvas is sized with its colour, so a window resize
-    -- reallocates the pair together and they can never disagree
-    slotHeld = { canvas = c, w = w, h = h, depth = newDepth(w, h) }
-    slots[name] = slotHeld
-  end
-  held = slotHeld
-  canvas, canvasW, canvasH = held.canvas, w, h
-  -- a depth buffer is what makes occlusion real: walk behind a building and
-  -- the building wins, with no y-sorting anywhere
-  local ok = pcall(love.graphics.setCanvas, depthTarget())
-  if not ok and held.depth then
-    -- the readable canvas would not bind; fall back to the internal buffer
-    -- for the rest of this session rather than losing the whole 3D pass
-    pcall(held.depth.release, held.depth)
-    held.depth = nil
-    ok = pcall(love.graphics.setCanvas, depthTarget())
-  end
-  if not ok then
-    pcall(love.graphics.setCanvas)
-    return false
+  -- Hosted passes borrow the already-bound color/depth attachments. Never
+  -- allocate, clear, or release a provider-owned target.
+  if borrowed then
+    canvas, canvasW, canvasH = borrowed.color, w, h
+  else
+    local name = slot or "world"
+    local slotHeld = slots[name]
+    if not (slotHeld and slotHeld.w == w and slotHeld.h == h) then
+      local ok, c = PixelCanvas.new(w, h)
+      if not ok then return false end
+      c:setFilter("nearest", "nearest")
+      if slotHeld then releaseSlot(slotHeld) end
+      -- the depth canvas is sized with its colour, so a window resize
+      -- reallocates the pair together and they can never disagree
+      slotHeld = { canvas = c, w = w, h = h, depth = newDepth(w, h) }
+      slots[name] = slotHeld
+    end
+    held = slotHeld
+    canvas, canvasW, canvasH = held.canvas, w, h
+    -- a depth buffer is what makes occlusion real: walk behind a building and
+    -- the building wins, with no y-sorting anywhere
+    local ok = pcall(love.graphics.setCanvas, depthTarget())
+    if not ok and held.depth then
+      -- the readable canvas would not bind; fall back to the internal buffer
+      -- for the rest of this session rather than losing the whole 3D pass
+      pcall(held.depth.release, held.depth)
+      held.depth = nil
+      ok = pcall(love.graphics.setCanvas, depthTarget())
+    end
+    if not ok then
+      pcall(love.graphics.setCanvas)
+      return false
+    end
   end
   -- Ahead of the clear, because the sky's bands are placed off the ground
   -- plane's vanishing line and that is a property of this matrix.
-  Voxel3D.vp = Voxel3D.viewProjection(cx, cy, vw, vh)
+  Voxel3D.vp = borrowed and borrowed.vp or Voxel3D.viewProjection(cx, cy, vw, vh)
   -- This frame's pixels per WORLD pixel: the size a diorama pixel is on
   -- screen. The sky's dither grid is cut to it, and so is the water's --
   -- one number, so the two break up on the same checkerboard.
@@ -918,7 +930,9 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow)
   -- reads its bands against (see Water). nil when nothing painted bands.
   Voxel3D.skyEdge = (sky and sky.bands)
                     and Sky.region(h, Voxel3D.horizonY(h)) or nil
-  if sky then
+  if borrowed then
+    -- Preserve both the host background and battler depth.
+  elseif sky then
     love.graphics.clear(sky[1], sky[2], sky[3], sky[4] or 1, true, true)
     -- The sky goes down here, in the one window in this function where a
     -- rectangle is just a rectangle: the depth mode and the scene shader are
@@ -947,7 +961,7 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow)
   -- the sun's frame, filled by ShadowMap just before this pass opened.
   -- Sent unconditionally: the sampler is declared either way, and leaving
   -- one unbound is a driver-dependent crash rather than a fallback.
-  local map = ShadowMap.active()
+  local map = not borrowed and ShadowMap.active()
   pcall(sh.send, sh, "sunVP", "row", map and ShadowMap.uvVP or IDENTITY)
   local tex = ShadowMap.texture()
   if tex then pcall(sh.send, sh, "sunMap", tex) end

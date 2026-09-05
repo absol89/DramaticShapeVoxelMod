@@ -66,10 +66,11 @@ function BattleStage.export(battles)
 
     local player = copyPoint(shot.player, authoredPlayer)
     local enemy = copyPoint(shot.enemy, authoredEnemy)
-    local backPinned = call(battles, "backPinned") == true
+    local backPinned = shot.backPinned
+    if backPinned == nil then backPinned = call(battles, "backPinned") == true end
     if backPinned then player = copyPoint(authoredPlayer, authoredPlayer) end
 
-    local scale = tonumber(call(battles, "animScale", shot,
+    local scale = tonumber(shot.animationScale) or tonumber(call(battles, "animScale", shot,
       player[1], player[2])) or 1
     if not (scale > 0) or scale ~= scale then scale = 1 end
 

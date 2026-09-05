@@ -678,8 +678,32 @@ function OverworldBattle.providerRender(expectedBattle, drawActors,
   return shot.canvas
 end
 
+function OverworldBattle.providerExtras(battle, ctx)
+  if not OverworldBattle.providerAvailable(battle) then return false end
+  OverworldBattle.prepareTrainer(battle)
+  local drawn = BattleScene.renderHostedExtras(session.state, session.arena, battle, ctx)
+  session.providerShot = {trainerDrawn=drawn}
+  return drawn
+end
+
 function OverworldBattle.stageShot()
   if not session or session.broken then return nil end
+  -- Stadium projects every slot, including species with no imported model.
+  -- Publish the same logical anchors its animation-layer transform uses.
+  local finder=V.mod and V.mod.find
+  local handle=type(finder)=="function" and finder("STADIUM2_IMPORTER")
+  local api=handle and handle.exports and handle.exports.scene
+  local scene=api and api.current and api.current()
+  local anchors=scene and scene.uiAnchors
+  if scene and scene.battle==session.battle and scene.readyFrame and not scene.defect
+      and anchors and anchors.player and anchors.enemy then
+    local p,e=anchors.player,anchors.enemy
+    local dx,dy=e[1]-p[1],e[2]-p[2]
+    local scale=math.max(.5,math.min(2,math.sqrt(dx*dx+dy*dy)/math.sqrt(98*98+40*40)))
+    return {player={p[1],p[2]},enemy={e[1],e[2]},
+      animationScale=scale,backPinned=false,
+      trainerDrawn=session.providerShot and session.providerShot.trainerDrawn}
+  end
   return session.apiHosted and session.providerShot or session.shot
 end
 
@@ -707,6 +731,17 @@ function OverworldBattle.finish()
   restoreCast()
   session = nil
   Voxel3D.camera = nil
+end
+
+-- A ready Stadium scene owns the entire frame even for flat arena fills.
+-- Do not publish a second normal shot or pre-snap HUDs behind its compositor.
+local function stadiumOwnsFrame(battle)
+  local finder=V.mod and V.mod.find
+  if type(finder)~="function" then return false end
+  local handle=finder("STADIUM2_IMPORTER")
+  local api=handle and handle.exports and handle.exports.scene
+  local scene=api and api.current and api.current()
+  return scene and scene.battle==battle and scene.readyFrame and not scene.defect or false
 end
 
 -- ------- per-frame
@@ -772,7 +807,7 @@ function OverworldBattle.update(dt)
   -- slice: nothing visible can hitch on them
   ChunkMesher.pump(true)
 
-  if session.apiHosted then
+  if session.apiHosted or stadiumOwnsFrame(session.battle) then
     session.shot = nil
     session.snapped = false
     return
@@ -846,7 +881,7 @@ end
 -- The finished shot for this frame, or nil when there is none and the battle
 -- should draw the way it always did.
 function OverworldBattle.shot()
-  if not session or session.broken then return nil end
+  if not session or session.broken or stadiumOwnsFrame(session.battle) then return nil end
   local s = session.shot
   if s and s.canvas then return s end
   return nil
@@ -1205,7 +1240,7 @@ end
 -- there, it is on the menu, so it has no card to be a texture for -- and
 -- nothing downstream has to know that. No billboard, and no shadow on the
 -- ground under a mon that is not on it.
-function OverworldBattle.textures(battle)
+function OverworldBattle.prepareTrainer(battle)
   if not battle then return nil end
 
   -- Persistent 3D trainer handoff. The engine exposes the selected player
@@ -1234,6 +1269,11 @@ function OverworldBattle.textures(battle)
   _G.RED3D_TRAINER_INTRO_ACTIVE = legacyTrainerOk and true or false
   _G.RED3D_TRAINER_BATTLE_STATE = legacyTrainerOk and battle or nil
 
+end
+
+function OverworldBattle.textures(battle)
+  if not battle then return nil end
+  OverworldBattle.prepareTrainer(battle)
   local out = {}
   local okE, enemy = pcall(OverworldBattle.sideTexture, battle, "enemy")
   local okP, player = true, nil
@@ -1601,9 +1641,12 @@ function OverworldBattle.install()
   -- off the same verdict.
   local innerText = BattleState.drawTextArea
   function BattleState:drawTextArea()
-    if not self.dramaticShapeShot then return innerText(self) end
+    local hosted = self.stadium2ImporterGen1Shot
+    if not self.dramaticShapeShot and not (hosted and hosted.battleArtUI) then
+      return innerText(self)
+    end
     if BattlePresentation.suppressed("text", self) then return end
-    if isIOS() then return innerText(self) end
+    if isIOS() and not (hosted and hosted.battleArtUI) then return innerText(self) end
     return drawStyledTextArea(self, innerText)
   end
 
@@ -1703,6 +1746,8 @@ function OverworldBattle.install()
   -- only an exactly-black set is remapped.
   innerHUDs = BattleState.drawHUDs
   function BattleState:drawHUDs(slide)
+    local hosted = self.stadium2ImporterGen1Shot
+    if hosted and hosted.battleArtUI then return end
     if self.dramaticShapeShot
        and BattlePresentation.suppressed("hud", self) then return end
     -- Normally the HUDs have already been drawn this frame, snapped out to the
@@ -1843,6 +1888,55 @@ function OverworldBattle.snapHUDs(battle, shot)
   if prevCanvas then g.setCanvas(prevCanvas) else g.setCanvas() end
   g.setBlendMode(prevBlend or "alpha", prevAlpha)
   g.setColor(1, 1, 1, 1)
+  if not ok then error(err, 0) end
+  return true
+end
+
+-- Stadium supplies a clean scene copy and a scoped native-data capture.
+-- Draw Battle Art's HUD palette/layout without Stadium's glass panels. Text
+-- remains in the native UI canvas, styled by drawTextArea in the same frame.
+function OverworldBattle.drawHostedUI(ctx)
+  if not (ctx and ctx.battle and ctx.canvas and ctx.box and ctx.drawHUDs) then
+    return false
+  end
+  local battle = ctx.battle
+  if ctx.report then
+    ctx.report("fill="..tostring(UiBackplates.arenaFill:get())
+      .." mode="..tostring(UiBackplates.battleUi:get())
+      .." statusAvailable="..tostring(ctx.statusAvailable)
+      .." suppressed="..tostring(BattlePresentation.suppressed("hud",battle))
+      .." nativeShot="..tostring(battle.dramaticShapeShot~=nil)
+      .." hostedShot="..tostring(battle.stadium2ImporterGen1Shot~=nil)
+      .." scale="..tostring(ctx.box.scale))
+  end
+  if ctx.statusAvailable == false or BattlePresentation.suppressed("hud", battle) then
+    return true
+  end
+  local layer = BattleHud.layerTexture(BattleScene.GB_W, BattleScene.GB_H,
+    true, ctx.drawHUDs, UiBackplates.hudUsesColor(),
+    UiBackplates.hudUsesColorShadow(), battle)
+  if not layer then return false end
+  local shot = { scale = ctx.box.scale, ly = ctx.box.ly, pw = ctx.width }
+  local _, placement = OverworldBattle.snapRects(shot)
+  local g = love.graphics
+  local previous = g.getCanvas()
+  g.push("all")
+  local ok, err = pcall(function()
+    g.setCanvas(ctx.canvas)
+    g.setShader()
+    g.setDepthMode("always", false)
+    g.setBlendMode("alpha", "alphamultiply")
+    g.setColor(1, 1, 1, 1)
+    g.scale(ctx.sx or 1, ctx.sy or 1)
+    for side, band in pairs(OverworldBattle.HUD_BAND) do
+      local at = placement[side]
+      local quad = g.newQuad(band[1], band[2], band[3], band[4],
+        BattleScene.GB_W, BattleScene.GB_H)
+      g.draw(layer, quad, at.x + band[1] * at.scale, at.y, 0, at.scale, at.scale)
+    end
+  end)
+  g.pop()
+  if previous then g.setCanvas(previous) else g.setCanvas() end
   if not ok then error(err, 0) end
   return true
 end

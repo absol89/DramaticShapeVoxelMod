@@ -50,7 +50,7 @@ function UiBackplates.uiHidden(surface)
   local mode = UiBackplates.battleUi:get()
   if surface == "hud" then return mode == "TEXTBOX" or mode == "HIDE" end
   if surface == "text" then return mode == "HUD" or mode == "HIDE" end
-  if surface == "panels" then return mode == "HIDE" end
+  if surface == "panels" then return mode == "HUD" or mode == "HIDE" end
   return false
 end
 

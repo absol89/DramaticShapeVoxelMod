@@ -96,6 +96,9 @@ end
 function BattlePresentation.export()
   return {
     apiVersion = BattlePresentation.API_VERSION,
+    drawHostedUI = function(ctx)
+      return V.require("OverworldBattle").drawHostedUI(ctx)
+    end,
     suppressHook = BattlePresentation.SUPPRESS_HOOK,
     sourceModId = BattlePresentation.SOURCE_MOD_ID,
     surfaces = {

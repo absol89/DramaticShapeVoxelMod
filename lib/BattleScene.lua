@@ -751,6 +751,96 @@ function BattleScene.toGB(vp, wx, wy, wz, lx, ly, s, pw, ph)
   return (px - lx) / s, (py - ly) / s
 end
 
+-- Shared by voxel arenas and the Stadium flat-scene overlay.
+function BattleScene.drawTrainerAndBall(state, battle, arena, groundY)
+  local providerTrainer = false
+  if CharacterRenderers.battleActive() then
+    providerTrainer = CharacterRenderers.first("drawBattleTrainer", {
+      state = state, battle = battle, arena = arena, groundY = groundY,
+      host = { Voxel3D = Voxel3D, Mat4 = Mat4,
+               ShadowMap = ShadowMap },
+      setHandWorld = function(value)
+        CharacterRenderers.setBattleHand(value)
+      end,
+    })
+  end
+  if not providerTrainer
+      and rawget(_G, "RED3D_TRAINER_INTRO_ACTIVE") == true then
+    local direct = rawget(_G, "RED3D_DIRECT_BATTLE_DRAW")
+    if type(direct) == "function" then
+      _G.RED3D_BATTLE_ART_DIRECT_CALLS =
+        (tonumber(_G.RED3D_BATTLE_ART_DIRECT_CALLS) or 0) + 1
+      local okDirect, didDraw = pcall(direct, arena, groundY,
+                                       Voxel3D, Mat4)
+      _G.RED3D_BATTLE_ART_DIRECT_RESULT = okDirect
+        and (didDraw and "DRAW OK" or "NO DRAW") or "CALL ERROR"
+    end
+  elseif not providerTrainer
+      and rawget(_G, "RED3D_DIRECT_BATTLE_STATUS") == "DRAW OK" then
+    _G.RED3D_DIRECT_BATTLE_STATUS = "BATTLE DONE"
+  end
+
+  -- The Legendary capture prop shares this scene's depth buffer, camera,
+  -- lighting and shadows. Its intake beam follows the opponent's moving
+  -- chest so there is no flat duplicate ball or detached overlay.
+  if normalBall and normalBall.ball then
+    pcall(normalBall.ball.draw, normalBall.ball, BattleBillboard.PULL)
+    if normalBall.captureFxT and normalBall.captureFxT > 0
+        and arena and arena.enemy then
+      local duration = math.max(0.001, PokeballSettings.captureDuration())
+      local remain = math.max(0, math.min(1,
+        normalBall.captureFxT / duration))
+      local raw = 1 - remain
+      local q = raw * raw * (3 - 2 * raw)
+      local ax, ay, az = arena.enemy[1], groundY + 8, arena.enemy[2]
+      local bx = normalBall.ball.pos[1]
+      local by = normalBall.ball.pos[2]
+        + (Pokeball.R or 2.2) * 0.18 * (normalBall.ball.scale or 1)
+      local bz = normalBall.ball.pos[3]
+      local pullQ = q * q
+      pcall(normalBall.ball.drawBeam, normalBall.ball,
+        ax + (bx - ax) * pullQ,
+        ay + (by - ay) * pullQ,
+        az + (bz - az) * pullQ,
+        5.20 - 3.10 * q, 1.00 - 0.62 * q,
+        BattleBillboard.PULL)
+    end
+  end
+  return providerTrainer
+end
+
+function BattleScene.renderHostedExtras(state, arena, battle, ctx)
+  if not (ctx and ctx.camera and ctx.camera.vp and ctx.camera.eye
+      and ctx.camera.focus and ctx.target) then return false end
+  local groundY = BattleScene.groundY(arena.map or state.map, arena)
+  normalBallTick(arena, groundY)
+  local origin = {arena.mid[1], groundY, arena.mid[2]}
+  local oldVP = Voxel3D.vp
+  local oldEye, oldFocus, oldCamera = Voxel3D.eye, Voxel3D.focus, Voxel3D.camera
+  local function world(p)
+    return {p[1]+origin[1], p[2]+origin[2], p[3]+origin[3]}
+  end
+  Voxel3D.eye = world(ctx.camera.eye)
+  Voxel3D.focus = world(ctx.camera.focus)
+  Voxel3D.camera = {curve=0}
+  local vp = Mat4.mul(ctx.camera.vp, Mat4.translate(-origin[1], -origin[2], -origin[3]))
+  local g = ctx.graphics
+  g.push("all")
+  local ok, drawn = pcall(function()
+    g.origin()
+    if not Voxel3D.beginScene(ctx.target.width, ctx.target.height,
+        origin[1], origin[3], 160, 144, nil, nil, nil,
+        {color=ctx.target.color, vp=vp}) then return false end
+    return BattleScene.drawTrainerAndBall(state, battle, arena, groundY)
+  end)
+  Voxel3D.endScene()
+  g.pop()
+  Voxel3D.eye, Voxel3D.focus, Voxel3D.camera = oldEye, oldFocus, oldCamera
+  Voxel3D.vp = oldVP
+  if not ok then error(drawn, 0) end
+  return drawn == true
+end
+
 -- Render the arena and hand back { canvas, player = {x,y}, enemy = {x,y} },
 -- the two marks in GB coordinates -- or nil when there is nothing to draw
 -- yet (the terrain mesh is still building, the driver has no depth support).
@@ -1119,59 +1209,7 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     -- publishes the normal-battle lifetime above. Calling it here keeps the
     -- selected character depth-tested in the arena without changing Pokemon
     -- placement, combat state, the camera, or Legendary Pokeball ownership.
-    local providerTrainer = false
-    if CharacterRenderers.battleActive() then
-      providerTrainer = CharacterRenderers.first("drawBattleTrainer", {
-        state = state, battle = battle, arena = arena, groundY = groundY,
-        host = { Voxel3D = Voxel3D, Mat4 = Mat4,
-                 ShadowMap = ShadowMap },
-        setHandWorld = function(value)
-          CharacterRenderers.setBattleHand(value)
-        end,
-      })
-    end
-    if not providerTrainer
-        and rawget(_G, "RED3D_TRAINER_INTRO_ACTIVE") == true then
-      local direct = rawget(_G, "RED3D_DIRECT_BATTLE_DRAW")
-      if type(direct) == "function" then
-        _G.RED3D_BATTLE_ART_DIRECT_CALLS =
-          (tonumber(_G.RED3D_BATTLE_ART_DIRECT_CALLS) or 0) + 1
-        local okDirect, didDraw = pcall(direct, arena, groundY,
-                                         Voxel3D, Mat4)
-        _G.RED3D_BATTLE_ART_DIRECT_RESULT = okDirect
-          and (didDraw and "DRAW OK" or "NO DRAW") or "CALL ERROR"
-      end
-    elseif not providerTrainer
-        and rawget(_G, "RED3D_DIRECT_BATTLE_STATUS") == "DRAW OK" then
-      _G.RED3D_DIRECT_BATTLE_STATUS = "BATTLE DONE"
-    end
-
-    -- The Legendary capture prop shares this scene's depth buffer, camera,
-    -- lighting and shadows. Its intake beam follows the opponent's moving
-    -- chest so there is no flat duplicate ball or detached overlay.
-    if normalBall and normalBall.ball then
-      pcall(normalBall.ball.draw, normalBall.ball, BattleBillboard.PULL)
-      if normalBall.captureFxT and normalBall.captureFxT > 0
-          and arena and arena.enemy then
-        local duration = math.max(0.001, PokeballSettings.captureDuration())
-        local remain = math.max(0, math.min(1,
-          normalBall.captureFxT / duration))
-        local raw = 1 - remain
-        local q = raw * raw * (3 - 2 * raw)
-        local ax, ay, az = arena.enemy[1], groundY + 8, arena.enemy[2]
-        local bx = normalBall.ball.pos[1]
-        local by = normalBall.ball.pos[2]
-          + (Pokeball.R or 2.2) * 0.18 * (normalBall.ball.scale or 1)
-        local bz = normalBall.ball.pos[3]
-        local pullQ = q * q
-        pcall(normalBall.ball.drawBeam, normalBall.ball,
-          ax + (bx - ax) * pullQ,
-          ay + (by - ay) * pullQ,
-          az + (bz - az) * pullQ,
-          5.20 - 3.10 * q, 1.00 - 0.62 * q,
-          BattleBillboard.PULL)
-      end
-    end
+    local providerTrainer = BattleScene.drawTrainerAndBall(state, battle, arena, groundY)
     Voxel3D.glass(true)
     Voxel3D.seams(true)
     if flashing then Voxel3D.flatten(nil) end
