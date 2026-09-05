@@ -54,3 +54,29 @@ local animFile=assert(io.open('lib/AnimatedBattleArt.lua','rb'))
 local anim=animFile:read('*a'); animFile:close()
 assert(anim:find('BattleArt.effectivePlayerAnimationSet()',1,true))
 print('Choose Your Hero selection, rival art and optional-save fallback: ok')
+
+for _,gen in ipairs({'gen1','gen2','gen3'}) do
+ api.trainerSetting.get=function() return gen end
+ local dotted='assets/battle/front-static/'..gen..'/prof.oak.png'
+ local legacy='assets/battle/front-static/'..gen..'/prof-oak.png'
+ assets[dotted],assets[legacy]='custom-oak','legacy-oak'
+ assert(api.trainerImage('prof-oak')=='custom-oak')
+ assert(api.trainerImage('prof.oak')=='custom-oak')
+ assets[dotted]=nil; assert(api.trainerImage('prof.oak')=='legacy-oak')
+ assets[legacy]=nil; assert(api.trainerImage('prof-oak')==nil)
+end
+local f=assert(io.open('main.lua','rb')); local main=f:read('*a');f:close()
+local a=assert(main:find('mod.hooks:wrap("intro.oak_speech.build"',1,true))
+local b=assert(main:find('mod.hooks:wrap("pokemon.sprite"',a,true))
+local hook
+local fn=assert(loadstring(main:sub(a,b-1)))
+setfenv(fn,{mod={hooks={wrap=function(_,name,callback) hook=callback end}},BattleArt=api});fn()
+local steps,speech={}, {oakPic='rom',oakTrueColor=false}
+local function next(s)assert(s==steps);return s end
+assert(hook(next,steps,speech)==steps and speech.oakPic=='rom')
+assets['assets/battle/front-static/gen3/prof.oak.png']='new-oak'
+hook(next,steps,speech);assert(speech.oakPic=='new-oak' and speech.oakTrueColor)
+api.setting.get=function()return 'rom' end
+speech={oakPic='rom',oakTrueColor=false};hook(next,steps,speech)
+assert(speech.oakPic=='rom' and not speech.oakTrueColor)
+print('Oak generation routing, legacy fallback, intro hook and ROM mode: ok')

@@ -34,7 +34,7 @@ BattleArt.playerAnimationSetting = ModSetting.new(
   { "png", "gen1", "gen2", "gen3", "gen4", "gen5", "ash", "gary", "red",
     "ash_front", "misty_front", "brock_front", "bulma_front", "gary_front", "rom" },
   { "PNG", "GEN 1", "GEN 2", "GEN 3", "GEN 4", "GEN 5", "ASH", "GARY", "RED/GREEN",
-    "ASH FRONT", "MISTY FRONT", "BROCK FRONT", "BULMA FRONT", "GARY FRONT", "ROM" }, 9)
+    "ASH FRONT", "MISTY FRONT", "BROCK FRONT", "BULMA FRONT", "GARY FRONT", "ROM" }, 2)
 -- One owner for species pictures. BATTLE ART keeps this mod's selected front
 -- and back collections in charge, including its imported shiny children.
 -- MODDED leaves every Pokemon picture to the underlying sprite provider (or
@@ -536,6 +536,11 @@ function BattleArt.trainerImage(name)
     local path = V.mod.assets:path(rel)
     if not path then return nil end
     return prepare(path, displayMode())
+  end
+  -- The engine class slug is prof-oak; accept the authored engine-style
+  -- filename first while retaining existing hyphenated collections.
+  if name == "prof-oak" or name == "prof.oak" then
+    return load("prof.oak") or load("prof-oak")
   end
   if chooseYourHeroRival() == "yellow" then
     local femName = yellowRivalFile(name)

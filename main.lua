@@ -1742,6 +1742,17 @@ end)
 -- next() first, so a sprite-replacing mod loaded before this one still gets
 -- the last word on WHICH art is used; this only changes which SIDE is asked
 -- for.
+-- The intro caches Oak before building its steps. Use the public build hook
+-- to replace that portrait without changing generated ROM assets or scripts.
+mod.hooks:wrap("intro.oak_speech.build", function(next, steps, speech)
+  local out = next(steps, speech)
+  local oak = BattleArt.trainerImage("prof.oak")
+  if speech and oak then
+    speech.oakPic, speech.oakTrueColor = oak, true
+  end
+  return out
+end)
+
 mod.hooks:wrap("pokemon.sprite", function(next, path, ctx)
   local out = next(path, ctx)
   if not (ctx and ctx.kind == "battle" and ctx.side == "back") then

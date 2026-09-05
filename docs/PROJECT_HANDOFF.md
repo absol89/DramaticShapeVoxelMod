@@ -1,3 +1,13 @@
+## Oak portraits and player animation default: 2026-09-05
+
+PLAYER ANIM defaults to GEN 1 (saved selections retained); TRAINER ART remains
+GEN 1. Oak trainer lookup prefers front-static/<trainer generation>/prof.oak.png
+and falls back to prof-oak.png, then ROM. The public intro.oak_speech.build hook
+uses that same resolver for the Gen 1 new-game portrait. Generated assets are
+untouched. Routing tests cover all three generations, legacy/missing assets,
+intro replacement, ROM mode and existing Choose Your Hero behavior; they pass.
+Modified Lua files compile. Phone/gameplay confirmation remains pending.
+
 ## PR 45 integration: 2026-09-05
 
 Merged PR 45 atop 6e99ed5 without conflicts or content overrides. Review was
