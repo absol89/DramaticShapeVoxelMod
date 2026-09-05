@@ -1,3 +1,11 @@
+## iOS Voxel Companion sandbox fix: 2026-09-05
+
+VoxelCompanion no longer indexes the forbidden love.system namespace while
+building its informational platform field. The existing sandbox-safe LÖVE 12
+Metal renderer probe identifies iOS; other platforms use neutral UNKNOWN
+metadata. This field does not select rendering behavior. A regression test
+uses a sandbox proxy that throws on love.system access and passes both paths.
+
 ## Oak portraits and player animation default: 2026-09-05
 
 PLAYER ANIM defaults to GEN 1 (saved selections retained); TRAINER ART remains

@@ -294,10 +294,11 @@ local function copyIntegrity(status)
 end
 
 local function platformName()
-  if love and love.system and type(love.system.getOS) == "function" then
-    local ok, value = pcall(love.system.getOS)
-    if ok and type(value) == "string" then return value:upper() end
-  end
+  -- Accessing love.system itself raises in the mod sandbox, so even a guarded
+  -- getOS probe prevents the companion host from starting on current iOS
+  -- builds. The only platform distinction used by this renderer is the LÖVE
+  -- 12 Metal path, which Voxel3D detects through permitted graphics APIs.
+  if Voxel3D.metalRenderer() then return "IOS" end
   return "UNKNOWN"
 end
 
