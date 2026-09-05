@@ -6,6 +6,7 @@
 
 local V = ...
 local Runtime = require("src.mods.Runtime")
+local UiBackplates = V.require("UiBackplates")
 
 local BattlePresentation = {}
 
@@ -75,6 +76,7 @@ end
 
 function BattlePresentation.suppressed(surface, battle)
   if not validSurface[surface] then return false end
+  if UiBackplates.uiHidden(surface) then return true end
 
   if Runtime.wantsHook(BattlePresentation.SUPPRESS_HOOK) then
     local request = {

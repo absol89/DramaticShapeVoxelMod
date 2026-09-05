@@ -856,6 +856,12 @@ local SETTINGS = {
     .. "UNLIT draws them flat and full bright. UNLIT is what the white "
     .. "arena fill needs, and what the OG battle's sprites look like.",
     when = function() return stagedBattles() end, full = true },
+  { UiBackplates.battleUi,
+    "BOTH shows the battle textbox and Pokemon HUDs. TEXTBOX keeps only "
+    .. "the textbox with TEXTBOX FILL. HUD keeps only the Pokemon HUDs with "
+    .. "HUD COLOR. HIDE hides both so another UI mod can draw them. "
+    .. "Battle controls remain active in every mode.",
+    when = function() return stagedBattles() end, full = true },
   { UiBackplates.hudColor,
     "COLOR keeps the engine's black names, levels and HP text plus its "
     .. "green/yellow/red HP bars, with a bright one-pixel shadow for the "
@@ -1008,7 +1014,8 @@ local OPTION_CATEGORIES = {
     PokeballSettings.suctionParticles, PokeballSettings.captureSpeed,
     PokeballSettings.openTime, PokeballSettings.fxScale,
     BattleArt.backPlacementSetting,
-    UiBackplates.spriteLight, UiBackplates.hudColor, UiBackplates.arenaFill,
+    UiBackplates.spriteLight, UiBackplates.battleUi,
+    UiBackplates.hudColor, UiBackplates.arenaFill,
     UiBackplates.stadiumCircle, UiBackplates.backdropOffset,
     UiBackplates.bossBg, UiBackplates.textboxFill,
   } },

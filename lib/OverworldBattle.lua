@@ -368,6 +368,7 @@ OverworldBattle.TEXT_RECT = {
 }
 
 function OverworldBattle.textRects(battle)
+  if BattlePresentation.suppressed("text", battle) then return {} end
   if not battle or battle.blankForAskName then return {} end
   local r = OverworldBattle.TEXT_RECT
   local out = { box = r.box }
@@ -385,6 +386,7 @@ end
 -- through there; split the main box around that 88x8 overlap as well. BLACK
 -- and WHITE retain the normal union, while OFF has no paper anywhere.
 function OverworldBattle.textPaperRects(battle, mode)
+  if BattlePresentation.suppressed("text", battle) then return {} end
   if mode == "OFF" then return {} end
   if mode == "HALF" and battle and battle.phase == "moveSelect" then
     return {
@@ -1731,6 +1733,7 @@ end
 -- the worst a future engine change can do is show an empty one for a frame,
 -- never break a battle.
 function OverworldBattle.hudLive(battle, slide)
+  if BattlePresentation.suppressed("hud", battle) then return false, false end
   local enemy = battle.enemy and not battle.showEnemyTrainer
                 and not battle.enemySendingOut
                 and not battle:growInScale(battle.enemy) and slide == 0

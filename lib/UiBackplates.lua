@@ -41,6 +41,19 @@ function UiBackplates.spritesUnlit()
   return UiBackplates.spriteLight:get() == "UNLIT"
 end
 
+-- Visibility is independent of the saved textbox fill and HUD palette.
+UiBackplates.battleUi = ModSetting.new("battleUi", "BATTLE ART UI",
+  { "BOTH", "TEXTBOX", "HUD", "HIDE" },
+  { "BOTH", "TEXTBOX", "HUD", "HIDE" })
+
+function UiBackplates.uiHidden(surface)
+  local mode = UiBackplates.battleUi:get()
+  if surface == "hud" then return mode == "TEXTBOX" or mode == "HIDE" end
+  if surface == "text" then return mode == "HUD" or mode == "HIDE" end
+  if surface == "panels" then return mode == "HIDE" end
+  return false
+end
+
 -- ------- HUD COLOR -------
 
 -- COLOR keeps the engine's black HUD glyphs and green/yellow/red HP bars,

@@ -1,3 +1,20 @@
+## Battle UI visibility: 2026-09-05
+
+Added BATTLE ART UI to the battle options and mod-manager schema. BOTH is the
+persisted default; TEXTBOX hides Pokemon HUDs and their panels, HUD hides
+textbox ink and fill, and HIDE hides both. Existing textbox fill and HUD color
+choices remain saved and retain their existing arena-color rules. The setting
+uses BattlePresentation suppression, preserving companion claims and normal
+non-staged engine UI. Battle input and state handling are unchanged.
+
+Validation: battle_ui_visibility_test.lua, textbox_options_test.lua and
+textbox_style_test.lua pass under LuaJIT. Coverage includes all four modes,
+fill/palette combinations, panel visibility, cached HUD clearing, persistence,
+companion suppression and unstaged fallback. Changed Lua files compile.
+companion_main_uninstall_integration_test.lua has an existing fixture failure
+(indexing a function in main.lua); reproduced against the preceding commit.
+No in-game visual validation performed.
+
 # Integration update: 2026-09-05
 
 Current branch: `codex/legendary-1.10.2-integration`, created at the user's
