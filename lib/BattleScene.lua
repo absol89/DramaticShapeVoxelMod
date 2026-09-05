@@ -1234,6 +1234,7 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     if not (pl and pr and el and er) then return end
     out = {
       canvas = canvas,
+      trainerDrawn = providerTrainer,
       player = { pmx, pmy },
       enemy = { emx, emy },
       playerSpan = math.abs(pr - pl),

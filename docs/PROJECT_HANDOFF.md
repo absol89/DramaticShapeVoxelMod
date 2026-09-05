@@ -1,3 +1,13 @@
+## Hosted trainer duplicate: 2026-09-05
+
+Inspected the installed red_3d_player provider: drawBattleTrainer returns true
+when it draws successfully. BattleScene now includes that result in its shot.
+The Stadium-hosted native picture path uses it to omit the player's 2D trainer
+intro while retaining the enemy slot. Failed/absent provider draws retain the
+native fallback, and Pokemon drawing resumes after the intro. No companion
+files were changed. Hosted trainer visibility, BattleScene sidecar/shadows,
+and Stadium depth tests pass. In-game confirmation remains pending.
+
 ## Stadium visibility follow-up: 2026-09-05
 
 The importer source shows visualActor() can return nil despite a loaded model:

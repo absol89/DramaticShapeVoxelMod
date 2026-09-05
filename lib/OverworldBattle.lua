@@ -1540,6 +1540,14 @@ function OverworldBattle.install()
   function BattleState:drawPicsLayer(slide, sx, sy, onlySide, skipMenuClip)
     local shot = self.dramaticShapeShot
     if not shot then
+      -- Stadium hosts publish providerShot instead of dramaticShapeShot.
+      -- Suppress only the trainer slot, and only after a successful 3D draw.
+      local hosted = OverworldBattle.stageShot()
+      if hosted and hosted.trainerDrawn and self.showPlayerBack
+          and self.playerBackPic and not texturing then
+        if onlySide == "player" then return end
+        return innerPics(self, slide, sx, sy, "enemy", skipMenuClip)
+      end
       return innerPics(self, slide, sx, sy, onlySide, skipMenuClip)
     end
     -- The player trainer has two independent native routes in this stack.
