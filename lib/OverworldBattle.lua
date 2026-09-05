@@ -678,6 +678,14 @@ function OverworldBattle.providerRender(expectedBattle, drawActors,
   return shot.canvas
 end
 
+function OverworldBattle.providerExtras(battle, ctx)
+  if not OverworldBattle.providerAvailable(battle) then return false end
+  OverworldBattle.prepareTrainer(battle)
+  local drawn = BattleScene.renderHostedExtras(session.state, session.arena, battle, ctx)
+  session.providerShot = {trainerDrawn=drawn}
+  return drawn
+end
+
 function OverworldBattle.stageShot()
   if not session or session.broken then return nil end
   -- Stadium projects every slot, including species with no imported model.
@@ -1232,7 +1240,7 @@ end
 -- there, it is on the menu, so it has no card to be a texture for -- and
 -- nothing downstream has to know that. No billboard, and no shadow on the
 -- ground under a mon that is not on it.
-function OverworldBattle.textures(battle)
+function OverworldBattle.prepareTrainer(battle)
   if not battle then return nil end
 
   -- Persistent 3D trainer handoff. The engine exposes the selected player
@@ -1261,6 +1269,11 @@ function OverworldBattle.textures(battle)
   _G.RED3D_TRAINER_INTRO_ACTIVE = legacyTrainerOk and true or false
   _G.RED3D_TRAINER_BATTLE_STATE = legacyTrainerOk and battle or nil
 
+end
+
+function OverworldBattle.textures(battle)
+  if not battle then return nil end
+  OverworldBattle.prepareTrainer(battle)
   local out = {}
   local okE, enemy = pcall(OverworldBattle.sideTexture, battle, "enemy")
   local okP, player = true, nil

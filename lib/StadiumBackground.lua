@@ -531,6 +531,14 @@ function StadiumBackground.environment(next, ctx)
   return ctx.marks
 end
 
+function StadiumBackground.overlay(next, ctx)
+  local result = next(ctx)
+  if UiBackplates.arenaFill:get() ~= "OFF" then
+    OverworldBattle.providerExtras(ctx.scene.battle, ctx)
+  end
+  return result
+end
+
 function StadiumBackground.install()
   if installed then return true end
   local handle = findMod("STADIUM2_IMPORTER")
@@ -547,7 +555,9 @@ function StadiumBackground.install()
     StadiumBackground.battlers, 1000)
   local okShadow = pcall(scene.register, V.mod, "shadow",
     StadiumBackground.shadow, 100)
-  installed = okBackground and okCamera and okEnvironment and okBattlers and okShadow
+  local okOverlay = pcall(scene.register, V.mod, "overlay",
+    StadiumBackground.overlay, 100)
+  installed = okBackground and okCamera and okEnvironment and okBattlers and okShadow and okOverlay
   if installed and V.mod.events and type(V.mod.events.on) == "function" then
     V.mod.events:on("battle.ended", releaseVoxelHost)
   end

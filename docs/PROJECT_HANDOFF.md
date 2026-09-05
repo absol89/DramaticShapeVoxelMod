@@ -1,3 +1,19 @@
+## Flat Stadium trainer and Pokeball pass: 2026-09-05
+
+User confirms backgrounds, HUD and Stadium FX now work in all flat fills.
+Flat hosting previously skipped BattleScene's trainer and normal-ball pass.
+The Stadium overlay now invokes that shared pass, prepares the trainer lifecycle
+without capturing sprite cards, and publishes actual trainer draw success.
+Voxel3D can borrow an active host target without clearing or rebinding it;
+the host camera is translated into Battle Art arena coordinates. Both normal
+and flat passes use the same trainer callback, ball clock, meshes and beam.
+Graphics/camera state is restored on success and failure. OFF retains its path.
+
+Seven targeted LuaJIT suites pass, including borrowed-target preservation,
+translated camera, ball ticking and companion-error cleanup. These are mocked
+checks; in-game trainer/throw appearance still needs user verification.
+Master and tag are unchanged.
+
 ## Sprite FX anchors and background ordering: 2026-09-05
 
 stageShot now publishes the active Stadium scene's logical uiAnchors and exact
