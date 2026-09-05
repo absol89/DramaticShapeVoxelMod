@@ -511,6 +511,8 @@ return {
     -- volume builder, so pinning the rock is the whole fix: there is no
     -- run left to misread.
     CAVERN = {
+      -- Non-warp shelf treads share one source-aware geometry/support contract.
+      cave_steps = { tiles = { { 21, 22 }, { 21, 22 } }, rise = 6 },
       -- ---- 16: the rock, one band ----
       --
       -- Reading across the blockset: $02/$03 over $12/$13 is the
@@ -612,38 +614,11 @@ return {
       ground = { 32, 33, 42,       -- $20/$21/$2A, the dark lower floor
                  20,               -- $14, the surfable cave water
                  47, 34 },         -- $2F over $22, the drop hole
-      -- ---- 0 to 16: the ladders, the caves' real staircases ----
-      --
-      -- Both ladder graphics are drawn from above as a shaft with two
-      -- rails and rungs between them, and which one is which is not a
-      -- guess -- it is in the warp table.  Across all nineteen maps,
-      -- every one of the 37 $08 cells warps to a LOWER floor
-      -- (MT_MOON_1F->B1F, B1F->B2F, ROCK_TUNNEL_1F->B1F, each
-      -- SEAFOAM_ISLANDS floor to the next one down, CERULEAN_CAVE_2F->1F
-      -- and 1F->B1F, the Diglett's route stubs down into the cave) and
-      -- every one of the 40 $0A cells warps to a HIGHER one (the exact
-      -- reverse, plus MT_MOON_B1F's and ROCK_TUNNEL_1F's exits back out
-      -- to daylight).  $08 is the ladder DOWN, $0A the ladder UP: 77
-      -- cells, no exceptions.
-      --
-      -- So they take the two classes that MOVE between floors.  $0A
-      -- becomes a rising flight -- four real steps climbing 0 -> 16, the
-      -- height of the rock band it disappears into -- and $08 becomes an
-      -- excavated stairwell, four steps descending below the floor into
-      -- a dark opening.  East for both: the ladder art is symmetric
-      -- about its own centre line so the drawing does not choose a side,
-      -- the cell's east neighbour is the closed (rock) side more often
-      -- than its west, and the rest of this profile's staircases
-      -- (REDS_HOUSE_1, UNDERGROUND) climb east too.  The flight's treads
-      -- land one rung apiece, which is as close to a drawn ladder as
-      -- stepped geometry gets.
-      --
-      -- All four tiles of each cell are listed, the way REDS_HOUSE_1
-      -- lists its flight: buildStairs anchors on the cell's TOP-LEFT
-      -- tile ($08 / $0A) and claims the other three, but pinning them
-      -- too keeps them out of the region flood and the door fold.
-      stair_e = { 10, 11, 26, 27 },        -- $0A/$0B over $1A/$1B, UP
-      stair_down_e = { 8, 9, 24, 25 },     -- $08/$09 over $18/$19, DOWN
+      -- Source rails and rungs form separate, open 3D ladders. Downward
+      -- warps have an uncapped shaft, with a rim matching adjacent ground
+      -- or a raised shelf. Actor support stays at the native warp datum0.
+      ladder_up = { 10, 11, 26, 27 },
+      ladder_down = { 8, 9, 24, 25 },
       -- ---- 3: the boulder switches ----
       --
       -- Victory Road's four plates ($2B/$2C over $2D/$2E, on 1F, 2F and
@@ -715,6 +690,8 @@ return {
     -- (41/42, also the lab tables' corners) are adopted as caps by the
     -- bookcase builder rather than pinned.
     DOJO = {
+      -- Lance: the complete side-view flight occurs at its original warp only.
+      warp_stairs = { { tiles = {{72,73},{74,75}}, class = "stair_e" } },
       bookcase = { 13, 14, 29, 30 },
       -- the lab tables (the starter-ball display and the north tables):
       -- 41/42 are also the shelf trim the bookcase builder adopts as
@@ -735,6 +712,21 @@ return {
     -- this furniture as wall-height volumes -- and merges the wall-touching
     -- table and desk INTO the wall, towering both -- so every object here
     -- is pinned to the shape it depicts.
+    -- Yellow's beach room has no indoor water. Keep its striped/dithered
+    -- floors and exit mat flat; retain the wall posters and existing palms
+    -- in their source roles. The exact templates below separate the padded
+    -- seats, dining tables, and computer from the old fallback wall boxes.
+    BEACH_HOUSE = {
+      ground = { 1, 4, 17, 20 },
+      wall = { 0, 6, 7, 22, 23 },
+      stool = { 2, 3, 18, 19 },
+      table = { 38, 39, 41, 42, 43, 44, 54, 55, 56, 57, 58, 59, 60 },
+      counter = { 50, 51, 66, 67 }, -- the computer cabinet supports12px
+      billboard = { 32, 33, 64, 65 },
+      -- Keep the existing rounded palm treatment after native comparison.
+      heights = { stool = 3, table = 6, counter = 12 },
+    },
+
     REDS_HOUSE_2 = {
       -- the wall band with its windows stays one 16px face
       wall = { 0, 36, 37, 52, 53 },
@@ -1022,6 +1014,9 @@ return {
     -- boxed the two free-standing shelf racks into one 4-tile-deep
     -- monolith.
     MART = {
+      -- Indigo reuses this entire drawing for two non-warp service doors.
+      -- Only the actual League warp becomes a descending north flight.
+      warp_stairs = { { tiles = {{92,93},{94,95}}, class = "stair_down_n" } },
       -- THE BACK WALL.  It is drawn FOUR tile rows tall -- trim (40, or
       -- the fridge tops 90/91), the SALE signs (78/79) or glass upper
       -- (44/45), the black display niche (76/77) or glass lower (46/47),
@@ -1326,7 +1321,10 @@ return {
       -- flattened by the walkable-cell rule.  They stand on the floor:
       -- the window band is drawn ABOVE them, and the support rule only
       -- lifts a prop drawn above a box.
-      billboard = { 2, 3, 18, 19, 36, 52, 57 },
+      -- Exact museum-seat drawing; binoculars retain their separate standee.
+      stool = { 2, 3, 18, 19 },
+      heights = { stool = 5 },
+      billboard = { 36, 52, 57 },
       -- the plants, in the THIN pool like every other interior plant:
       -- the potted palm that stands in every hut and rest-house corner
       -- (5/6 crown, 21/22 fronds, 37/38 over 53/54 the pot), and Route
@@ -1408,6 +1406,15 @@ return {
     -- into the floor entirely, and three separate tiles fell into the
     -- engine's stale water set and sank into ponds indoors.
     LOBBY = {
+      -- Complete shop/casino stair cells at actual warps. Tiles 10/11 also
+      -- decorate the Prize Room counter, so a tile-wide pin is incorrect.
+      warp_stairs = {
+        { tiles = {{12,13},{28,29}}, class = "stair_n" },
+        { tiles = {{10,11},{26,27}}, class = "stair_down_n" },
+      },
+      -- The top-view cushion folds onto a five-pixel seat; its four
+      -- inset supports match the separately drawn lower elevation.
+      heights = { stool = 5 },
       -- The two exit cells of every map (the sliding-door threshold, 4
       -- over 20).  20 is $14, which the stale-cache fallback counts as
       -- water in EVERY tileset, and rule 2 judges the whole CELL by it:
@@ -1580,6 +1587,9 @@ return {
     -- cells and flattened away, the corner plants towered to 32px, and
     -- both staircases (also walkable) were flat floor.
     MUSEUM = {
+      -- The top-view cushion folds onto a five-pixel seat; its four
+      -- inset supports match the separately drawn lower elevation.
+      heights = { stool = 5 },
       -- the two street doors on 1F: the same $14 mat trap as the
       -- department store's, flat
       ground = { 4, 20 },
@@ -1851,18 +1861,12 @@ return {
       -- void), the back and rooftop doors (81-84, walkable and folded
       -- into their facade), the desk aprons (85/86), and the landing
       -- edge (5).
-      -- CANNOT be pinned, engine-side: the four staircases (12/13/28/29
-      -- the rising flight, 10/11/26/27 the sunken one) are in this
-      -- tileset's doorTiles, and Structures' door fold OVERWRITES the
-      -- resolved shape of any door cell whose north neighbour is upright
-      -- -- without checking `authored` -- so a stair_e / stair_down_w pin
-      -- is silently discarded.  The indoor flights therefore read as
-      -- doorways folded into the north wall band, which is at least what
-      -- they are (you walk into them from the room).  The roof's two
-      -- flights, which stand clear of any wall, come out as a shallow
-      -- 8px lip -- a stairwell mouth, near enough -- and pinning them
-      -- `wall` would be worse: it would plug the openings with a 16px
-      -- block in the middle of the roof.  See the report.
+      -- Mansion's horizontal tread bands face north. These are all
+      -- walkable warps: the class height describes the flight, while
+      -- actor support stays at floor0. Authored pins now survive the
+      -- door-fold guard, including the stair IDs listed as door tiles.
+      stair_n = { 12, 13, 28, 29 },
+      stair_down_n = { 10, 11, 26, 27 },
     },
 
     -- Silph Co's 11th floor (the president's office), Bill's house and
@@ -1876,6 +1880,8 @@ return {
     -- in the engine's stale-cache water set -- including $1F, the main
     -- FLOOR tile, which sank wherever it shared a cell with $48.
     INTERIOR = {
+      -- Silph 11F shares the Facility east-descending drawing, not a north flight.
+      warp_stairs = { { tiles = {{5,6},{21,22}}, class = "stair_down_e" } },
       -- the wall band, one 16px face throughout: the rooms' face-on
       -- courses (52 upper, 68 lower; 16 in Bill's house and Silph's
       -- outer band), the courses seen from above along the south and the
@@ -2038,6 +2044,8 @@ return {
     -- had a pond in it -- the shore-set trap, and TRADE_CENTER's link
     -- table carries the other one, $48.
     CLUB = {
+      -- Source facade10..15 gives the round seats their six-pixel height.
+      heights = { stool = 6 },
       -- The wall band stays ONE 16px face.  6 is the striped panel,
       -- 52 the fluted pillar that breaks it every three cells (its
       -- rounded foot, 53, stands one row lower on the floor and is
@@ -2267,10 +2275,11 @@ return {
       -- the TOP face and it lies low.  70/71 the pillow, 86/87 the
       -- mattress.  (Its drawer end is in `table` above.)
       bed = { 70, 71, 86, 87 },
-      -- Seats, in the standee pool: the round stool that appears in
-      -- every cabin, the badge house and the captain's room (7/8 seat
-      -- over 23/24 legs), and the captain's own chair (66/67 seat over
-      -- the same 23/24 base, its back pinned into the wall above).
+      -- Seats: the round stool in the cabins, badge house and captain's
+      -- room (7/8 over 23/24) has its own ship_stool template below;
+      -- these pins remain its fallback. The captain's own chair (66/67
+      -- over the same 23/24 base, its back pinned into the wall above)
+      -- retains its separate standee treatment.
       -- Seat height 8 keeps a character standing on the stool's
       -- (walkable) cell sitting at seat height rather than floating.
       -- The drawings have real floor margin on all four sides, so the
@@ -2357,6 +2366,16 @@ return {
     -- honest open water.  Nothing in this entry is dodging a water
     -- fallback; the whole entry is about the ship.)
     SHIP_PORT = {
+      -- Complete vessel; the live engine departure snapshot uses this same grid.
+      ship_hull = { anchor = { 20, 6 }, roofRows = 0, roofCycle = { 0, 0 },
+        depthPx = 48, slab = 0, panes = false, tiles = {
+          { 20, 20, 2, 3, 4, 5, 6, 7, 9, 9, 11, 11, 12, 13, 14, 15 },
+          { 16, 17, 18, 19, 0, 21, 22, 23, 24, 25, 24, 25, 28, 29, 30, 31 },
+          { 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 40, 41, 44, 45, 46, 47 },
+          { 48, 33, 34, 51, 52, 53, 54, 55, 56, 57, 56, 57, 62, 61, 62, 47 },
+          { 64, 65, 66, 67, 68, 69, 69, 69, 69, 69, 69, 69, 69, 77, 78, 79 },
+          { 20, 81, 82, 83, 85, 85, 85, 85, 85, 85, 85, 85, 85, 93, 90, 91 }
+        } },
       -- The hull, every tile of her, as a `roof`: a box wearing its art
       -- on the TOP face.  That is what the drawing IS -- the liner seen
       -- from above and slightly astern, funnels and boats and deck rail
@@ -2416,6 +2435,9 @@ return {
     -- island is tile $14 -- the engine's stale-cache water id -- and sank
     -- into a pond in the middle of the foyer.
     FACILITY = {
+      -- This alternate Silph up flight is the front-facing shop drawing,
+      -- including its four-row landing. Other Facility side-view stairs stay E/W.
+      warp_stairs = { { tiles = {{90,91},{67,52}}, class = "stair_n" } },
       -- The wall band stays ONE 16px face: the dark courses (42/58
       -- horizontal, 43/44 vertical, 45/46 the top corners, 59/60 the
       -- bottom caps) and Silph Co's own pale striped band (87/89).  A
@@ -2495,18 +2517,11 @@ return {
       -- accepted trade as the Center's bush.
       prop = { 5, 6, 7, 15, 21, 22, 23, 31, 39, 47, 55, 61, 62, 63 },
 
-      -- Both flights UP, both climbing EAST.  3/4/19/78 is the one-cell
-      -- open staircase of the Mansion (1F->2F, 2F->3F) and the Hideout
-      -- (B1F->Game Corner): white treads whose risers step up toward the
-      -- upper right.  90/91 over 67/52 is Silph Co's own stairwell, set
-      -- into the north wall band on every floor -- courses of tread whose
-      -- east ends step back one notch at a time.  BOTH cells are
-      -- WALKABLE (19 and 67 are the tileset's warp tiles), so unpinned
-      -- they resolved to flat ground and the steps were painted on the
-      -- floor.  Silph's drawing is the one genuinely ambiguous flight in
-      -- the tileset -- read as a west rise it builds a ramp that leaves a
-      -- gap against the east jamb, so east it is, which also makes one
-      -- consistent story out of every up-stair in the group.
+      -- Retained side-view up-flight pins. The complete 3/4/19/78
+      -- drawing rises east in the Mansion and Hideout. Silph's alternate
+      -- 90/91/67/52 drawing has horizontal front-facing treads; its ten
+      -- exact warp cells resolve north through warp_stairs above. Keeping
+      -- these old tile-level pins preserves all original actor ride rules.
       stair_e = { 3, 4, 19, 78, 52, 67, 90, 91 },
       -- The staircase DOWN (11/12/27/28): three treads in a black
       -- stairwell, shortening and darkening west to east, so the flight
@@ -2957,6 +2972,10 @@ return {
   -- Per-map additions to a shared tileset profile. Oak's Lab shares DOJO
   -- with the Fighting Dojo and Lance's room; these pins must not alter either.
   maps = {
+    -- Only the full-cell LAB stools appear in these rooms. Other LAB
+    -- rooms retain their existing eight-pixel bench-stool support.
+    FUCHSIA_MEETING_ROOM = { heights = { stool = 6 } },
+    CINNABAR_LAB_TRADE_ROOM = { heights = { stool = 6 } },
     OAKS_LAB = {
       -- Same four-tile drawing and round profile as the GYM cans.
       can = { 11, 12, 27, 28 },
@@ -3000,6 +3019,856 @@ return {
   },
 
   buildings = {
+    GATE = {
+      { frontEave = 0, id = "gate_stool", panes = false, parts = { { depth = 11, facade = { 11, 15 }, kind = "upright", silhouette = false, stretch = true, supports = { fromRow = 12, zones = { { x = { 3, 4 }, z = { 5, 6 } }, { x = { 3, 4 }, z = { 10, 11 } }, { x = { 11, 12 }, z = { 5, 6 } }, { x = { 11, 12 }, z = { 10, 11 } } } }, top = { 5, 10 }, x = { 2, 13 }, z = 3 }, { at = 4, kind = "flat", rows = { 5, 5 }, x = { 3, 12 }, z = 13 }, { at = 4, kind = "flat", rows = { 6, 6 }, x = { 3, 12 }, z = 4 }, { at = 4, kind = "flat", rows = { 7, 7 }, x = { 5, 10 }, z = 6 }, { at = 4, kind = "flat", rows = { 10, 10 }, x = { 5, 10 }, z = 11 } }, roofBack = 0, roofCycle = { 0, 0 }, roofFront = 0, roofRows = 0, slab = 0, tiles = { { 2, 3 }, { 18, 19 } } }
+    },
+    FACILITY = {
+      {
+        id = "facility_cabinet",
+        tiles = { { 40, 41 }, { 56, 57 }, { 56, 57 }, { 25, 26 } },
+        roofRows = 0, roofCycle = { 0, 0 }, slab = 0, depthPx = 32,
+        panes = false,
+        parts = {
+          -- The original projected top is rows0..3; the complete face is4..31.
+          -- Put its base in the original last cell, not in front of its own door.
+          { kind = "upright", x = { 0, 15 }, top = { 1, 1 }, facade = { 4, 31 },
+            z = 16, depth = 16, case = { sample = { 1, 4 } },
+            inset = { x = { 2, 13 }, rows = { 8, 24 } } },
+          { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 16, at = 27 },
+        },
+      },
+      -- Keep the full palm silhouette, including the original pot spacing.
+      {
+        id = "facility_palm",
+        tiles = { { 5, 6 }, { 21, 22 }, { 7, 15 }, { 23, 31 } },
+        plant = "facility_palm",
+        roofRows = 0, roofCycle = { 0, 0 }, slab = 0, depthPx = 32,
+        panes = false,
+      },
+    },
+    BEACH_HOUSE = {
+      {
+        roofRows = 0,
+        roofBack = 0,
+        roofFront = 0,
+        roofCycle = { 0, 0 },
+        slab = 0,
+        frontEave = 0,
+        panes = false,
+        id = "beach_stool",
+        tiles = { { 2, 3 }, { 18, 19 } },
+        parts = { {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 12, 12 },
+          z = 4,
+          at = 1,
+          sample = { 5, 12 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 14, 14 },
+          z = 4,
+          at = 0,
+          sample = { 5, 14 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 12, 12 },
+          z = 5,
+          at = 1,
+          sample = { 5, 12 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 14, 14 },
+          z = 5,
+          at = 0,
+          sample = { 5, 14 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 12, 12 },
+          z = 6,
+          at = 1,
+          sample = { 5, 12 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 14, 14 },
+          z = 6,
+          at = 0,
+          sample = { 5, 14 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 12, 12 },
+          z = 7,
+          at = 1,
+          sample = { 5, 12 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 14, 14 },
+          z = 7,
+          at = 0,
+          sample = { 5, 14 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 12, 12 },
+          z = 8,
+          at = 1,
+          sample = { 5, 12 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 14, 14 },
+          z = 8,
+          at = 0,
+          sample = { 5, 14 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 12, 12 },
+          z = 9,
+          at = 1,
+          sample = { 5, 12 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 14, 14 },
+          z = 9,
+          at = 0,
+          sample = { 5, 14 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 12, 12 },
+          z = 10,
+          at = 1,
+          sample = { 5, 12 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 14, 14 },
+          z = 10,
+          at = 0,
+          sample = { 5, 14 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 12, 12 },
+          z = 11,
+          at = 1,
+          sample = { 5, 12 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 14, 14 },
+          z = 11,
+          at = 0,
+          sample = { 5, 14 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 12, 12 },
+          z = 12,
+          at = 1,
+          sample = { 5, 12 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 14, 14 },
+          z = 12,
+          at = 0,
+          sample = { 5, 14 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 7, 7 },
+          z = 3,
+          at = 2,
+          sample = { 2, 7 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 7, 7 },
+          z = 4,
+          at = 2,
+          sample = { 2, 7 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 7, 7 },
+          z = 5,
+          at = 2,
+          sample = { 2, 7 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 7, 7 },
+          z = 6,
+          at = 2,
+          sample = { 2, 7 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 7, 7 },
+          z = 7,
+          at = 2,
+          sample = { 2, 7 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 7, 7 },
+          z = 8,
+          at = 2,
+          sample = { 2, 7 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 7, 7 },
+          z = 9,
+          at = 2,
+          sample = { 2, 7 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 7, 7 },
+          z = 10,
+          at = 2,
+          sample = { 2, 7 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 7, 7 },
+          z = 11,
+          at = 2,
+          sample = { 2, 7 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 7, 7 },
+          z = 12,
+          at = 2,
+          sample = { 2, 7 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 7, 7 },
+          z = 13,
+          at = 2,
+          sample = { 2, 7 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 7, 7 },
+          z = 4,
+          at = 2,
+          sample = { 3, 7 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 7, 7 },
+          z = 5,
+          at = 2,
+          sample = { 3, 7 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 7, 7 },
+          z = 6,
+          at = 2,
+          sample = { 3, 7 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 7, 7 },
+          z = 7,
+          at = 2,
+          sample = { 3, 7 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 7, 7 },
+          z = 8,
+          at = 2,
+          sample = { 3, 7 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 7, 7 },
+          z = 9,
+          at = 2,
+          sample = { 3, 7 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 7, 7 },
+          z = 10,
+          at = 2,
+          sample = { 3, 7 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 7, 7 },
+          z = 11,
+          at = 2,
+          sample = { 3, 7 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 7, 7 },
+          z = 12,
+          at = 2,
+          sample = { 3, 7 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 7, 7 },
+          z = 5,
+          at = 2,
+          sample = { 4, 7 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 7, 7 },
+          z = 6,
+          at = 2,
+          sample = { 4, 7 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 7, 7 },
+          z = 7,
+          at = 2,
+          sample = { 4, 7 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 7, 7 },
+          z = 8,
+          at = 2,
+          sample = { 4, 7 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 7, 7 },
+          z = 9,
+          at = 2,
+          sample = { 4, 7 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 7, 7 },
+          z = 10,
+          at = 2,
+          sample = { 4, 7 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 7, 7 },
+          z = 11,
+          at = 2,
+          sample = { 4, 7 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 7, 7 },
+          z = 6,
+          at = 2,
+          sample = { 5, 7 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 7, 7 },
+          z = 7,
+          at = 2,
+          sample = { 5, 7 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 7, 7 },
+          z = 8,
+          at = 2,
+          sample = { 5, 7 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 7, 7 },
+          z = 9,
+          at = 2,
+          sample = { 5, 7 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 7, 7 },
+          z = 10,
+          at = 2,
+          sample = { 5, 7 },
+        } },
+      },
+      {
+        roofRows = 0,
+        roofBack = 0,
+        roofFront = 0,
+        roofCycle = { 0, 0 },
+        slab = 0,
+        frontEave = 0,
+        panes = false,
+        id = "beach_table",
+        tiles = { { 38, 39, 39, 41 }, { 54, 55, 56, 57 }, { 44, 42, 42, 43 }, { 60, 58, 58, 59 } },
+        support = 6,
+        parts = { {
+          kind = "upright",
+          x = { 2, 29 },
+          top = { 28, 28 },
+          facade = { 28, 30 },
+          z = 2,
+          depth = 28,
+          supports = {
+            fromRow = 29,
+            zones = { {
+              x = { 2, 5 },
+              z = { 2, 5 },
+            }, {
+              x = { 2, 5 },
+              z = { 26, 29 },
+            }, {
+              x = { 26, 29 },
+              z = { 2, 5 },
+            }, {
+              x = { 26, 29 },
+              z = { 26, 29 },
+            } },
+          },
+        }, {
+          kind = "upright",
+          x = { 0, 31 },
+          top = { 2, 2 },
+          facade = { 24, 26 },
+          rise = 3,
+          z = 0,
+          depth = 32,
+        }, {
+          kind = "upright",
+          x = { 0, 31 },
+          top = { 24, 24 },
+          facade = { 24, 24 },
+          rise = 3,
+          z = 0,
+          depth = 32,
+        }, {
+          kind = "flat",
+          x = { 0, 31 },
+          rows = { 24, 24 },
+          z = 0,
+          at = 5,
+        }, {
+          kind = "flat",
+          x = { 1, 30 },
+          rows = { 1, 1 },
+          z = 1,
+          at = 5,
+        }, {
+          kind = "upright",
+          x = { 30, 30 },
+          top = { 1, 1 },
+          facade = { 1, 1 },
+          rise = 5,
+          z = 1,
+          depth = 30,
+        }, {
+          kind = "flat",
+          x = { 1, 30 },
+          rows = { 1, 1 },
+          z = 30,
+          at = 5,
+        }, {
+          kind = "flat",
+          x = { 13, 18 },
+          rows = { 8, 8 },
+          z = 12,
+          at = 5,
+        }, {
+          kind = "flat",
+          x = { 12, 19 },
+          rows = { 9, 9 },
+          z = 13,
+          at = 5,
+        }, {
+          kind = "flat",
+          x = { 11, 20 },
+          rows = { 10, 10 },
+          z = 14,
+          at = 5,
+        }, {
+          kind = "flat",
+          x = { 11, 20 },
+          rows = { 11, 11 },
+          z = 15,
+          at = 5,
+        }, {
+          kind = "flat",
+          x = { 11, 20 },
+          rows = { 12, 12 },
+          z = 16,
+          at = 5,
+        }, {
+          kind = "flat",
+          x = { 11, 20 },
+          rows = { 13, 13 },
+          z = 17,
+          at = 5,
+        }, {
+          kind = "flat",
+          x = { 12, 19 },
+          rows = { 14, 14 },
+          z = 18,
+          at = 5,
+        }, {
+          kind = "flat",
+          x = { 13, 18 },
+          rows = { 15, 15 },
+          z = 19,
+          at = 5,
+        } },
+      },
+      {
+        roofRows = 0,
+        roofBack = 0,
+        roofFront = 0,
+        roofCycle = { 0, 0 },
+        slab = 0,
+        frontEave = 0,
+        panes = false,
+        id = "beach_pc",
+        tiles = { { 64, 65 }, { 32, 33 }, { 66, 67 }, { 50, 51 } },
+        support = 12,
+        desk = {
+          fascia = { 20, 22 },
+          base = { 23, 31 },
+          depth = 2,
+          lid = "white",
+          z = 16,
+        },
+        parts = { {
+          kind = "upright",
+          x = { 2, 13 },
+          top = { 0, 3 },
+          facade = { 4, 14 },
+          z = 18,
+          depth = 6,
+          case = {
+            sample = { 5, 7 },
+          },
+          inset = {
+            x = { 4, 11 },
+            rows = { 5, 10 },
+          },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 17, 20 },
+          z = 24,
+          at = 12,
+        }, {
+          kind = "flat",
+          x = { 1, 14 },
+          rows = { 15, 15 },
+          z = 30,
+          at = 11,
+        } },
+        wall = {
+          cycle = { 0, 3 },
+          h = 16,
+          depthPx = 8,
+          x = 0,
+        },
+      },
+    },
+
+    MUSEUM = {
+      -- Unproject the source cushion and keep the accepted even rim,
+      -- centered padding, and four inset legs. Floor pixels stay outside.
+      {
+        roofRows = 0,
+        roofBack = 0,
+        roofFront = 0,
+        roofCycle = { 0, 0 },
+        slab = 0,
+        frontEave = 0,
+        panes = false,
+        id = "museum_stool",
+        tiles = { { 2, 3 }, { 18, 19 } },
+        parts = { {
+          kind = "upright",
+          x = { 2, 13 },
+          top = { 5, 10 },
+          facade = { 11, 15 },
+          z = 3,
+          depth = 11,
+          stretch = true,
+          silhouette = false,
+          supports = {
+            fromRow = 12,
+            zones = { {
+              x = { 3, 4 },
+              z = { 5, 6 },
+            }, {
+              x = { 3, 4 },
+              z = { 10, 11 },
+            }, {
+              x = { 11, 12 },
+              z = { 5, 6 },
+            }, {
+              x = { 11, 12 },
+              z = { 10, 11 },
+            } },
+          },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 5, 5 },
+          z = 13,
+          at = 4,
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 6, 6 },
+          z = 4,
+          at = 4,
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 7, 7 },
+          z = 6,
+          at = 4,
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 10, 10 },
+          z = 11,
+          at = 4,
+        } },
+      },
+    },
+
+    LOBBY = {
+      -- Resolve the whole round table without repinning shared floor tile55.
+      {
+        id = "lobby_round_table",
+        tiles = { { 9, 39, 39, 25 }, { 54, 55, 55, 57 }, { 70, 55, 55, 71 }, { 85, 86, 87, 55 } },
+        roofRows = 0,
+        roofBack = 0,
+        roofFront = 0,
+        roofCycle = { 0, 0 },
+        slab = 0,
+        frontEave = 0,
+        panes = false,
+        parts = {
+          { kind = "flat", x = { 13, 18 }, rows = { 7, 7 }, z = 8, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 12, 19 }, rows = { 7, 7 }, z = 9, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 13, 18 }, rows = { 7, 7 }, z = 9, at = 1, thick = 1, sample = { 10, 26 } },
+          { kind = "flat", x = { 11, 20 }, rows = { 7, 7 }, z = 10, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 12, 19 }, rows = { 7, 7 }, z = 10, at = 1, thick = 1, sample = { 10, 26 } },
+          { kind = "flat", x = { 10, 21 }, rows = { 7, 7 }, z = 11, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 11, 20 }, rows = { 7, 7 }, z = 11, at = 1, thick = 1, sample = { 10, 26 } },
+          { kind = "flat", x = { 9, 22 }, rows = { 7, 7 }, z = 12, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 10, 21 }, rows = { 7, 7 }, z = 12, at = 1, thick = 1, sample = { 10, 26 } },
+          { kind = "flat", x = { 8, 23 }, rows = { 7, 7 }, z = 13, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 9, 22 }, rows = { 7, 7 }, z = 13, at = 1, thick = 1, sample = { 10, 26 } },
+          { kind = "flat", x = { 8, 23 }, rows = { 7, 7 }, z = 14, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 9, 22 }, rows = { 7, 7 }, z = 14, at = 1, thick = 1, sample = { 10, 26 } },
+          { kind = "flat", x = { 8, 23 }, rows = { 7, 7 }, z = 15, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 9, 22 }, rows = { 7, 7 }, z = 15, at = 1, thick = 1, sample = { 10, 26 } },
+          { kind = "flat", x = { 8, 23 }, rows = { 7, 7 }, z = 16, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 9, 22 }, rows = { 7, 7 }, z = 16, at = 1, thick = 1, sample = { 10, 26 } },
+          { kind = "flat", x = { 8, 23 }, rows = { 7, 7 }, z = 17, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 9, 22 }, rows = { 7, 7 }, z = 17, at = 1, thick = 1, sample = { 10, 26 } },
+          { kind = "flat", x = { 8, 23 }, rows = { 7, 7 }, z = 18, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 9, 22 }, rows = { 7, 7 }, z = 18, at = 1, thick = 1, sample = { 10, 26 } },
+          { kind = "flat", x = { 9, 22 }, rows = { 7, 7 }, z = 19, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 10, 21 }, rows = { 7, 7 }, z = 19, at = 1, thick = 1, sample = { 10, 26 } },
+          { kind = "flat", x = { 10, 21 }, rows = { 7, 7 }, z = 20, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 11, 20 }, rows = { 7, 7 }, z = 20, at = 1, thick = 1, sample = { 10, 26 } },
+          { kind = "flat", x = { 11, 20 }, rows = { 7, 7 }, z = 21, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 12, 19 }, rows = { 7, 7 }, z = 21, at = 1, thick = 1, sample = { 10, 26 } },
+          { kind = "flat", x = { 12, 19 }, rows = { 7, 7 }, z = 22, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 13, 18 }, rows = { 7, 7 }, z = 22, at = 1, thick = 1, sample = { 10, 26 } },
+          { kind = "flat", x = { 13, 18 }, rows = { 7, 7 }, z = 23, at = 1, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 12, 19 }, rows = { 7, 7 }, z = 12, at = 5, thick = 5, sample = { 15, 25 } },
+          { kind = "flat", x = { 12, 19 }, rows = { 7, 7 }, z = 13, at = 5, thick = 5, sample = { 15, 25 } },
+          { kind = "flat", x = { 13, 18 }, rows = { 7, 7 }, z = 13, at = 5, thick = 5, sample = { 10, 26 } },
+          { kind = "flat", x = { 12, 19 }, rows = { 7, 7 }, z = 14, at = 5, thick = 5, sample = { 15, 25 } },
+          { kind = "flat", x = { 13, 18 }, rows = { 7, 7 }, z = 14, at = 5, thick = 5, sample = { 10, 26 } },
+          { kind = "flat", x = { 12, 19 }, rows = { 7, 7 }, z = 15, at = 5, thick = 5, sample = { 15, 25 } },
+          { kind = "flat", x = { 13, 18 }, rows = { 7, 7 }, z = 15, at = 5, thick = 5, sample = { 10, 26 } },
+          { kind = "flat", x = { 12, 19 }, rows = { 7, 7 }, z = 16, at = 5, thick = 5, sample = { 15, 25 } },
+          { kind = "flat", x = { 13, 18 }, rows = { 7, 7 }, z = 16, at = 5, thick = 5, sample = { 10, 26 } },
+          { kind = "flat", x = { 12, 19 }, rows = { 7, 7 }, z = 17, at = 5, thick = 5, sample = { 15, 25 } },
+          { kind = "flat", x = { 13, 18 }, rows = { 7, 7 }, z = 17, at = 5, thick = 5, sample = { 10, 26 } },
+          { kind = "flat", x = { 12, 19 }, rows = { 7, 7 }, z = 18, at = 5, thick = 5, sample = { 15, 25 } },
+          { kind = "flat", x = { 13, 18 }, rows = { 7, 7 }, z = 18, at = 5, thick = 5, sample = { 10, 26 } },
+          { kind = "flat", x = { 12, 19 }, rows = { 7, 7 }, z = 19, at = 5, thick = 5, sample = { 15, 25 } },
+          { kind = "flat", x = { 7, 24 }, rows = { 7, 7 }, z = 0, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 6, 25 }, rows = { 7, 7 }, z = 1, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 8, 23 }, rows = { 7, 7 }, z = 1, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 5, 26 }, rows = { 7, 7 }, z = 2, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 7, 24 }, rows = { 7, 7 }, z = 2, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 9, 22 }, rows = { 7, 7 }, z = 2, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 4, 27 }, rows = { 7, 7 }, z = 3, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 6, 25 }, rows = { 7, 7 }, z = 3, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 8, 23 }, rows = { 7, 7 }, z = 3, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 3, 28 }, rows = { 7, 7 }, z = 4, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 5, 26 }, rows = { 7, 7 }, z = 4, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 7, 24 }, rows = { 7, 7 }, z = 4, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 5, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 4, 27 }, rows = { 7, 7 }, z = 5, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 6, 25 }, rows = { 7, 7 }, z = 5, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 6, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 3, 28 }, rows = { 7, 7 }, z = 6, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 5, 26 }, rows = { 7, 7 }, z = 6, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 7, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 7, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 4, 27 }, rows = { 7, 7 }, z = 7, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 8, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 8, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 3, 28 }, rows = { 7, 7 }, z = 8, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 9, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 9, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 9, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 10, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 10, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 10, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 11, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 11, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 11, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 12, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 12, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 12, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 13, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 13, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 13, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 14, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 14, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 14, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 15, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 15, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 15, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 16, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 16, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 16, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 17, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 17, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 17, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 18, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 18, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 18, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 19, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 19, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 19, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 20, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 20, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 20, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 21, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 21, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 21, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 22, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 22, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 22, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 23, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 23, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 3, 28 }, rows = { 7, 7 }, z = 23, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 7, 7 }, z = 24, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 24, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 4, 27 }, rows = { 7, 7 }, z = 24, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 7, 7 }, z = 25, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 3, 28 }, rows = { 7, 7 }, z = 25, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 5, 26 }, rows = { 7, 7 }, z = 25, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 7, 7 }, z = 26, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 4, 27 }, rows = { 7, 7 }, z = 26, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 6, 25 }, rows = { 7, 7 }, z = 26, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 3, 28 }, rows = { 7, 7 }, z = 27, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 5, 26 }, rows = { 7, 7 }, z = 27, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 7, 24 }, rows = { 7, 7 }, z = 27, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 4, 27 }, rows = { 7, 7 }, z = 28, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 6, 25 }, rows = { 7, 7 }, z = 28, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 8, 23 }, rows = { 7, 7 }, z = 28, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 5, 26 }, rows = { 7, 7 }, z = 29, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 7, 24 }, rows = { 7, 7 }, z = 29, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 9, 22 }, rows = { 7, 7 }, z = 29, at = 7, thick = 1, sample = { 15, 3 } },
+          { kind = "flat", x = { 6, 25 }, rows = { 7, 7 }, z = 30, at = 7, thick = 2, sample = { 15, 25 } },
+          { kind = "flat", x = { 8, 23 }, rows = { 7, 7 }, z = 30, at = 7, thick = 1, sample = { 15, 1 } },
+          { kind = "flat", x = { 7, 24 }, rows = { 7, 7 }, z = 31, at = 7, thick = 2, sample = { 15, 25 } },
+        },
+      },
+      -- Unproject the source cushion and keep the accepted even rim,
+      -- centered padding, and four inset legs. Floor pixels stay outside.
+      {
+        roofRows = 0,
+        roofBack = 0,
+        roofFront = 0,
+        roofCycle = { 0, 0 },
+        slab = 0,
+        frontEave = 0,
+        panes = false,
+        id = "lobby_stool",
+        tiles = { { 7, 8 }, { 23, 24 } },
+        parts = { {
+          kind = "upright",
+          x = { 2, 13 },
+          top = { 4, 9 },
+          facade = { 10, 14 },
+          z = 3,
+          depth = 11,
+          stretch = true,
+          silhouette = false,
+          supports = {
+            fromRow = 11,
+            zones = { {
+              x = { 3, 4 },
+              z = { 5, 6 },
+            }, {
+              x = { 3, 4 },
+              z = { 10, 11 },
+            }, {
+              x = { 11, 12 },
+              z = { 5, 6 },
+            }, {
+              x = { 11, 12 },
+              z = { 10, 11 },
+            } },
+          },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 4, 4 },
+          z = 13,
+          at = 4,
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 5, 5 },
+          z = 4,
+          at = 4,
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 6, 6 },
+          z = 6,
+          at = 4,
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 9, 9 },
+          z = 11,
+          at = 4,
+        } },
+      },
+    },
+
     OVERWORLD = {
       -- assets/docs/buildings/B30: the POKEMON TOWER -- the one drawing
       -- in the catalogue that STRADDLES A MAP BOUNDARY.  Twelve of its
@@ -3691,28 +4560,712 @@ return {
       },
     },
 
-    DOJO = {
-      -- F01: the starter-ball table in Oak's lab (one placement in the
-      -- game: OAKS_LAB cell 6,3) -- the first FURNITURE through the
-      -- band pipeline, and the first drawing whose plot is smaller than
-      -- its grid. Its 24 rows read: 0-15 the tabletop seen from above
-      -- (black rim, white highlight course, grey field); 16-18 the top
-      -- slab's own front edge, black/#555/black -- which is exactly
-      -- what the rim treatment paints, so slab = 3 and those rows fold
-      -- into the roof band instead of extruding under it; 19-21 the
-      -- base band, corner feet and the inset dark panel between them.
+    SHIP = {
+      -- The cabin / Badge House stool is drawn in perspective. Rebuild
+      -- its twelve-pixel seat, ten-pixel fascia and eight-pixel underside
+      -- as concentric rounded layers, centered at 7.5 on both axes.
+      -- The lid keeps its grey field, dark collar and black rim; the dark
+      -- front-facing band belongs on the fascia rather than across the lid.
       --
-      -- The legs stand on open FLOOR: the measured ground line lands
-      -- two rows short of the grid (see Buildings measure), and `depth`
-      -- keeps the plot to the blocked cell row -- the grid's third row
-      -- is the walkable cell the player faces the table from, matched
-      -- so the flat leg art is claimed off the floor, not so the model
-      -- stands on it. 16 top rows onto a 16px plot map 1:1: roofBack
-      -- covers the whole depth, nothing cycles, and roofCycle is
-      -- unreachable behind it. The Poke Ball sprites ride the `table`
-      -- pin's height (VoxelScene.groundAt reads the collision tile, not
-      -- this model), so the tileset entry above overrides that height
-      -- to the 6px this drawing actually stands.
+      -- The light foot is partly hidden by the shaft in rows 11-13.
+      -- Mirror its unobscured lower outline (15/14/13) into a ten-pixel
+      -- round plan and continue row 14's white field beneath the shaft.
+      -- This infers its unseen rear without printing the grey/dark shaft
+      -- junction onto the foot. All donors remain this stool's own texels.
+      -- The existing 2x2 shaft and eight-pixel seating height stay intact.
+      --
+      -- Match only 7/8 over 23/24. The captain's 66/67 seat and its
+      -- wall-mounted back remain on their separate existing path.
+      {
+        id = "ship_stool",
+        tiles = {
+          { 7, 8 },
+          { 23, 24 },
+        },
+        roofRows = 0, roofBack = 0, roofFront = 0, roofCycle = { 0, 0 },
+        slab = 0, frontEave = 0, ledge = nil,
+        panes = false,
+        parts = {
+          -- Horizontal seat: centered grey field, dark collar, black rim.
+          { kind = "upright", x = { 4, 11 }, top = { 2, 2 }, facade = { 2, 2 }, rise = 7, z = 2, depth = 1 },
+          { kind = "upright", x = { 4, 11 }, top = { 2, 2 }, facade = { 2, 2 }, rise = 7, z = 13, depth = 1 },
+          { kind = "upright", x = { 3, 12 }, top = { 3, 3 }, facade = { 3, 3 }, rise = 7, z = 3, depth = 1 },
+          { kind = "upright", x = { 3, 12 }, top = { 3, 3 }, facade = { 3, 3 }, rise = 7, z = 12, depth = 1 },
+          { kind = "upright", x = { 2, 13 }, top = { 4, 4 }, facade = { 4, 4 }, rise = 7, z = 4, depth = 8 },
+          { kind = "upright", x = { 4, 11 }, top = { 8, 8 }, facade = { 8, 8 }, rise = 7, z = 3, depth = 1 },
+          { kind = "upright", x = { 4, 11 }, top = { 8, 8 }, facade = { 8, 8 }, rise = 7, z = 12, depth = 1 },
+          -- Dark fascia and black underside preserve the drawn band widths.
+          { kind = "upright", x = { 5, 10 }, top = { 8, 8 }, facade = { 8, 8 }, rise = 6, z = 3, depth = 1 },
+          { kind = "upright", x = { 5, 10 }, top = { 8, 8 }, facade = { 8, 8 }, rise = 6, z = 12, depth = 1 },
+          { kind = "upright", x = { 4, 11 }, top = { 8, 8 }, facade = { 8, 8 }, rise = 6, z = 4, depth = 1 },
+          { kind = "upright", x = { 4, 11 }, top = { 8, 8 }, facade = { 8, 8 }, rise = 6, z = 11, depth = 1 },
+          { kind = "upright", x = { 3, 12 }, top = { 8, 8 }, facade = { 8, 8 }, rise = 6, z = 5, depth = 6 },
+          { kind = "upright", x = { 6, 9 }, top = { 10, 10 }, facade = { 10, 10 }, rise = 5, z = 4, depth = 1 },
+          { kind = "upright", x = { 6, 9 }, top = { 10, 10 }, facade = { 10, 10 }, rise = 5, z = 11, depth = 1 },
+          { kind = "upright", x = { 5, 10 }, top = { 10, 10 }, facade = { 10, 10 }, rise = 5, z = 5, depth = 1 },
+          { kind = "upright", x = { 5, 10 }, top = { 10, 10 }, facade = { 10, 10 }, rise = 5, z = 10, depth = 1 },
+          { kind = "upright", x = { 4, 11 }, top = { 10, 10 }, facade = { 10, 10 }, rise = 5, z = 6, depth = 4 },
+          -- Original central shaft: same source texels and elevation.
+          { kind = "box", x = { 7, 8 }, rows = { 11, 13 }, cycle = { 12, 12 }, base = 1, z = 7, depth = 2 },
+          -- Symmetric white foot with black outline; no shaft-junction stamp.
+          { kind = "upright", x = { 5, 10 }, top = { 15, 15 }, facade = { 15, 15 }, rise = 0, z = 3, depth = 1 },
+          { kind = "upright", x = { 5, 10 }, top = { 15, 15 }, facade = { 15, 15 }, rise = 0, z = 12, depth = 1 },
+          { kind = "upright", x = { 4, 11 }, top = { 14, 14 }, facade = { 14, 14 }, rise = 0, z = 4, depth = 1 },
+          { kind = "upright", x = { 4, 11 }, top = { 14, 14 }, facade = { 14, 14 }, rise = 0, z = 11, depth = 1 },
+          { kind = "upright", x = { 3, 12 }, top = { 13, 13 }, facade = { 13, 13 }, rise = 0, z = 5, depth = 6 },
+          { kind = "upright", x = { 7, 8 }, top = { 14, 14 }, facade = { 14, 14 }, rise = 0, z = 5, depth = 6 },
+        },
+      },
+      -- Complete ship drawings; cropped cabin fallback must remain last.
+      { id = "ship_cabin_table", tiles = { { 9, 10, 10, 12 }, { 25, 26, 44, 28 }, { 11, 11, 11, 11 } }, roofRows = 0, roofCycle = { 0, 0 }, slab = 0, depthPx = 17, panes = false, groundTiles = { { 29, 13 }, { 13, 29 } }, parts = { { kind = "flat", x = { 0, 31 }, rows = { 0, 16 }, z = 0, at = 11 }, { kind = "flat", x = { 0, 0 }, rows = { 1, 1 }, z = 0, at = 11, sample = { 1, 0 } }, { kind = "flat", x = { 31, 31 }, rows = { 1, 1 }, z = 0, at = 11, sample = { 1, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 17 }, z = 0, at = 10, sample = { 1, 17 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 17 }, z = 0, at = 9, sample = { 0, 16 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 4 }, z = 2, at = 8, thick = 9, sample = { 1, 17 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 4 }, z = 11, at = 8, thick = 9, sample = { 1, 17 } }, { kind = "flat", x = { 26, 29 }, rows = { 1, 4 }, z = 2, at = 8, thick = 9, sample = { 1, 17 } }, { kind = "flat", x = { 26, 29 }, rows = { 1, 4 }, z = 11, at = 8, thick = 9, sample = { 1, 17 } }, { kind = "flat", x = { 8, 15 }, rows = { 0, 7 }, z = 8, at = 11, thick = 1, sample = { 19, 11 } }, { kind = "flat", x = { 9, 12 }, rows = { 0, 0 }, z = 8, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 9, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 10, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 11, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 12, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 12 }, rows = { 0, 0 }, z = 13, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 15 }, rows = { 0, 1 }, z = 10, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 15 }, rows = { 0, 1 }, z = 10, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 15, 15 }, rows = { 0, 1 }, z = 10, at = 14, thick = 1, sample = { 10, 9 } } } },
+      { id = "ship_house_table", tiles = { { 9, 10, 10, 12 }, { 25, 26, 44, 28 }, { 25, 44, 44, 28 }, { 11, 59, 60, 11 } }, roofRows = 0, roofCycle = { 0, 0 }, slab = 0, depthPx = 25, panes = false, groundTiles = { { 13, 29 }, { 29, 13 } }, parts = { { kind = "flat", x = { 0, 31 }, rows = { 0, 24 }, z = 0, at = 11 }, { kind = "flat", x = { 0, 0 }, rows = { 1, 1 }, z = 0, at = 11, sample = { 1, 0 } }, { kind = "flat", x = { 31, 31 }, rows = { 1, 1 }, z = 0, at = 11, sample = { 1, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 25 }, z = 0, at = 10, sample = { 1, 25 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 25 }, z = 0, at = 9, sample = { 0, 24 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 4 }, z = 2, at = 8, thick = 9, sample = { 1, 25 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 4 }, z = 19, at = 8, thick = 9, sample = { 1, 25 } }, { kind = "flat", x = { 26, 29 }, rows = { 1, 4 }, z = 2, at = 8, thick = 9, sample = { 1, 25 } }, { kind = "flat", x = { 26, 29 }, rows = { 1, 4 }, z = 19, at = 8, thick = 9, sample = { 1, 25 } }, { kind = "upright", x = { 8, 23 }, top = { 25, 25 }, facade = { 25, 31 }, z = 23, depth = 2, rise = 4, case = { sample = { 9, 27 } } }, { kind = "flat", x = { 8, 15 }, rows = { 0, 7 }, z = 8, at = 11, thick = 1, sample = { 19, 11 } }, { kind = "flat", x = { 9, 12 }, rows = { 0, 0 }, z = 8, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 9, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 10, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 11, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 12, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 12 }, rows = { 0, 0 }, z = 13, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 15 }, rows = { 0, 1 }, z = 10, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 15 }, rows = { 0, 1 }, z = 10, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 15, 15 }, rows = { 0, 1 }, z = 10, at = 14, thick = 1, sample = { 10, 9 } } } },
+      { id = "ship_captain_desk", tiles = { { 9, 10, 10, 10, 10, 12 }, { 25, 44, 68, 69, 44, 28 }, { 25, 44, 44, 44, 44, 28 }, { 59, 60, 11, 11, 59, 60 } }, roofRows = 0, roofCycle = { 0, 0 }, slab = 0, depthPx = 25, panes = false, groundTiles = { { 13, 29 }, { 29, 13 } }, parts = { { kind = "flat", x = { 0, 47 }, rows = { 0, 24 }, z = 0, at = 11 }, { kind = "flat", x = { 0, 0 }, rows = { 1, 1 }, z = 0, at = 11, sample = { 1, 0 } }, { kind = "flat", x = { 47, 47 }, rows = { 1, 1 }, z = 0, at = 11, sample = { 1, 0 } }, { kind = "flat", x = { 0, 47 }, rows = { 1, 25 }, z = 0, at = 10, sample = { 1, 25 } }, { kind = "flat", x = { 0, 47 }, rows = { 1, 25 }, z = 0, at = 9, sample = { 0, 24 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 4 }, z = 2, at = 8, thick = 9, sample = { 1, 25 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 4 }, z = 19, at = 8, thick = 9, sample = { 1, 25 } }, { kind = "flat", x = { 42, 45 }, rows = { 1, 4 }, z = 2, at = 8, thick = 9, sample = { 1, 25 } }, { kind = "flat", x = { 42, 45 }, rows = { 1, 4 }, z = 19, at = 8, thick = 9, sample = { 1, 25 } }, { kind = "upright", x = { 0, 15 }, top = { 25, 25 }, facade = { 25, 31 }, z = 23, depth = 2, rise = 4, case = { sample = { 1, 27 } } }, { kind = "upright", x = { 32, 47 }, top = { 25, 25 }, facade = { 25, 31 }, z = 23, depth = 2, rise = 4, case = { sample = { 33, 27 } } } } },
+      { id = "ship_kitchen_table", tiles = { { 9, 10, 10, 12 }, { 25, 26, 44, 28 }, { 25, 64, 65, 28 }, { 25, 80, 81, 28 }, { 25, 44, 26, 28 }, { 25, 44, 44, 28 }, { 25, 64, 65, 28 }, { 25, 80, 81, 28 }, { 25, 44, 26, 28 }, { 25, 44, 44, 28 }, { 25, 44, 44, 28 }, { 11, 59, 60, 11 } }, roofRows = 0, roofCycle = { 0, 0 }, slab = 0, depthPx = 89, panes = false, groundTiles = { { 13, 29 }, { 29, 13 } }, parts = { { kind = "flat", x = { 0, 31 }, rows = { 0, 88 }, z = 0, at = 11 }, { kind = "flat", x = { 0, 0 }, rows = { 1, 1 }, z = 0, at = 11, sample = { 1, 0 } }, { kind = "flat", x = { 31, 31 }, rows = { 1, 1 }, z = 0, at = 11, sample = { 1, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 89 }, z = 0, at = 10, sample = { 1, 89 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 89 }, z = 0, at = 9, sample = { 0, 88 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 4 }, z = 2, at = 8, thick = 9, sample = { 1, 89 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 4 }, z = 83, at = 8, thick = 9, sample = { 1, 89 } }, { kind = "flat", x = { 26, 29 }, rows = { 1, 4 }, z = 2, at = 8, thick = 9, sample = { 1, 89 } }, { kind = "flat", x = { 26, 29 }, rows = { 1, 4 }, z = 83, at = 8, thick = 9, sample = { 1, 89 } }, { kind = "upright", x = { 8, 23 }, top = { 89, 89 }, facade = { 89, 95 }, z = 87, depth = 2, rise = 4, case = { sample = { 9, 91 } } }, { kind = "flat", x = { 8, 15 }, rows = { 0, 7 }, z = 8, at = 11, thick = 1, sample = { 19, 11 } }, { kind = "flat", x = { 9, 12 }, rows = { 0, 0 }, z = 8, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 9, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 10, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 11, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 12, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 10 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 12 }, rows = { 0, 0 }, z = 13, at = 12, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 15 }, rows = { 0, 1 }, z = 10, at = 13, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 13, 15 }, rows = { 0, 1 }, z = 10, at = 15, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 15, 15 }, rows = { 0, 1 }, z = 10, at = 14, thick = 1, sample = { 10, 9 } }, { kind = "flat", x = { 16, 23 }, rows = { 0, 7 }, z = 32, at = 11, thick = 1, sample = { 19, 11 } }, { kind = "flat", x = { 17, 20 }, rows = { 0, 0 }, z = 32, at = 12, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 32, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 32, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 32, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 32, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 32, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 32, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 32, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 32, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 32, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 32, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 32, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 32, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 32, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 32, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 32, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 32, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 21 }, rows = { 0, 0 }, z = 33, at = 12, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 33, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 33, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 33, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 33, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 33, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 33, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 33, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 33, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 33, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 33, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 33, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 33, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 21 }, rows = { 0, 0 }, z = 34, at = 12, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 34, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 34, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 34, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 34, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 34, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 34, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 34, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 34, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 34, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 34, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 34, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 34, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 21 }, rows = { 0, 0 }, z = 35, at = 12, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 35, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 35, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 35, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 35, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 35, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 35, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 35, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 35, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 35, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 35, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 35, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 35, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 21 }, rows = { 0, 0 }, z = 36, at = 12, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 36, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 36, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 36, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 36, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 36, at = 13, thick = 1, sample = { 19, 34 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 36, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 36, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 36, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 36, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 36, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 36, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 36, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 17, 20 }, rows = { 0, 0 }, z = 37, at = 12, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 37, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 37, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 37, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 37, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 37, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 37, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 37, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 37, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 37, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 37, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 37, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 37, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 37, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 37, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 37, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 37, at = 16, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 21, 23 }, rows = { 0, 1 }, z = 34, at = 13, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 21, 23 }, rows = { 0, 1 }, z = 34, at = 15, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 23, 23 }, rows = { 0, 1 }, z = 34, at = 14, thick = 1, sample = { 18, 33 } }, { kind = "flat", x = { 16, 23 }, rows = { 0, 7 }, z = 64, at = 11, thick = 1, sample = { 19, 11 } }, { kind = "flat", x = { 17, 20 }, rows = { 0, 0 }, z = 64, at = 12, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 64, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 64, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 64, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 64, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 64, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 64, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 64, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 64, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 64, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 64, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 64, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 64, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 64, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 64, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 64, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 64, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 21 }, rows = { 0, 0 }, z = 65, at = 12, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 65, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 65, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 65, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 65, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 65, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 65, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 65, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 65, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 65, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 65, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 65, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 65, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 21 }, rows = { 0, 0 }, z = 66, at = 12, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 66, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 66, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 66, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 66, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 66, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 66, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 66, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 66, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 66, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 66, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 66, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 66, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 21 }, rows = { 0, 0 }, z = 67, at = 12, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 67, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 67, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 67, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 67, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 67, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 67, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 67, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 67, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 67, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 67, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 67, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 67, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 21 }, rows = { 0, 0 }, z = 68, at = 12, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 68, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 68, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 68, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 68, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 68, at = 13, thick = 1, sample = { 19, 66 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 68, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 68, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 68, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 68, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 68, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 68, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 68, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 17, 20 }, rows = { 0, 0 }, z = 69, at = 12, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 69, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 69, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 69, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 69, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 69, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 69, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 69, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 69, at = 14, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 69, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 69, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 69, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 69, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 69, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 69, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 69, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 69, at = 16, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 21, 23 }, rows = { 0, 1 }, z = 66, at = 13, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 21, 23 }, rows = { 0, 1 }, z = 66, at = 15, thick = 1, sample = { 18, 65 } }, { kind = "flat", x = { 23, 23 }, rows = { 0, 1 }, z = 66, at = 14, thick = 1, sample = { 18, 65 } } } },
+      { id = "ship_bunk", tiles = { { 70, 71 }, { 86, 87 }, { 86, 87 }, { 59, 60 } }, roofRows = 0, roofCycle = { 0, 0 }, slab = 0, depthPx = 24, panes = false, groundTiles = { { 13, 29 }, { 29, 13 } }, parts = { { kind = "upright", x = { 0, 15 }, top = { 0, 23 }, facade = { 24, 31 }, z = 0, depth = 24, case = { sample = { 1, 27 } } }, { kind = "flat", x = { 2, 14 }, rows = { 0, 4 }, z = 2, at = 7, thick = 1, sample = { 7, 10 } }, { kind = "flat", x = { 3, 13 }, rows = { 0, 4 }, z = 2, at = 8, thick = 1, sample = { 7, 10 } }, { kind = "flat", x = { 4, 12 }, rows = { 0, 2 }, z = 3, at = 9, thick = 1, sample = { 7, 10 } }, { kind = "flat", x = { 2, 14 }, rows = { 0, 13 }, z = 9, at = 8, thick = 1, sample = { 7, 10 } }, { kind = "flat", x = { 2, 14 }, rows = { 0, 1 }, z = 8, at = 9, thick = 2, sample = { 7, 10 } } }, seal = "e" },
+      { id = "ship_kitchen_counter", tiles = { { 10, 10, 10, 10 }, { 44, 64, 65, 44 }, { 44, 80, 81, 44 }, { 44, 44, 26, 44 } }, roofRows = 0, roofCycle = { 0, 0 }, slab = 0, depthPx = 32, panes = false, groundTiles = { { 13, 29 }, { 29, 13 } }, parts = { { kind = "flat", x = { 0, 31 }, rows = { 0, 31 }, z = 0, at = 11, thick = 12, sample = { 2, 8 } }, { kind = "flat", x = { 0, 31 }, rows = { 0, 31 }, z = 0, at = 11 }, { kind = "flat", x = { 16, 23 }, rows = { 0, 7 }, z = 24, at = 11, thick = 1, sample = { 3, 11 } }, { kind = "flat", x = { 17, 20 }, rows = { 0, 0 }, z = 24, at = 12, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 24, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 24, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 24, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 24, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 24, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 24, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 24, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 24, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 24, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 24, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 24, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 24, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 24, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 24, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 24, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 24, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 21 }, rows = { 0, 0 }, z = 25, at = 12, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 25, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 25, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 25, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 25, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 25, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 25, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 25, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 25, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 25, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 25, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 25, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 25, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 21 }, rows = { 0, 0 }, z = 26, at = 12, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 26, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 26, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 26, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 26, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 26, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 26, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 26, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 26, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 26, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 26, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 26, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 26, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 21 }, rows = { 0, 0 }, z = 27, at = 12, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 27, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 27, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 27, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 27, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 27, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 27, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 27, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 27, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 27, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 27, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 27, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 27, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 21 }, rows = { 0, 0 }, z = 28, at = 12, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 28, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 28, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 28, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 28, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 28, at = 13, thick = 1, sample = { 19, 26 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 28, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 28, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 28, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 28, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 28, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 16, 16 }, rows = { 0, 0 }, z = 28, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 21, 21 }, rows = { 0, 0 }, z = 28, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 17, 20 }, rows = { 0, 0 }, z = 29, at = 12, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 29, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 29, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 29, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 29, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 29, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 29, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 29, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 29, at = 14, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 29, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 29, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 29, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 29, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 17, 17 }, rows = { 0, 0 }, z = 29, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 18, 18 }, rows = { 0, 0 }, z = 29, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 19, 19 }, rows = { 0, 0 }, z = 29, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 20, 20 }, rows = { 0, 0 }, z = 29, at = 16, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 21, 23 }, rows = { 0, 1 }, z = 26, at = 13, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 21, 23 }, rows = { 0, 1 }, z = 26, at = 15, thick = 1, sample = { 18, 25 } }, { kind = "flat", x = { 23, 23 }, rows = { 0, 1 }, z = 26, at = 14, thick = 1, sample = { 18, 25 } } }, seal = "nsew" },
+      { id = "ship_kitchen_hob", tiles = { { 10, 10, 10, 10 }, { 44, 53, 53, 44 }, { 44, 53, 53, 44 }, { 44, 44, 44, 44 } }, roofRows = 0, roofCycle = { 0, 0 }, slab = 0, depthPx = 32, panes = false, groundTiles = { { 13, 29 }, { 29, 13 } }, parts = { { kind = "flat", x = { 0, 31 }, rows = { 0, 31 }, z = 0, at = 11, thick = 12, sample = { 2, 8 } }, { kind = "flat", x = { 0, 31 }, rows = { 0, 31 }, z = 0, at = 11 } }, seal = "nsew" },
+      { id = "ship_captain_chair", tiles = { { 16, 16 }, { 84, 85 }, { 66, 67 }, { 23, 24 } }, roofRows = 0, roofCycle = { 0, 0 }, slab = 0, depthPx = 32, panes = false, groundTiles = { { 13, 29 }, { 29, 13 } }, parts = { { kind = "flat", x = { 0, 15 }, rows = { 1, 16 }, z = 0, at = 15, thick = 16, sample = { 0, 0 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 15, sample = { 0, 0 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 14, sample = { 0, 1 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 13, sample = { 0, 2 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 12, sample = { 0, 3 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 11, sample = { 0, 4 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 10, sample = { 0, 5 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 9, sample = { 0, 6 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 8, sample = { 0, 7 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 7, sample = { 0, 8 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 6, sample = { 0, 9 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 5, sample = { 0, 10 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 4, sample = { 0, 11 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 3, sample = { 0, 12 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 2, sample = { 0, 13 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 1, sample = { 0, 14 } }, { kind = "flat", x = { 0, 15 }, rows = { 0, 0 }, z = 15, at = 0, sample = { 0, 15 } }, { kind = "flat", x = { 5, 10 }, rows = { 0, 0 }, z = 19, at = 0, sample = { 3, 19 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 20, at = 0, sample = { 3, 19 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 21, at = 0, sample = { 3, 19 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 22, at = 0, sample = { 3, 19 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 23, at = 0, sample = { 3, 19 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 24, at = 0, sample = { 3, 19 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 25, at = 0, sample = { 3, 19 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 26, at = 0, sample = { 3, 19 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 27, at = 0, sample = { 3, 19 } }, { kind = "flat", x = { 5, 10 }, rows = { 0, 0 }, z = 28, at = 0, sample = { 3, 19 } }, { kind = "flat", x = { 5, 10 }, rows = { 0, 0 }, z = 20, at = 0, sample = { 5, 28 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 21, at = 0, sample = { 5, 28 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 22, at = 0, sample = { 5, 28 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 23, at = 0, sample = { 5, 28 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 24, at = 0, sample = { 5, 28 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 25, at = 0, sample = { 5, 28 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 26, at = 0, sample = { 5, 28 } }, { kind = "flat", x = { 5, 10 }, rows = { 0, 0 }, z = 27, at = 0, sample = { 5, 28 } }, { kind = "flat", x = { 7, 8 }, rows = { 1, 2 }, z = 23, at = 1, sample = { 7, 29 } }, { kind = "flat", x = { 7, 8 }, rows = { 1, 2 }, z = 23, at = 2, sample = { 5, 28 } }, { kind = "flat", x = { 7, 8 }, rows = { 1, 2 }, z = 23, at = 3, sample = { 5, 28 } }, { kind = "flat", x = { 7, 8 }, rows = { 1, 2 }, z = 23, at = 4, sample = { 7, 27 } }, { kind = "flat", x = { 6, 9 }, rows = { 0, 0 }, z = 20, at = 5, sample = { 3, 19 } }, { kind = "flat", x = { 5, 10 }, rows = { 0, 0 }, z = 21, at = 5, sample = { 3, 19 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 22, at = 5, sample = { 3, 19 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 23, at = 5, sample = { 3, 19 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 24, at = 5, sample = { 3, 19 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 25, at = 5, sample = { 3, 19 } }, { kind = "flat", x = { 5, 10 }, rows = { 0, 0 }, z = 26, at = 5, sample = { 3, 19 } }, { kind = "flat", x = { 6, 9 }, rows = { 0, 0 }, z = 27, at = 5, sample = { 3, 19 } }, { kind = "flat", x = { 5, 10 }, rows = { 0, 0 }, z = 19, at = 6, sample = { 3, 20 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 20, at = 6, sample = { 3, 20 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 21, at = 6, sample = { 3, 20 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 22, at = 6, sample = { 3, 20 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 23, at = 6, sample = { 3, 20 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 24, at = 6, sample = { 3, 20 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 25, at = 6, sample = { 3, 20 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 26, at = 6, sample = { 3, 20 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 27, at = 6, sample = { 3, 20 } }, { kind = "flat", x = { 5, 10 }, rows = { 0, 0 }, z = 28, at = 6, sample = { 3, 20 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 18, at = 7, sample = { 3, 19 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 19, at = 7, sample = { 3, 19 } }, { kind = "flat", x = { 2, 13 }, rows = { 0, 0 }, z = 20, at = 7, sample = { 3, 19 } }, { kind = "flat", x = { 2, 13 }, rows = { 0, 0 }, z = 21, at = 7, sample = { 3, 19 } }, { kind = "flat", x = { 2, 13 }, rows = { 0, 0 }, z = 22, at = 7, sample = { 3, 19 } }, { kind = "flat", x = { 2, 13 }, rows = { 0, 0 }, z = 23, at = 7, sample = { 3, 19 } }, { kind = "flat", x = { 2, 13 }, rows = { 0, 0 }, z = 24, at = 7, sample = { 3, 19 } }, { kind = "flat", x = { 2, 13 }, rows = { 0, 0 }, z = 25, at = 7, sample = { 3, 19 } }, { kind = "flat", x = { 2, 13 }, rows = { 0, 0 }, z = 26, at = 7, sample = { 3, 19 } }, { kind = "flat", x = { 2, 13 }, rows = { 0, 0 }, z = 27, at = 7, sample = { 3, 19 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 28, at = 7, sample = { 3, 19 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 29, at = 7, sample = { 3, 19 } }, { kind = "flat", x = { 5, 10 }, rows = { 0, 0 }, z = 19, at = 7, sample = { 3, 20 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 20, at = 7, sample = { 3, 20 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 21, at = 7, sample = { 3, 20 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 22, at = 7, sample = { 3, 20 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 23, at = 7, sample = { 3, 20 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 24, at = 7, sample = { 3, 20 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 25, at = 7, sample = { 3, 20 } }, { kind = "flat", x = { 3, 12 }, rows = { 0, 0 }, z = 26, at = 7, sample = { 3, 20 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 27, at = 7, sample = { 3, 20 } }, { kind = "flat", x = { 5, 10 }, rows = { 0, 0 }, z = 28, at = 7, sample = { 3, 20 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 20, at = 7, sample = { 4, 20 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 21, at = 7, sample = { 4, 20 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 22, at = 7, sample = { 4, 20 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 23, at = 7, sample = { 4, 20 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 24, at = 7, sample = { 4, 20 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 25, at = 7, sample = { 4, 20 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 26, at = 7, sample = { 4, 20 } }, { kind = "flat", x = { 4, 11 }, rows = { 0, 0 }, z = 27, at = 7, sample = { 4, 20 } }, { kind = "upright", x = { 3, 12 }, top = { 9, 9 }, facade = { 9, 18 }, rise = 8, z = 18, depth = 2, case = { sample = { 4, 11 } } }, { kind = "flat", x = { 4, 11 }, rows = { 1, 2 }, z = 18, at = 18, sample = { 4, 8 } } }, seal = "nsew" },
+      { id = "ship_truncated_table", tiles = { { 9, 10, 10, 12 }, { 25, 26, 44, 28 } }, roofRows = 0, roofCycle = { 0, 0 }, slab = 0, depthPx = 17, panes = false, groundTiles = { { 13, 29 }, { 29, 13 } }, parts = { { kind = "flat", x = { 0, 31 }, rows = { 8, 23 }, z = 0, at = 11 }, { kind = "flat", x = { 0, 31 }, rows = { 0, 0 }, z = 16, at = 11 }, { kind = "flat", x = { 0, 0 }, rows = { 1, 1 }, z = 0, at = 11, sample = { 1, 8 } }, { kind = "flat", x = { 31, 31 }, rows = { 1, 1 }, z = 0, at = 11, sample = { 1, 8 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 0, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 1, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 2, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 3, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 4, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 5, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 6, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 7, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 8, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 9, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 10, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 11, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 12, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 13, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 14, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 15, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 16, at = 10, sample = { 1, 1 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 0, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 1, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 2, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 3, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 4, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 5, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 6, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 7, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 8, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 9, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 10, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 11, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 12, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 13, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 14, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 15, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 0, 31 }, rows = { 1, 1 }, z = 16, at = 9, sample = { 0, 0 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 1 }, z = 2, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 1 }, z = 3, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 1 }, z = 4, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 1 }, z = 5, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 1 }, z = 11, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 1 }, z = 12, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 1 }, z = 13, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 2, 5 }, rows = { 1, 1 }, z = 14, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 26, 29 }, rows = { 1, 1 }, z = 2, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 26, 29 }, rows = { 1, 1 }, z = 3, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 26, 29 }, rows = { 1, 1 }, z = 4, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 26, 29 }, rows = { 1, 1 }, z = 5, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 26, 29 }, rows = { 1, 1 }, z = 11, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 26, 29 }, rows = { 1, 1 }, z = 12, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 26, 29 }, rows = { 1, 1 }, z = 13, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 26, 29 }, rows = { 1, 1 }, z = 14, at = 8, thick = 9, sample = { 1, 1 } }, { kind = "flat", x = { 8, 15 }, rows = { 16, 23 }, z = 8, at = 11, thick = 1, sample = { 19, 19 } }, { kind = "flat", x = { 9, 12 }, rows = { 0, 0 }, z = 8, at = 12, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 8, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 9, at = 12, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 9, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 9, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 10, at = 12, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 10, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 10, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 11, at = 12, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 11, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 11, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 13 }, rows = { 0, 0 }, z = 12, at = 12, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 11, 18 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 8, 8 }, rows = { 0, 0 }, z = 12, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 13, 13 }, rows = { 0, 0 }, z = 12, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 9, 12 }, rows = { 0, 0 }, z = 13, at = 12, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 14, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 9, 9 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 10, 10 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 11, 11 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 12, 12 }, rows = { 0, 0 }, z = 13, at = 16, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 13, 15 }, rows = { 0, 1 }, z = 10, at = 13, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 13, 15 }, rows = { 0, 1 }, z = 10, at = 15, thick = 1, sample = { 10, 17 } }, { kind = "flat", x = { 15, 15 }, rows = { 0, 1 }, z = 10, at = 14, thick = 1, sample = { 10, 17 } } }, topRows = { { 11, 11, 11, 11 } }, seal = "s" },
+    },
+
+    LAB = {
+      -- Complete mixed desk/stool drawings: keep the original 12px worktop
+      -- and 8px seat support, with a separate inset chair and source equipment.
+      {
+        frontEave = 0,
+        id = "lab_workbench",
+        -- Explicit room floor under the source-complete desk/chair cutout.
+        groundTiles = {{1,38},{38,1}},
+        panes = false,
+        roofBack = 0,
+        roofCycle = { 0, 0 },
+        roofFront = 0,
+        roofRows = 0,
+        slab = 0,
+        tiles = { { 2, 3, 4, 5 }, { 18, 19, 20, 21 }, { 6, 7, 8, 9 }, { 22, 23, 38, 1 } },
+        parts = {
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 2 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 3 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 4 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 2 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 3 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 4 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 11 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 12 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 11 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 12 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 2 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 3 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 4 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 5 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 6 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 7 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 8 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 9 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 10 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 11 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 12 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 2 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 3 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 4 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 5 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 6 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 7 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 8 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 9 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 10 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 11 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 12 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 19, 21 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 20, 21 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 21, 21 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 22, 21 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 23, 21 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 24, 21 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 25, 21 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 26, 21 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 27, 21 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 28, 21 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 29, 21 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 19, 20 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 20, 20 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 21, 20 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 22, 20 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 23, 20 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 24, 20 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 25, 20 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 26, 20 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 27, 20 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 28, 20 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 29, 20 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 19, 20 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 20, 20 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 21, 20 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 22, 20 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 23, 20 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 24, 20 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 25, 20 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 26, 20 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 27, 20 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 28, 20 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 29, 20 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 19, 19 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 20, 19 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 21, 19 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 22, 19 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 23, 19 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 24, 19 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 25, 19 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 26, 19 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 27, 19 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 28, 19 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 29, 19 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 19, 19 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 20, 19 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 21, 19 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 22, 19 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 23, 19 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 24, 19 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 25, 19 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 26, 19 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 27, 19 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 28, 19 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 29, 19 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 19, 18 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 20, 18 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 21, 18 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 22, 18 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 23, 18 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 24, 18 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 25, 18 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 26, 18 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 27, 18 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 28, 18 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 29, 18 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 19, 18 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 20, 18 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 21, 18 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 22, 18 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 23, 18 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 24, 18 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 25, 18 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 26, 18 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 27, 18 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 28, 18 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 29, 18 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 19, 17 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 20, 17 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 22, 17 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 23, 17 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 24, 17 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 25, 17 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 26, 17 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 27, 17 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 28, 17 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 29, 17 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 19, 17 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 20, 17 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 22, 17 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 23, 17 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 24, 17 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 25, 17 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 26, 17 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 27, 17 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 28, 17 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 29, 17 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 2 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 3 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 4 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 5 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 6 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 7 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 8 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 9 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 10 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 11 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 12 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 13 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 0 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 1 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 2 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 3 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 4 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 5 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 6 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 7 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 8 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 9 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 10 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 11 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 12 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 13 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 14 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 15 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 0 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 1 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 2 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 3 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 4 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 5 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 6 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 7 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 8 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 9 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 10 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 11 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 12 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 13 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 14 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 15 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 1 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 2 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 3 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 4 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 5 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 6 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 7 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 8 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 9 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 10 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 11 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 12 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 13 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 14 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 2 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 3 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 4 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 5 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 6 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 7 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 8 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 9 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 10 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 11 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 12 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 3, 4 }, z = 19 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 3, 4 }, z = 20 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 3, 4 }, z = 19 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 3, 4 }, z = 20 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 3, 4 }, z = 27 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 3, 4 }, z = 28 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 3, 4 }, z = 27 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 3, 4 }, z = 28 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 11, 12 }, z = 19 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 11, 12 }, z = 20 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 11, 12 }, z = 19 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 11, 12 }, z = 20 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 11, 12 }, z = 27 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 11, 12 }, z = 28 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 11, 12 }, z = 27 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 11, 12 }, z = 28 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 18 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 19 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 20 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 21 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 22 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 23 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 24 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 25 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 26 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 27 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 28 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 29 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 19 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 20 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 21 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 22 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 23 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 24 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 25 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 26 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 27 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 28 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 21 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 22 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 23 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 24 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 25 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 26 },
+          { at = 12, kind = "flat", rows = { 3, 7 }, x = { 3, 15 } },
+          { depth = 6, facade = { 12, 13 }, kind = "upright", rise = 12, top = { 8, 12 }, x = { 4, 15 }, z = 8 },
+          { depth = 2, facade = { 8, 9 }, kind = "upright", rise = 12, top = { 8, 8 }, x = { 16, 19 }, z = 8 },
+          { case = { bezel = { 20, 10 }, cursor = { 24, 8 }, lid = { 25, 2 }, screen = { 21, 7 }, shell = { 28, 5 } }, kind = "iso", plan = 6, rise = 12, rows = { 1, 13 }, x = { 19, 30 }, z = 9 },
+        },
+      },
+      {
+        frontEave = 0,
+        id = "warden_workbench",
+        -- Explicit room floor under the source-complete desk/chair cutout.
+        groundTiles = {{1,38},{38,1}},
+        panes = false,
+        roofBack = 0,
+        roofCycle = { 0, 0 },
+        roofFront = 0,
+        roofRows = 0,
+        slab = 0,
+        tiles = { { 64, 65, 65, 66 }, { 80, 72, 73, 82 }, { 6, 7, 8, 9 }, { 22, 23, 38, 1 } },
+        parts = {
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 2 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 3 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 4 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 2 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 3 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 4 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 11 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 12 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 11 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 12 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 2 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 3 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 4 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 5 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 6 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 7 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 8 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 9 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 10 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 11 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 12 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 2 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 3 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 4 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 5 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 6 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 7 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 8 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 9 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 10 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 11 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 12 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 19, 21 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 20, 21 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 21, 21 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 22, 21 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 23, 21 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 24, 21 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 25, 21 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 26, 21 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 27, 21 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 28, 21 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 29, 21 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 19, 20 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 20, 20 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 21, 20 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 22, 20 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 23, 20 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 24, 20 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 25, 20 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 26, 20 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 27, 20 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 28, 20 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 29, 20 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 19, 20 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 20, 20 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 21, 20 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 22, 20 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 23, 20 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 24, 20 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 25, 20 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 26, 20 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 27, 20 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 28, 20 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 29, 20 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 19, 19 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 20, 19 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 21, 19 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 22, 19 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 23, 19 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 24, 19 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 25, 19 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 26, 19 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 27, 19 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 28, 19 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 29, 19 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 19, 19 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 20, 19 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 21, 19 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 22, 19 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 23, 19 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 24, 19 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 25, 19 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 26, 19 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 27, 19 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 28, 19 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 29, 19 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 19, 18 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 20, 18 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 21, 18 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 22, 18 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 23, 18 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 24, 18 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 25, 18 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 26, 18 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 27, 18 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 28, 18 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 29, 18 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 19, 18 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 20, 18 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 21, 18 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 22, 18 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 23, 18 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 24, 18 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 25, 18 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 26, 18 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 27, 18 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 28, 18 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 29, 18 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 19, 17 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 20, 17 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 22, 17 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 23, 17 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 24, 17 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 25, 17 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 26, 17 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 27, 17 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 28, 17 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 29, 17 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 19, 17 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 20, 17 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 22, 17 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 23, 17 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 24, 17 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 25, 17 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 26, 17 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 27, 17 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 28, 17 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 29, 17 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 2 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 3 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 4 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 5 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 6 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 7 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 8 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 9 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 10 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 11 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 12 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 13 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 0 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 1 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 2 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 3 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 4 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 5 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 6 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 7 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 8 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 9 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 10 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 11 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 12 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 13 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 14 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 15 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 0 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 1 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 2 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 3 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 4 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 5 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 6 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 7 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 8 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 9 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 10 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 11 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 12 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 13 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 14 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 15 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 1 }, thick = 1, x = { 1, 30 }, z = 1 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 1 }, thick = 1, x = { 1, 30 }, z = 2 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 1 }, thick = 1, x = { 1, 30 }, z = 3 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 1 }, thick = 1, x = { 1, 30 }, z = 4 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 1 }, thick = 1, x = { 1, 30 }, z = 5 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 1 }, thick = 1, x = { 1, 30 }, z = 6 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 1 }, thick = 1, x = { 1, 30 }, z = 7 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 1 }, thick = 1, x = { 1, 30 }, z = 8 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 1 }, thick = 1, x = { 1, 30 }, z = 9 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 1 }, thick = 1, x = { 1, 30 }, z = 10 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 1 }, thick = 1, x = { 1, 30 }, z = 11 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 1 }, thick = 1, x = { 1, 30 }, z = 12 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 1 }, thick = 1, x = { 1, 30 }, z = 13 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 1 }, thick = 1, x = { 1, 30 }, z = 14 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 4, 4 }, thick = 1, x = { 2, 29 }, z = 2 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 4, 4 }, thick = 1, x = { 2, 29 }, z = 3 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 4, 4 }, thick = 1, x = { 2, 29 }, z = 4 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 4, 4 }, thick = 1, x = { 2, 29 }, z = 5 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 4, 4 }, thick = 1, x = { 2, 29 }, z = 6 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 4, 4 }, thick = 1, x = { 2, 29 }, z = 7 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 4, 4 }, thick = 1, x = { 2, 29 }, z = 8 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 4, 4 }, thick = 1, x = { 2, 29 }, z = 9 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 4, 4 }, thick = 1, x = { 2, 29 }, z = 10 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 4, 4 }, thick = 1, x = { 2, 29 }, z = 11 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 4, 4 }, thick = 1, x = { 2, 29 }, z = 12 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 4, 4 }, thick = 1, x = { 2, 29 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 3, 4 }, z = 19 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 3, 4 }, z = 20 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 3, 4 }, z = 19 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 3, 4 }, z = 20 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 3, 4 }, z = 27 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 3, 4 }, z = 28 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 3, 4 }, z = 27 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 3, 4 }, z = 28 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 11, 12 }, z = 19 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 11, 12 }, z = 20 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 11, 12 }, z = 19 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 11, 12 }, z = 20 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 11, 12 }, z = 27 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 11, 12 }, z = 28 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 11, 12 }, z = 27 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 11, 12 }, z = 28 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 18 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 19 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 20 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 21 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 22 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 23 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 24 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 25 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 26 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 27 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 28 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 29 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 19 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 20 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 21 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 22 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 23 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 24 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 25 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 26 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 27 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 28 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 21 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 22 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 23 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 24 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 25 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 26 },
+          { case = { sample = { 9, 9 } }, depth = 4, facade = { 9, 12 }, inset = { rows = { 10, 11 }, x = { 10, 13 } }, kind = "upright", rise = 12, top = { 8, 8 }, x = { 8, 16 }, z = 6 },
+          { at = 12, kind = "flat", rows = { 13, 15 }, x = { 8, 16 }, z = 10 },
+          { at = 11, kind = "flat", rows = { 8, 8 }, x = { 19, 19 } },
+          { at = 11, kind = "flat", rows = { 9, 9 }, x = { 18, 20 } },
+          { at = 11, kind = "flat", rows = { 10, 10 }, x = { 17, 21 } },
+          { at = 11, kind = "flat", rows = { 11, 11 }, x = { 16, 22 } },
+          { at = 11, kind = "flat", rows = { 12, 12 }, x = { 16, 22 } },
+          { at = 11, kind = "flat", rows = { 13, 13 }, x = { 17, 21 } },
+          { at = 11, kind = "flat", rows = { 14, 14 }, x = { 18, 20 } },
+          { at = 11, kind = "flat", rows = { 15, 15 }, x = { 19, 19 } },
+        },
+      },
+      -- The complete LAB equipment desk occurs in Fuchsia's meeting
+      -- room and Cinnabar's fossil room. Preserve its established12px
+      -- support plane, while separating the face-on terminal from its
+      -- top-view keyboard and the adjacent unmarked round motif.
+      {
+        id = "lab_equipment_desk",
+        tiles = {
+          { 64, 65, 65, 66 },
+          { 80, 81, 81, 82 },
+          { 80, 72, 73, 82 },
+          { 83, 58, 58, 84 },
+        },
+        roofRows = 0, roofBack = 0, roofFront = 0, roofCycle = { 0, 0 },
+        slab = 0, frontEave = 0, panes = false, support = 12,
+        parts = {
+          -- Repeat only the actual three-pixel foot bands vertically.
+          -- Four inset posts leave two pixels of overhang on every side;
+          -- source row31 is floor and must never become furniture.
+          { kind = "flat", x = { 2, 4 }, rows = { 28, 30 }, z = 2, at = 8, thick = 9 },
+          { kind = "flat", x = { 27, 29 }, rows = { 28, 30 }, z = 2, at = 8, thick = 9 },
+          { kind = "flat", x = { 2, 4 }, rows = { 28, 30 }, z = 27, at = 8, thick = 9 },
+          { kind = "flat", x = { 27, 29 }, rows = { 28, 30 }, z = 27, at = 8, thick = 9 },
+          -- The original plain field replaces the old device print on
+          -- this lid only. Keep the full source intact for the parts.
+          { kind = "upright", x = { 0, 31 }, top = { 2, 2 },
+            facade = { 24, 26 }, rise = 9, z = 0, depth = 32 },
+          { kind = "upright", x = { 0, 31 }, top = { 24, 24 },
+            facade = { 24, 24 }, rise = 9, z = 0, depth = 32 },
+          { kind = "flat", x = { 0, 31 }, rows = { 24, 24 }, z = 0, at = 11 },
+          -- Complete the source's narrow white highlight around all
+          -- four sides of the level top, just inside its black rim.
+          { kind = "flat", x = { 1, 30 }, rows = { 1, 1 }, z = 1, at = 11 },
+          { kind = "upright", x = { 30, 30 }, top = { 1, 1 },
+            facade = { 1, 1 }, rise = 11, z = 1, depth = 30 },
+          { kind = "flat", x = { 1, 30 }, rows = { 1, 1 }, z = 30, at = 11 },
+          -- This drawing has no cursor or indicator. Its two dark
+          -- display rows recess into the original white case material.
+          { kind = "upright", x = { 8, 16 }, top = { 16, 16 },
+            facade = { 17, 20 }, rise = 12, z = 16, depth = 4,
+            case = { sample = { 9, 17 } },
+            inset = { x = { 10, 13 }, rows = { 18, 19 } } },
+          { kind = "flat", x = { 8, 16 }, rows = { 21, 23 }, z = 20, at = 12 },
+          -- Keep one flat, unmarked round piece exactly as drawn. Its
+          -- diamond outline shares two pixels with the terminal border;
+          -- copying the whole tile would leave a second upright outline
+          -- painted on the table beside the new computer.
+          { kind = "flat", x = { 19, 19 }, rows = { 16, 16 }, at = 11 },
+          { kind = "flat", x = { 18, 20 }, rows = { 17, 17 }, at = 11 },
+          { kind = "flat", x = { 17, 21 }, rows = { 18, 18 }, at = 11 },
+          { kind = "flat", x = { 16, 22 }, rows = { 19, 20 }, at = 11 },
+          { kind = "flat", x = { 17, 21 }, rows = { 21, 21 }, at = 11 },
+          { kind = "flat", x = { 18, 20 }, rows = { 22, 22 }, at = 11 },
+          { kind = "flat", x = { 19, 19 }, rows = { 23, 23 }, at = 11 },
+        },
+      },
+      -- The full-cell laboratory stool has a top-view cushion in rows2..8,
+      -- above five rows of leg elevation (9..13). A six-pixel seat puts
+      -- the sitter on that surface instead of inside an upright12px print.
+      -- Its four inferred corner posts and centered trim follow the
+      -- accepted square stools; every material stays in this source art.
+      {
+        id = "lab_stool",
+        tiles = { { 14, 15 }, { 30, 31 } },
+        roofRows = 0, roofBack = 0, roofFront = 0, roofCycle = { 0, 0 },
+        slab = 0, frontEave = 0, panes = false,
+        parts = {
+          { kind = "upright", x = { 2, 13 }, top = { 2, 7 },
+            facade = { 8, 13 }, z = 3, depth = 11,
+            stretch = true, silhouette = false,
+            -- Keep the shadow between the drawn side supports open;
+            -- repeat those supports as four inset two-by-two posts.
+            supports = { fromRow = 9, zones = {
+              { x = { 3, 4 }, z = { 10, 11 } },
+              { x = { 11, 12 }, z = { 10, 11 } },
+              { x = { 3, 4 }, z = { 5, 6 } },
+              { x = { 11, 12 }, z = { 5, 6 } },
+            } } },
+          -- Close the black perimeter, retain equal two-pixel white
+          -- margins, and center the source's six-column gray cushion.
+          { kind = "flat", x = { 3, 12 }, rows = { 2, 2 }, z = 13, at = 5 },
+          { kind = "flat", x = { 3, 12 }, rows = { 3, 3 }, z = 4, at = 5 },
+          { kind = "flat", x = { 5, 10 }, rows = { 4, 4 }, z = 6, at = 5 },
+          { kind = "flat", x = { 5, 10 }, rows = { 7, 7 }, z = 11, at = 5 },
+        },
+      },
+    },
+
+    DOJO = {
+      -- Oak's starter display: the source paints16 top rows, then three
+      -- slab-edge rows and three base rows. Keep its48x16 plot and6px
+      -- actor support; four inset feet replace the full-depth runners.
+      -- Constant source donors close the white rim and make the overhang
+      -- even on all sides. No source floor rows22/23 become geometry.
       {
         id = "lab_table",
         tiles = {
@@ -3722,22 +5275,121 @@ return {
         },
         roofRows = 19, roofBack = 16, roofFront = 0, roofCycle = { 2, 13 },
         slab = 3, frontEave = 0, ledge = nil, depth = 2,
+        -- Six-pixel tabletop with equal2px overhang and four corner feet.
+        -- The drawn white highlight closes around all four inner edges.
+        -- Repeated source row17 is fully occupied; sample names the actual
+        -- material donor, so no background or floor is extruded.
+        panes = false,
+        parts = {
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 2, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 3, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 4, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 5, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 2, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 3, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 4, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 5, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 10, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 11, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 12, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 13, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 10, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 11, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 12, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 13, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 2, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 3, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 4, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 5, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 2, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 3, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 4, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 5, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 10, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 11, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 12, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 13, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 10, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 11, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 12, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 42, 45 }, rows = { 17, 17 }, z = 13, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 2, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 3, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 4, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 5, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 6, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 7, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 8, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 9, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 10, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 11, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 12, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 13, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 0, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 1, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 2, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 3, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 4, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 5, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 6, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 7, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 8, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 9, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 10, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 11, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 12, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 13, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 14, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 15, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 0, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 1, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 2, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 3, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 4, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 5, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 6, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 7, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 8, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 9, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 10, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 11, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 12, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 13, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 14, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 47 }, rows = { 17, 17 }, z = 15, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 1, 46 }, rows = { 17, 17 }, z = 1, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 46 }, rows = { 17, 17 }, z = 2, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 46 }, rows = { 17, 17 }, z = 3, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 46 }, rows = { 17, 17 }, z = 4, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 46 }, rows = { 17, 17 }, z = 5, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 46 }, rows = { 17, 17 }, z = 6, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 46 }, rows = { 17, 17 }, z = 7, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 46 }, rows = { 17, 17 }, z = 8, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 46 }, rows = { 17, 17 }, z = 9, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 46 }, rows = { 17, 17 }, z = 10, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 46 }, rows = { 17, 17 }, z = 11, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 46 }, rows = { 17, 17 }, z = 12, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 46 }, rows = { 17, 17 }, z = 13, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 46 }, rows = { 17, 17 }, z = 14, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 2, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 3, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 4, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 5, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 6, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 7, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 8, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 9, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 10, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 11, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 12, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 45 }, rows = { 17, 17 }, z = 13, at = 5, thick = 1, sample = { 8, 2 } },
+        },
       },
-      -- F02: the computer desk on the lab's west side (OAKS_LAB cell
-      -- 0,1) -- the one DESK-SET template: the pipeline's region
-      -- classification at PART granularity (see Buildings
-      -- deskSetModel). The desk is the sibling lab table (fascia rows
-      -- 16-18, base 19-21); on it stand a monitor over its keyboard
-      -- (left), a computer tower over a keyboard and mouse (middle),
-      -- and a sheet of paper LYING FLAT (right). Upright parts anchor
-      -- their drawn bottom row to the desk's top plane and wear their
-      -- own drawn tops as lids; flat parts lie one voxel proud at
-      -- drawn row = depth row -- the same 1:1 the tabletop itself is
-      -- drawn with. The roof fields are inert (roofRows = 0 keeps the
-      -- recess scan over the whole drawing, which is what sinks the
-      -- monitor's screen and the tower's slots). Same drawing, same
-      -- grid, stands in the Hall of Fame on the GYM atlas --
-      -- registered there below.
+      -- The west computer desk uses the same32x16 six-pixel base. Its
+      -- original monitor, tower, keypad and paper remain pixel/voxel-exact
+      -- above height6; explicit rise/at fields retain that support plane.
+      -- All materials come from this drawing, not the sibling Hall of
+      -- Fame computer. That separate GYM template remains unchanged.
       {
         id = "lab_computers",
         tiles = {
@@ -3747,20 +5399,122 @@ return {
         },
         roofRows = 0, roofBack = 0, roofFront = 0, roofCycle = { 0, 0 },
         slab = 0, frontEave = 0, ledge = nil, depth = 2,
-        desk = { fascia = { 16, 18 }, base = { 19, 21 } },
+        -- Symmetric six-pixel desk; equipment above its plane stays exact.
         parts = {
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 2, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 3, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 4, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 5, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 2, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 3, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 4, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 5, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 10, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 11, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 12, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 13, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 10, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 11, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 12, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 13, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 2, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 3, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 4, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 5, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 2, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 3, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 4, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 5, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 10, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 11, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 12, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 13, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 10, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 11, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 12, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 13, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 2, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 3, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 4, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 5, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 6, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 7, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 8, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 9, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 10, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 11, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 12, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 13, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 0, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 1, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 2, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 3, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 4, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 5, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 6, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 7, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 8, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 9, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 10, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 11, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 12, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 13, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 14, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 15, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 0, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 1, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 2, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 3, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 4, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 5, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 6, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 7, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 8, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 9, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 10, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 11, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 12, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 13, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 14, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 15, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 1, at = 5, thick = 1, sample = { 3, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 2, at = 5, thick = 1, sample = { 3, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 3, at = 5, thick = 1, sample = { 3, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 4, at = 5, thick = 1, sample = { 3, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 5, at = 5, thick = 1, sample = { 3, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 6, at = 5, thick = 1, sample = { 3, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 7, at = 5, thick = 1, sample = { 3, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 8, at = 5, thick = 1, sample = { 3, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 9, at = 5, thick = 1, sample = { 3, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 10, at = 5, thick = 1, sample = { 3, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 11, at = 5, thick = 1, sample = { 3, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 12, at = 5, thick = 1, sample = { 3, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 13, at = 5, thick = 1, sample = { 3, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 14, at = 5, thick = 1, sample = { 3, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 2, at = 5, thick = 1, sample = { 3, 3 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 3, at = 5, thick = 1, sample = { 3, 3 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 4, at = 5, thick = 1, sample = { 3, 3 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 5, at = 5, thick = 1, sample = { 3, 3 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 6, at = 5, thick = 1, sample = { 3, 3 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 7, at = 5, thick = 1, sample = { 3, 3 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 8, at = 5, thick = 1, sample = { 3, 3 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 9, at = 5, thick = 1, sample = { 3, 3 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 10, at = 5, thick = 1, sample = { 3, 3 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 11, at = 5, thick = 1, sample = { 3, 3 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 12, at = 5, thick = 1, sample = { 3, 3 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 13, at = 5, thick = 1, sample = { 3, 3 } },
+
           { kind = "upright", x = { 2, 13 }, top = { 0, 2 },
-            facade = { 3, 10 }, depth = 4 },              -- the monitor
-          { kind = "flat", x = { 1, 13 }, rows = { 11, 14 } },  -- keyboard
+            facade = { 3, 10 }, rise = 6, depth = 4, case = { sample = { 3, 1 } } },              -- the monitor
+          { kind = "flat", x = { 1, 13 }, rows = { 11, 14 }, at = 6 },  -- keyboard
           { kind = "upright", x = { 14, 21 }, top = { 0, 3 },
-            facade = { 4, 10 }, depth = 6 },              -- the tower
-          { kind = "flat", x = { 14, 21 }, rows = { 11, 14 } }, -- keys+mouse
-          { kind = "flat", x = { 22, 30 }, rows = { 1, 14 } },  -- the paper
+            facade = { 4, 10 }, rise = 6, depth = 6, case = { sample = { 15, 1 } } },              -- the tower
+          { kind = "flat", x = { 14, 21 }, rows = { 11, 14 }, at = 6 }, -- keys+mouse
+          { kind = "flat", x = { 22, 30 }, rows = { 1, 14 }, at = 6 },  -- the paper
         },
       },
-      -- F03: the empty north table beside it (OAKS_LAB cell 2,1): the
-      -- starter table's band table verbatim on a grid two tiles
-      -- narrower.
+      -- The north Pokédex table: the same symmetric base on its original
+      --32x16 plot and6px support, with its own source palette donors.
       {
         id = "lab_table_small",
         tiles = {
@@ -3770,6 +5524,115 @@ return {
         },
         roofRows = 19, roofBack = 16, roofFront = 0, roofCycle = { 2, 13 },
         slab = 3, frontEave = 0, ledge = nil, depth = 2,
+        -- Six-pixel tabletop with equal2px overhang and four corner feet.
+        -- The drawn white highlight closes around all four inner edges.
+        -- Repeated source row17 is fully occupied; sample names the actual
+        -- material donor, so no background or floor is extruded.
+        panes = false,
+        parts = {
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 2, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 3, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 4, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 5, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 2, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 3, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 4, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 5, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 10, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 11, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 12, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 13, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 10, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 11, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 12, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 5 }, rows = { 17, 17 }, z = 13, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 2, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 3, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 4, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 5, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 2, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 3, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 4, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 5, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 10, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 11, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 12, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 13, at = 1, thick = 2, sample = { 8, 16 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 10, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 11, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 12, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 26, 29 }, rows = { 17, 17 }, z = 13, at = 1, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 2, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 3, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 4, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 5, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 6, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 7, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 8, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 9, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 10, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 11, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 12, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 13, at = 2, thick = 1, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 0, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 1, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 2, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 3, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 4, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 5, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 6, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 7, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 8, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 9, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 10, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 11, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 12, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 13, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 14, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 15, at = 5, thick = 3, sample = { 8, 16 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 0, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 1, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 2, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 3, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 4, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 5, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 6, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 7, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 8, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 9, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 10, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 11, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 12, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 13, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 14, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 0, 31 }, rows = { 17, 17 }, z = 15, at = 4, thick = 1, sample = { 8, 17 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 1, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 2, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 3, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 4, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 5, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 6, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 7, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 8, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 9, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 10, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 11, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 12, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 13, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 1, 30 }, rows = { 17, 17 }, z = 14, at = 5, thick = 1, sample = { 8, 1 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 2, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 3, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 4, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 5, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 6, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 7, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 8, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 9, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 10, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 11, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 12, at = 5, thick = 1, sample = { 8, 2 } },
+          { kind = "flat", x = { 2, 29 }, rows = { 17, 17 }, z = 13, at = 5, thick = 1, sample = { 8, 2 } },
+        },
       },
     },
 
@@ -3798,7 +5661,7 @@ return {
         desk = { fascia = { 20, 21 }, base = { 22, 23 }, lid = "white" },
         parts = {
           { kind = "upright", x = { 2, 13 }, top = { 0, 3 },
-            facade = { 4, 14 }, depth = 6 },                -- the unit
+            facade = { 4, 14 }, depth = 6, case = { sample = { 3, 1 } } },                -- the unit
           { kind = "flat", x = { 2, 13 }, rows = { 17, 19 },
             z = 13 },                                       -- keyboard
         },
@@ -3972,7 +5835,7 @@ return {
         desk = { fascia = { 20, 21 }, base = { 22, 23 }, lid = "white" },
         parts = {
           { kind = "upright", x = { 2, 13 }, top = { 0, 3 },
-            facade = { 4, 14 }, depth = 6 },                -- the unit
+            facade = { 4, 14 }, depth = 6, case = { sample = { 3, 1 } } },                -- the unit
           { kind = "flat", x = { 2, 13 }, rows = { 17, 19 },
             z = 13 },                                       -- keyboard
         },
@@ -4068,10 +5931,10 @@ return {
         desk = { fascia = { 16, 18 }, base = { 19, 21 } },
         parts = {
           { kind = "upright", x = { 2, 13 }, top = { 0, 2 },
-            facade = { 3, 10 }, depth = 4 },              -- the monitor
+            facade = { 3, 10 }, depth = 4, case = { sample = { 3, 1 } } },              -- the monitor
           { kind = "flat", x = { 1, 13 }, rows = { 11, 14 } },  -- keyboard
           { kind = "upright", x = { 14, 21 }, top = { 0, 3 },
-            facade = { 4, 10 }, depth = 6 },              -- the tower
+            facade = { 4, 10 }, depth = 6, case = { sample = { 15, 1 } } },              -- the tower
           { kind = "flat", x = { 14, 21 }, rows = { 11, 14 } }, -- keys+mouse
           { kind = "flat", x = { 22, 30 }, rows = { 1, 14 } },  -- the paper
         },
@@ -4079,6 +5942,510 @@ return {
     },
 
     CLUB = {
+      -- Exact whole bicycle drawings; legacy pins remain the fallback.
+      -- Materials come only from each drawing, with open wheel/frame gaps.
+      {
+        id="bike_display_floor", bicycle="floor",
+        tiles={{11,12,14},{27,28,9}},
+        roofRows=0,roofBack=0,roofFront=0,roofCycle={0,0},
+        slab=0,frontEave=0,depth=16,panes=false,
+      },
+      {
+        id="bike_display_wall", bicycle="wall",
+        tiles={{1,2,3},{17,18,19}},
+        roofRows=0,roofBack=0,roofFront=0,roofCycle={0,0},
+        slab=0,frontEave=0,depth=16,panes=false,
+      },
+      -- Round top, dark cushion fascia, and a short centered pedestal;
+      -- unfold the three source bands without projecting them twice.
+      {
+        roofRows = 0,
+        roofBack = 0,
+        roofFront = 0,
+        roofCycle = { 0, 0 },
+        slab = 0,
+        frontEave = 0,
+        panes = false,
+        id = "cable_club_stool",
+        tiles = { { 42, 43 }, { 38, 39 } },
+        parts = { {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 2,
+          at = 5,
+          sample = { 7, 4 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 3,
+          at = 5,
+          sample = { 7, 4 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 4,
+          at = 5,
+          sample = { 7, 4 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 8, 8 },
+          z = 5,
+          at = 5,
+          sample = { 7, 4 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 8, 8 },
+          z = 6,
+          at = 5,
+          sample = { 7, 4 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 8, 8 },
+          z = 7,
+          at = 5,
+          sample = { 7, 4 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 8, 8 },
+          z = 8,
+          at = 5,
+          sample = { 7, 4 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 8, 8 },
+          z = 9,
+          at = 5,
+          sample = { 7, 4 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 8, 8 },
+          z = 10,
+          at = 5,
+          sample = { 7, 4 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 11,
+          at = 5,
+          sample = { 7, 4 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 12,
+          at = 5,
+          sample = { 7, 4 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 13,
+          at = 5,
+          sample = { 7, 4 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 3,
+          at = 5,
+          sample = { 7, 5 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 4,
+          at = 5,
+          sample = { 7, 5 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 5,
+          at = 5,
+          sample = { 7, 5 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 6,
+          at = 5,
+          sample = { 7, 5 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 7,
+          at = 5,
+          sample = { 7, 5 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 8,
+          at = 5,
+          sample = { 7, 5 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 9,
+          at = 5,
+          sample = { 7, 5 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 10,
+          at = 5,
+          sample = { 7, 5 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 11,
+          at = 5,
+          sample = { 7, 5 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 12,
+          at = 5,
+          sample = { 7, 5 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 4,
+          at = 5,
+          sample = { 7, 7 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 5,
+          at = 5,
+          sample = { 7, 7 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 6,
+          at = 5,
+          sample = { 7, 7 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 7,
+          at = 5,
+          sample = { 7, 7 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 8,
+          at = 5,
+          sample = { 7, 7 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 9,
+          at = 5,
+          sample = { 7, 7 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 10,
+          at = 5,
+          sample = { 7, 7 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 11,
+          at = 5,
+          sample = { 7, 7 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 2,
+          at = 4,
+          sample = { 5, 11 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 3,
+          at = 4,
+          sample = { 5, 11 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 4,
+          at = 4,
+          sample = { 5, 11 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 8, 8 },
+          z = 5,
+          at = 4,
+          sample = { 5, 11 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 8, 8 },
+          z = 6,
+          at = 4,
+          sample = { 5, 11 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 8, 8 },
+          z = 7,
+          at = 4,
+          sample = { 5, 11 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 8, 8 },
+          z = 8,
+          at = 4,
+          sample = { 5, 11 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 8, 8 },
+          z = 9,
+          at = 4,
+          sample = { 5, 11 },
+        }, {
+          kind = "flat",
+          x = { 2, 13 },
+          rows = { 8, 8 },
+          z = 10,
+          at = 4,
+          sample = { 5, 11 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 11,
+          at = 4,
+          sample = { 5, 11 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 12,
+          at = 4,
+          sample = { 5, 11 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 13,
+          at = 4,
+          sample = { 5, 11 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 3,
+          at = 3,
+          sample = { 7, 13 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 4,
+          at = 3,
+          sample = { 7, 13 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 5,
+          at = 3,
+          sample = { 7, 13 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 6,
+          at = 3,
+          sample = { 7, 13 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 7,
+          at = 3,
+          sample = { 7, 13 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 8,
+          at = 3,
+          sample = { 7, 13 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 9,
+          at = 3,
+          sample = { 7, 13 },
+        }, {
+          kind = "flat",
+          x = { 3, 12 },
+          rows = { 8, 8 },
+          z = 10,
+          at = 3,
+          sample = { 7, 13 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 11,
+          at = 3,
+          sample = { 7, 13 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 12,
+          at = 3,
+          sample = { 7, 13 },
+        }, {
+          kind = "flat",
+          x = { 6, 9 },
+          rows = { 8, 8 },
+          z = 4,
+          at = 2,
+          thick = 3,
+          sample = { 5, 15 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 5,
+          at = 2,
+          thick = 3,
+          sample = { 5, 15 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 6,
+          at = 2,
+          thick = 3,
+          sample = { 5, 15 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 7,
+          at = 2,
+          thick = 3,
+          sample = { 5, 15 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 8,
+          at = 2,
+          thick = 3,
+          sample = { 5, 15 },
+        }, {
+          kind = "flat",
+          x = { 4, 11 },
+          rows = { 8, 8 },
+          z = 9,
+          at = 2,
+          thick = 3,
+          sample = { 5, 15 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 10,
+          at = 2,
+          thick = 3,
+          sample = { 5, 15 },
+        }, {
+          kind = "flat",
+          x = { 6, 9 },
+          rows = { 8, 8 },
+          z = 11,
+          at = 2,
+          thick = 3,
+          sample = { 5, 15 },
+        }, {
+          kind = "flat",
+          x = { 6, 9 },
+          rows = { 8, 8 },
+          z = 5,
+          at = 2,
+          thick = 2,
+          sample = { 7, 14 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 6,
+          at = 2,
+          thick = 2,
+          sample = { 7, 14 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 7,
+          at = 2,
+          thick = 2,
+          sample = { 7, 14 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 8,
+          at = 2,
+          thick = 2,
+          sample = { 7, 14 },
+        }, {
+          kind = "flat",
+          x = { 5, 10 },
+          rows = { 8, 8 },
+          z = 9,
+          at = 2,
+          thick = 2,
+          sample = { 7, 14 },
+        }, {
+          kind = "flat",
+          x = { 6, 9 },
+          rows = { 8, 8 },
+          z = 10,
+          at = 2,
+          thick = 2,
+          sample = { 7, 14 },
+        } },
+      },
       -- F06: the Bike Shop's OPEN TOOLBOX -- BIKE_SHOP cells (6,6) and
       -- (7,7), and nowhere else in the game (2 placements).
       --
@@ -4136,6 +6503,276 @@ return {
     },
 
     MANSION = {
+      -- Complete mixed desk/stool drawings: keep the original 12px worktop
+      -- and 8px seat support, with a separate inset chair and source equipment.
+      {
+        frontEave = 0,
+        id = "mansion_workbench",
+        -- Explicit room floor under the source-complete desk/chair cutout.
+        groundTiles = {{17}},
+        panes = false,
+        roofBack = 0,
+        roofCycle = { 0, 0 },
+        roofFront = 0,
+        roofRows = 0,
+        slab = 0,
+        tiles = { { 36, 37, 52, 53 }, { 64, 65, 66, 67 }, { 2, 3, 85, 86 }, { 18, 19, 17, 17 } },
+        parts = {
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 2 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 3 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 4 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 2 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 3 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 4 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 11 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 12 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 2, 4 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 11 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 12 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 4 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 2 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 3 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 4 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 5 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 6 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 7 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 8 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 9 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 10 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 11 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 12 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 9, x = { 19, 29 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 2 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 3 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 4 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 5 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 6 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 7 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 8 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 9 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 10 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 11 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 12 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 19, 29 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 19, 21 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 20, 21 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 21, 21 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 22, 21 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 23, 21 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 24, 21 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 25, 21 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 26, 21 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 27, 21 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 28, 21 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 29, 21 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 19, 20 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 20, 20 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 21, 20 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 22, 20 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 23, 20 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 24, 20 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 25, 20 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 26, 20 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 27, 20 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 28, 20 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 1, kind = "flat", rows = { 15, 15 }, sample = { 29, 20 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 19, 20 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 20, 20 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 21, 20 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 22, 20 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 23, 20 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 24, 20 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 25, 20 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 26, 20 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 27, 20 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 28, 20 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 2, kind = "flat", rows = { 15, 15 }, sample = { 29, 20 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 19, 19 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 20, 19 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 21, 19 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 22, 19 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 23, 19 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 24, 19 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 25, 19 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 26, 19 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 27, 19 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 28, 19 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 3, kind = "flat", rows = { 15, 15 }, sample = { 29, 19 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 19, 19 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 20, 19 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 21, 19 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 22, 19 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 23, 19 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 24, 19 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 25, 19 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 26, 19 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 27, 19 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 28, 19 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 4, kind = "flat", rows = { 15, 15 }, sample = { 29, 19 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 19, 18 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 20, 18 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 21, 18 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 22, 18 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 23, 18 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 24, 18 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 25, 18 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 26, 18 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 27, 18 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 28, 18 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 29, 18 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 19, 18 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 20, 18 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 21, 18 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 22, 18 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 23, 18 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 24, 18 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 25, 18 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 26, 18 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 27, 18 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 28, 18 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 6, kind = "flat", rows = { 15, 15 }, sample = { 29, 18 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 19, 17 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 20, 17 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 22, 17 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 23, 17 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 24, 17 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 25, 17 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 26, 17 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 27, 17 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 28, 17 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 29, 17 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 19, 17 }, thick = 1, x = { 19, 19 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 20, 17 }, thick = 1, x = { 20, 20 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 21, 21 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 22, 17 }, thick = 1, x = { 22, 22 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 23, 17 }, thick = 1, x = { 23, 23 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 24, 17 }, thick = 1, x = { 24, 24 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 25, 17 }, thick = 1, x = { 25, 25 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 26, 17 }, thick = 1, x = { 26, 26 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 27, 17 }, thick = 1, x = { 27, 27 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 28, 17 }, thick = 1, x = { 28, 28 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 29, 17 }, thick = 1, x = { 29, 29 }, z = 13 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 2 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 3 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 4 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 5 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 6 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 7 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 8 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 9 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 10 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 11 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 12 },
+          { at = 8, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 1, x = { 2, 29 }, z = 13 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 0 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 1 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 2 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 3 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 4 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 5 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 6 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 7 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 8 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 9 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 10 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 11 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 12 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 13 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 14 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 17, 17 }, thick = 3, x = { 0, 31 }, z = 15 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 0 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 1 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 2 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 3 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 4 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 5 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 6 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 7 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 8 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 9 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 10 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 11 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 12 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 13 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 14 },
+          { at = 10, kind = "flat", rows = { 15, 15 }, sample = { 21, 17 }, thick = 1, x = { 0, 31 }, z = 15 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 1 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 2 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 3 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 4 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 5 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 6 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 7 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 8 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 9 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 10 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 11 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 12 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 13 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 1, 2 }, thick = 1, x = { 1, 30 }, z = 14 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 2 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 3 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 4 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 5 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 6 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 7 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 8 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 9 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 10 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 11 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 12 },
+          { at = 11, kind = "flat", rows = { 15, 15 }, sample = { 8, 14 }, thick = 1, x = { 2, 29 }, z = 13 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 3, 4 }, z = 19 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 3, 4 }, z = 20 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 3, 4 }, z = 19 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 3, 4 }, z = 20 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 3, 4 }, z = 27 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 3, 4 }, z = 28 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 3, 4 }, z = 27 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 3, 4 }, z = 28 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 11, 12 }, z = 19 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 11, 12 }, z = 20 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 11, 12 }, z = 19 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 11, 12 }, z = 20 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 11, 12 }, z = 27 },
+          { at = 5, kind = "flat", rows = { 15, 15 }, sample = { 7, 28 }, thick = 6, x = { 11, 12 }, z = 28 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 11, 12 }, z = 27 },
+          { at = 0, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 1, x = { 11, 12 }, z = 28 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 18 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 19 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 20 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 21 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 22 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 23 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 24 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 25 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 26 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 27 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 28 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 4, 31 }, thick = 2, x = { 2, 13 }, z = 29 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 19 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 20 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 21 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 22 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 23 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 24 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 25 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 26 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 27 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 5, 24 }, thick = 1, x = { 3, 12 }, z = 28 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 21 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 22 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 23 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 24 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 25 },
+          { at = 7, kind = "flat", rows = { 15, 15 }, sample = { 8, 24 }, thick = 1, x = { 5, 10 }, z = 26 },
+          { at = 12, kind = "flat", rows = { 3, 7 }, x = { 3, 15 } },
+          { depth = 6, facade = { 12, 13 }, kind = "upright", rise = 12, top = { 8, 12 }, x = { 4, 15 }, z = 8 },
+          { depth = 2, facade = { 8, 9 }, kind = "upright", rise = 12, top = { 8, 8 }, x = { 16, 19 }, z = 8 },
+          { case = { bezel = { 20, 10 }, cursor = { 24, 8 }, lid = { 25, 2 }, screen = { 21, 7 }, shell = { 28, 5 } }, kind = "iso", plan = 6, rise = 12, rows = { 1, 13 }, x = { 19, 30 }, z = 9 },
+        },
+      },
       -- F05: the TALL display cabinet, the one with the trophy behind
       -- its glass -- CELADON_CHIEF_HOUSE cells 3,0 and 4,0 and
       -- CELADON_MANSION_1F cell 2,2 (3 placements).  Its 32 rows read
@@ -4220,6 +6857,32 @@ return {
         },
         roofRows = 28, roofBack = 24, roofFront = 0, roofCycle = { 2, 23 },
         slab = 3, frontEave = 0, ledge = nil,
+        -- Read the same source bands as explicit furniture parts: the
+        -- entire lid is level, with two-pixel overhang beyond the apron
+        -- and four feet on every side. Light feet are not window panes.
+        panes = false,
+        parts = {
+          { kind = "upright", x = { 2, 61 }, top = { 28, 28 },
+            facade = { 28, 30 }, z = 2, depth = 28,
+            supports = { fromRow = 29, zones = {
+              { x = { 2, 5 }, z = { 2, 5 } },
+              { x = { 2, 5 }, z = { 26, 29 } },
+              { x = { 58, 61 }, z = { 2, 5 } },
+              { x = { 58, 61 }, z = { 26, 29 } },
+            } } },                                      -- apron and feet
+          { kind = "upright", x = { 0, 63 }, top = { 0, 23 },
+            facade = { 24, 26 }, rise = 3, z = 0, depth = 32 }, -- slab
+          -- Continue its black lower fascia through the two corner
+          -- columns so every slab layer has the same even overhang.
+          { kind = "upright", x = { 0, 63 }, top = { 24, 24 },
+            facade = { 24, 24 }, rise = 3, z = 0, depth = 32 },
+          -- The source's white row 1 continues around the east and
+          -- south edges, completing a one-pixel ring around the field.
+          { kind = "upright", x = { 62, 62 }, top = { 1, 1 },
+            facade = { 1, 1 }, rise = 5, z = 1, depth = 30 },
+          { kind = "flat", x = { 1, 62 }, rows = { 1, 1 },
+            z = 30, at = 5 },
+        },
       },
     },
 
@@ -4249,6 +6912,32 @@ return {
         },
         roofRows = 28, roofBack = 24, roofFront = 0, roofCycle = { 2, 23 },
         slab = 3, frontEave = 0, ledge = nil,
+        -- Read the same source bands as explicit furniture parts: the
+        -- entire lid is level, with two-pixel overhang beyond the apron
+        -- and four feet on every side. Light feet are not window panes.
+        panes = false,
+        parts = {
+          { kind = "upright", x = { 2, 29 }, top = { 28, 28 },
+            facade = { 28, 30 }, z = 2, depth = 28,
+            supports = { fromRow = 29, zones = {
+              { x = { 2, 5 }, z = { 2, 5 } },
+              { x = { 2, 5 }, z = { 26, 29 } },
+              { x = { 26, 29 }, z = { 2, 5 } },
+              { x = { 26, 29 }, z = { 26, 29 } },
+            } } },                                      -- apron and feet
+          { kind = "upright", x = { 0, 31 }, top = { 0, 23 },
+            facade = { 24, 26 }, rise = 3, z = 0, depth = 32 }, -- slab
+          -- Continue its black lower fascia through the two corner
+          -- columns so every slab layer has the same even overhang.
+          { kind = "upright", x = { 0, 31 }, top = { 24, 24 },
+            facade = { 24, 24 }, rise = 3, z = 0, depth = 32 },
+          -- The source's white row 1 continues around the east and
+          -- south edges, completing a one-pixel ring around the field.
+          { kind = "upright", x = { 30, 30 }, top = { 1, 1 },
+            facade = { 1, 1 }, rise = 5, z = 1, depth = 30 },
+          { kind = "flat", x = { 1, 30 }, rows = { 1, 1 },
+            z = 30, at = 5 },
+        },
       },
       -- F10: the town house's BOOKCASE -- the commonest piece of
       -- furniture in the game at 58 placements across three drawings,
@@ -4306,7 +6995,7 @@ return {
       },
       -- F09: the stool at every one of those tables (94 placements on
       -- this tileset) -- the first template with NO base piece.  The
-      -- drawing is one object, a round seat on legs, drawn MID-CELL over
+      -- drawing is one object, a seat on legs, drawn MID-CELL over
       -- its own floor (rows 0-4 are the room behind it), and no band
       -- split fits that: a roof band starts at the drawing's top row.
       -- So it is a desk-set of exactly one upright part anchored to the
@@ -4335,12 +7024,77 @@ return {
         parts = {
           { kind = "upright", x = { 2, 13 }, top = { 5, 10 },
             facade = { 11, 15 }, z = 3, depth = 11,
-            stretch = true },                             -- the stool
+            -- Continue the black rim through the four outer corner
+            -- cells; retain the accepted seat art and inset legs.
+            stretch = true, silhouette = false,
+            -- Continue the clearly drawn outer legs to four corners.
+            -- The dark centre under the seat is treated as shaded space,
+            -- not a third foot or a solid apron. Keep only the corner
+            -- legs below the one-voxel seat, including the dark row 12
+            -- band that otherwise becomes a heavy block at the rear.
+            -- Infer solid two-by-two posts tucked under the seat. The
+            -- rear pair remains inset, leaving real overhang on both
+            -- axes instead of clipping an outward post.
+            -- Height five and the original seat surface stay unchanged.
+            supports = { fromRow = 12, zones = {
+              { x = { 3, 4 }, z = { 10, 11 } },
+              { x = { 11, 12 }, z = { 10, 11 } },
+              { x = { 3, 4 }, z = { 5, 6 } },
+              { x = { 11, 12 }, z = { 5, 6 } },
+            } } },                                       -- the stool
+          -- Continue the original black rim across the far edge too.
+          -- This reuses row 5 on ten existing seat voxels, leaving the
+          -- interior surface and every inset leg unchanged.
+          { kind = "flat", x = { 3, 12 }, rows = { 5, 5 },
+            z = 13, at = 4 },
+          -- One-pixel black rim and equal two-pixel white margins.
+          -- Centre the six-by-five grey field using its original rows;
+          -- change only the three strips displaced by the lid stretch.
+          { kind = "flat", x = { 3, 12 }, rows = { 6, 6 },
+            z = 4, at = 4 },
+          { kind = "flat", x = { 5, 10 }, rows = { 7, 7 },
+            z = 6, at = 4 },
+          { kind = "flat", x = { 5, 10 }, rows = { 10, 10 },
+            z = 11, at = 4 },
         },
       },
     },
 
     REDS_HOUSE_1 = {
+      -- The TV paints a top at rows0..4 and a front at5..15. Fold those
+      -- bands into an 11px case, retaining the original picture and control
+      -- pixels on the front. Unpictured sides/back use its dark case material.
+      {
+        roofRows = 0,
+        roofBack = 0,
+        roofFront = 0,
+        roofCycle = { 0, 0 },
+        slab = 0,
+        frontEave = 0,
+        panes = false,
+        id = "reds_tv",
+        tiles = {
+          { 6, 7 },
+          { 22, 23 },
+        },
+        parts = {
+          {
+            kind = "upright",
+            x = { 0, 15 },
+            top = { 0, 4 },
+            facade = { 5, 15 },
+            z = 3,
+            depth = 10,
+            case = {
+              sample = { 5, 14 },
+            },
+            inset = {
+              x = { 3, 12 },
+              rows = { 7, 12 },
+            },
+          },
+        },
+      },
       -- F08 again: Red's and the Copycat's ground-floor dining table
       -- (cells (3,4):(4,5) of both maps) -- the house table on the
       -- reds_house atlas, with two differences the fields absorb.
@@ -4370,6 +7124,32 @@ return {
         },
         roofRows = 28, roofBack = 23, roofFront = 1, roofCycle = { 2, 22 },
         slab = 3, frontEave = 0, ledge = nil,
+        -- Read the same source bands as explicit furniture parts: the
+        -- entire lid is level, with two-pixel overhang beyond the apron
+        -- and four feet on every side. Light feet are not window panes.
+        panes = false,
+        parts = {
+          { kind = "upright", x = { 2, 29 }, top = { 28, 28 },
+            facade = { 28, 30 }, z = 2, depth = 28,
+            supports = { fromRow = 29, zones = {
+              { x = { 2, 5 }, z = { 2, 5 } },
+              { x = { 2, 5 }, z = { 26, 29 } },
+              { x = { 26, 29 }, z = { 2, 5 } },
+              { x = { 26, 29 }, z = { 26, 29 } },
+            } } },                                      -- apron and feet
+          { kind = "upright", x = { 0, 31 }, top = { 0, 22 },
+            facade = { 24, 26 }, rise = 3, z = 0, depth = 32 }, -- slab
+          -- Continue its black lower fascia through the two corner
+          -- columns so every slab layer has the same even overhang.
+          { kind = "upright", x = { 0, 31 }, top = { 24, 24 },
+            facade = { 24, 24 }, rise = 3, z = 0, depth = 32 },
+          -- The source's white row 1 continues around the east and
+          -- south edges, completing a one-pixel ring around the field.
+          { kind = "upright", x = { 30, 30 }, top = { 1, 1 },
+            facade = { 1, 1 }, rise = 5, z = 1, depth = 30 },
+          { kind = "flat", x = { 1, 30 }, rows = { 1, 1 },
+            z = 30, at = 5 },
+        },
         scrub = { { 10, 5, 21, 15 } },
         keep = { 40, 54, 55, 56, 57 },
         support = 6,
@@ -4405,12 +7185,911 @@ return {
         parts = {
           { kind = "upright", x = { 2, 13 }, top = { 5, 10 },
             facade = { 11, 15 }, z = 3, depth = 11,
-            stretch = true },                             -- the stool
+            -- Continue the black rim through the four outer corner
+            -- cells; retain the accepted seat art and inset legs.
+            stretch = true, silhouette = false,
+            -- Continue the clearly drawn outer legs to four corners.
+            -- The dark centre under the seat is treated as shaded space,
+            -- not a third foot or a solid apron. Keep only the corner
+            -- legs below the one-voxel seat, including the dark row 12
+            -- band that otherwise becomes a heavy block at the rear.
+            -- Infer solid two-by-two posts tucked under the seat. The
+            -- rear pair remains inset, leaving real overhang on both
+            -- axes instead of clipping an outward post.
+            -- Height five and the original seat surface stay unchanged.
+            supports = { fromRow = 12, zones = {
+              { x = { 3, 4 }, z = { 10, 11 } },
+              { x = { 11, 12 }, z = { 10, 11 } },
+              { x = { 3, 4 }, z = { 5, 6 } },
+              { x = { 11, 12 }, z = { 5, 6 } },
+            } } },                                       -- the stool
+          -- Continue the original black rim across the far edge too.
+          -- This reuses row 5 on ten existing seat voxels, leaving the
+          -- interior surface and every inset leg unchanged.
+          { kind = "flat", x = { 3, 12 }, rows = { 5, 5 },
+            z = 13, at = 4 },
+          -- One-pixel black rim and equal two-pixel white margins.
+          -- Centre the six-by-five grey field using its original rows;
+          -- change only the three strips displaced by the lid stretch.
+          { kind = "flat", x = { 3, 12 }, rows = { 6, 6 },
+            z = 4, at = 4 },
+          { kind = "flat", x = { 5, 10 }, rows = { 7, 7 },
+            z = 6, at = 4 },
+          { kind = "flat", x = { 5, 10 }, rows = { 10, 10 },
+            z = 11, at = 4 },
+        },
+      },
+    },
+
+    REDS_HOUSE_2 = {
+      -- The bedroom PC separates its top-view casing (0..3), front (4..14),
+      -- and horizontal keyboard (17..20). Retain the adjacent 12px cabinet
+      -- and original wall band; only the front carries the recessed display.
+      {
+        roofRows = 0,
+        roofBack = 0,
+        roofFront = 0,
+        roofCycle = { 0, 0 },
+        slab = 0,
+        frontEave = 0,
+        panes = false,
+        id = "reds_pc",
+        tiles = {
+          { 64, 65 },
+          { 32, 33 },
+          { 66, 67 },
+          { 50, 51 },
+        },
+        support = 12,
+        desk = {
+          fascia = { 20, 22 },
+          base = { 23, 31 },
+          depth = 2,
+          lid = "white",
+          z = 16,
+        },
+        wall = {
+          cycle = { 0, 3 },
+          h = 16,
+          depthPx = 8,
+          x = 0,
+        },
+        parts = {
+          {
+            kind = "upright",
+            x = { 2, 13 },
+            top = { 0, 3 },
+            facade = { 4, 14 },
+            z = 18,
+            depth = 6,
+            case = {
+              sample = { 3, 1 },
+            },
+            inset = {
+              x = { 4, 11 },
+              rows = { 5, 10 },
+            },
+          },
+          {
+            kind = "flat",
+            x = { 3, 12 },
+            rows = { 17, 20 },
+            z = 24,
+            at = 12,
+          },
+          {
+            kind = "flat",
+            x = { 1, 14 },
+            rows = { 15, 15 },
+            z = 30,
+            at = 11,
+          },
+        },
+      },
+      -- The TV paints a top at rows0..4 and a front at5..15. Fold those
+      -- bands into an 11px case, retaining the original picture and control
+      -- pixels on the front. Unpictured sides/back use its dark case material.
+      {
+        roofRows = 0,
+        roofBack = 0,
+        roofFront = 0,
+        roofCycle = { 0, 0 },
+        slab = 0,
+        frontEave = 0,
+        panes = false,
+        id = "reds_tv",
+        tiles = {
+          { 6, 7 },
+          { 22, 23 },
+        },
+        parts = {
+          {
+            kind = "upright",
+            x = { 0, 15 },
+            top = { 0, 4 },
+            facade = { 5, 15 },
+            z = 3,
+            depth = 10,
+            case = {
+              sample = { 5, 14 },
+            },
+            inset = {
+              x = { 3, 12 },
+              rows = { 7, 12 },
+            },
+          },
+        },
+      },
+      -- The bed top occupies rows0..27; rows28..31 are the dark frame
+      -- elevation. Retain the 7px support and full16x32 footprint. Continue
+      -- that frame material down the base rather than repeating pillows or
+      -- blanket graphics on vertical faces; no unsupported legs are invented.
+      {
+        roofRows = 0,
+        roofBack = 0,
+        roofFront = 0,
+        roofCycle = { 0, 0 },
+        slab = 0,
+        frontEave = 0,
+        panes = false,
+        id = "reds_bed",
+        tiles = {
+          { 45, 46 },
+          { 61, 62 },
+          { 61, 62 },
+          { 63, 47 },
+        },
+        support = 7,
+        parts = {
+          {
+            kind = "flat",
+            x = { 0, 15 },
+            rows = { 28, 31 },
+            z = 0,
+            at = 2,
+            sample = { 4, 29 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 0, 15 },
+            rows = { 28, 31 },
+            z = 4,
+            at = 2,
+            sample = { 4, 29 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 0, 15 },
+            rows = { 28, 31 },
+            z = 8,
+            at = 2,
+            sample = { 4, 29 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 0, 15 },
+            rows = { 28, 31 },
+            z = 12,
+            at = 2,
+            sample = { 4, 29 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 0, 15 },
+            rows = { 28, 31 },
+            z = 16,
+            at = 2,
+            sample = { 4, 29 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 0, 15 },
+            rows = { 28, 31 },
+            z = 20,
+            at = 2,
+            sample = { 4, 29 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 0, 15 },
+            rows = { 28, 31 },
+            z = 24,
+            at = 2,
+            sample = { 4, 29 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 0, 15 },
+            rows = { 28, 31 },
+            z = 28,
+            at = 2,
+            sample = { 4, 29 },
+            thick = 3,
+          },
+          {
+            kind = "upright",
+            x = { 0, 15 },
+            top = { 0, 27 },
+            facade = { 28, 31 },
+            rise = 3,
+            z = 0,
+            depth = 32,
+            stretch = true,
+            case = {
+              sample = { 4, 29 },
+            },
+          },
+        },
+      },
+      -- The short bedroom table shares the PC cabinet's existing12px
+      -- plane. Retain that compatibility height while giving its own source
+      -- field a complete white trim, two-pixel overhang, and four inset posts.
+      -- Post length is the inferred continuation of the drawn front feet.
+      {
+        roofRows = 0,
+        roofBack = 0,
+        roofFront = 0,
+        roofCycle = { 0, 0 },
+        slab = 0,
+        frontEave = 0,
+        panes = false,
+        id = "reds_short_table",
+        tiles = {
+          { 38, 39, 39, 41 },
+          { 44, 42, 42, 43 },
+          { 60, 58, 58, 59 },
+        },
+        support = 12,
+        parts = {
+          {
+            kind = "flat",
+            x = { 2, 4 },
+            rows = { 19, 21 },
+            z = 2,
+            at = 7,
+            sample = { 3, 21 },
+            thick = 8,
+          },
+          {
+            kind = "flat",
+            x = { 2, 4 },
+            rows = { 19, 21 },
+            z = 19,
+            at = 7,
+            sample = { 3, 21 },
+            thick = 8,
+          },
+          {
+            kind = "flat",
+            x = { 27, 29 },
+            rows = { 19, 21 },
+            z = 2,
+            at = 7,
+            sample = { 3, 21 },
+            thick = 8,
+          },
+          {
+            kind = "flat",
+            x = { 27, 29 },
+            rows = { 19, 21 },
+            z = 19,
+            at = 7,
+            sample = { 3, 21 },
+            thick = 8,
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 14 },
+            z = 2,
+            at = 8,
+            sample = { 15, 19 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 8 },
+            z = 15,
+            at = 8,
+            sample = { 15, 19 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 0,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 1,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 1,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 2,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 2,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 2,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 3,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 3,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 3,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 4,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 4,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 4,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 5,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 5,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 5,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 6,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 6,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 6,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 7,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 7,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 7,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 8,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 8,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 8,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 9,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 9,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 9,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 10,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 10,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 10,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 11,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 11,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 11,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 12,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 12,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 12,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 13,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 13,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 13,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 14,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 14,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 14,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 15,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 15,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 15,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 16,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 16,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 16,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 17,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 17,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 17,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 18,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 18,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 18,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 19,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 19,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 19,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 20,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 20,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 20,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 21,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 21,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 2, 29 },
+            rows = { 2, 2 },
+            z = 21,
+            at = 11,
+            sample = { 15, 3 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 22,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
+          {
+            kind = "flat",
+            x = { 1, 30 },
+            rows = { 2, 2 },
+            z = 22,
+            at = 11,
+            sample = { 15, 1 },
+          },
+          {
+            kind = "flat",
+            x = { 0, 31 },
+            rows = { 2, 2 },
+            z = 23,
+            at = 11,
+            sample = { 0, 2 },
+            thick = 3,
+          },
         },
       },
     },
 
     INTERIOR = {
+      -- Bill's paired cell-separator chambers. The exact five-row drawing
+      -- includes the floor curve: claim it once so it is not stamped flat
+      -- beneath the round machine. A recessed front entry preserves Bill's
+      -- scripted exit at cell (1,2); collision and actor support stay native.
+      {
+        id = "bill_transporter", machine = "bill_transporter",
+        tiles = { {7,8,9,10}, {23,24,25,26}, {39,40,41,42},
+                  {55,56,57,58}, {80,1,2,15} },
+        roofRows = 0, roofBack = 0, roofFront = 0, roofCycle = {0,0},
+        slab = 0, frontEave = 0, depth = 5, panes = false,
+      },
+      -- Match the complete connector before its one-column end pieces.
+      -- Only their silver metal becomes a tube; patterned background pixels
+      -- are intentionally omitted. Ordinary wall tiles16/69 stay untouched.
+      {
+        id="bill_pipe_link", pipe="bill_pipe", pipeVariant="link",
+        tiles={{37,38,38,38,38,32},{53,54,54,54,54,48}},
+        roofRows=0,roofBack=0,roofFront=0,roofCycle={0,0},
+        slab=0,frontEave=0,depth=2,panes=false,
+      },
+      {
+        id="bill_pipe_left", pipe="bill_pipe", pipeVariant="left",
+        tiles={{32},{48}},
+        roofRows=0,roofBack=0,roofFront=0,roofCycle={0,0},
+        slab=0,frontEave=0,depth=2,panes=false,
+      },
+      {
+        id="bill_pipe_right", pipe="bill_pipe", pipeVariant="right",
+        tiles={{37},{53}},
+        roofRows=0,roofBack=0,roofFront=0,roofCycle={0,0},
+        slab=0,frontEave=0,depth=2,panes=false,
+      },
+
       -- F0x: Bill's desk, and the Silph president's -- one drawing, two
       -- placements (BILLS_HOUSE cell 1,4 and SILPH_CO_11F cell 10,12,
       -- both found by the scan and nothing else).  The whole 4x4-tile
@@ -4473,22 +8152,28 @@ return {
           -- spanning them rather than a scuff on the desk
           { kind = "upright", x = { 16, 19 }, top = { 8, 8 },
             facade = { 8, 9 }, z = 8, depth = 2 },
-          -- the computer: drawn in 2:1 ISOMETRIC, turned 45 degrees to
-          -- the map -- see the `iso` branch in buildParts.  `plan` = rx
-          -- makes its footprint a SQUARE turned 45, so from directly
-          -- above it is the cube the drawing depicts and not the slab
-          -- the 2:1 would otherwise build
+          -- The original angled CRT keeps its 45-degree orientation and
+          -- height. A planar case prevents voxel stair faces from becoming
+          -- ribs across its screen. Materials and the cursor sample this
+          -- computer's own drawing; unseen rear faces continue its casing.
           { kind = "iso", x = { 19, 30 }, rows = { 1, 13 },
-            plan = 6, z = 9 },
-          -- the chair pushed up to the desk, drawn into the walkable
-          -- cell in front.  It stands on the FLOOR, not on the desk, so
-          -- its rise is the whole plane back down; two voxels deep
-          -- because it is a chair, and `inside` cuts it per pixel, so
-          -- this is the thin slab the `stool` standee was -- the desk
-          -- claiming tiles 43/44 for its apron is what makes the
-          -- template owe it
-          { kind = "upright", x = { 2, 13 }, top = { 20, 21 },
-            facade = { 22, 31 }, rise = -8, z = 22, depth = 10 },
+            plan = 6, z = 9,
+            case = { shell = { 28, 5 }, lid = { 25, 2 },
+              bezel = { 20, 10 }, screen = { 21, 7 }, cursor = { 24, 8 } } },
+          -- The stool stands on the floor in front of the desk. Rows
+          -- 20-26 paint its seat from above; 27-31 are the same five-pixel
+          -- seat/leg band as the Club stool, not a separate backrest.
+          -- Keep the accepted square seat, even trim and four inset posts.
+          -- The posts stop before the front plane, so the desk's existing
+          -- pane rule cannot recess their faces; leave that rule unchanged.
+          { kind = "upright", x = { 2, 13 }, top = { 20, 26 }, facade = { 27, 31 }, rise = -8, z = 20, depth = 11, stretch = true, silhouette = false, supports = { fromRow = 28, zones = { { x = { 3, 4 }, z = { 22, 23 } }, { x = { 11, 12 }, z = { 22, 23 } }, { x = { 3, 4 }, z = { 27, 28 } }, { x = { 11, 12 }, z = { 27, 28 } } } } },
+          -- Complete the far black rim and center the white/grey field.
+          { kind = "flat", x = { 3, 12 }, rows = { 20, 20 }, z = 30, at = 4 },
+          { kind = "flat", x = { 3, 12 }, rows = { 21, 21 }, z = 21, at = 4 },
+          { kind = "flat", x = { 4, 11 }, rows = { 22, 22 }, z = 22, at = 4 },
+          -- Row 20 overlaps the desk at x13. Continue the stool's own
+          -- black row 21 through those two stretched corner cells.
+          { kind = "upright", x = { 13, 13 }, top = { 21, 21 }, facade = { 21, 21 }, rise = -4, z = 20, depth = 2 },
         },
       },
       -- F09 once more: the Pokemon Fan Club's four members' chairs,
@@ -4498,10 +8183,10 @@ return {
       -- A DIFFERENT drawing from the house stool -- its seat field
       -- carries a one-pixel white margin where the house's carries two
       -- -- but the same object band for band: rows 5-10 the seat seen
-      -- from above (its lid), row 11 the seat's own front edge, 12-15
-      -- the legs with the floor showing between them.  Its elevation
-      -- rows are PIXEL-IDENTICAL to the house drawing's, so it takes
-      -- that part table unchanged, growth and all: z 3..13, `stretch`
+      -- from above (its lid), row 11 the seat's own front edge and
+      -- 12-15 the legs below it. Its outer legs match the house
+      -- drawing; the central shadow marks differ. It retains
+      -- the same seat depth: z 3..13, `stretch`
       -- mapping the seat band over the deeper lid, `panes = false` so
       -- the pane rule does not sink the legs' lit faces.
       --
@@ -4528,7 +8213,33 @@ return {
         parts = {
           { kind = "upright", x = { 2, 13 }, top = { 5, 10 },
             facade = { 11, 15 }, z = 3, depth = 11,
-            stretch = true },                             -- the stool
+            -- Continue the black rim through the four outer corner
+            -- cells; retain the accepted seat art and inset legs.
+            stretch = true, silhouette = false,
+            -- The same four-corner structure as the house stools:
+            -- a one-voxel seat with separate legs in rows 12-15 below it.
+            -- Solid two-by-two posts sit inside the seat rim,
+            -- leaving an overhang beyond every side of each corner leg.
+            supports = { fromRow = 12, zones = {
+              { x = { 3, 4 }, z = { 10, 11 } },
+              { x = { 11, 12 }, z = { 10, 11 } },
+              { x = { 3, 4 }, z = { 5, 6 } },
+              { x = { 11, 12 }, z = { 5, 6 } },
+            } } },                                       -- the stool
+          -- Continue the original black rim across the far edge too.
+          -- This reuses row 5 on ten existing seat voxels, leaving the
+          -- interior surface and every inset leg unchanged.
+          { kind = "flat", x = { 3, 12 }, rows = { 5, 5 },
+            z = 13, at = 4 },
+          -- This drawing has a one-pixel white inset, so centre its
+          -- eight-by-seven grey field within equal margins on all sides.
+          -- Preserve its own source pattern and the one-pixel black rim.
+          { kind = "flat", x = { 3, 12 }, rows = { 6, 6 },
+            z = 4, at = 4 },
+          { kind = "flat", x = { 4, 11 }, rows = { 7, 7 },
+            z = 5, at = 4 },
+          { kind = "flat", x = { 4, 11 }, rows = { 7, 7 },
+            z = 6, at = 4 },
         },
       },
     },

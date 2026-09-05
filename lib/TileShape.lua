@@ -121,6 +121,13 @@ local FALLBACK_HEIGHTS = {
   stair_w = 16,
   stair_down_e = 16,
   stair_down_w = 16,
+  stair_n = 16,
+  stair_down_n = 16,
+  ladder_up = 16,
+  ladder_down = 16,
+  -- Legacy standee vocabulary retained for third-party/custom profiles.
+  -- Authored cave warps now use ladder_up/down and the open shaft builder.
+  ladder = 16,
 }
 
 -- class -> how the mesher draws it (see the header). The last three are
@@ -211,6 +218,11 @@ local ART = {
   stair_w = "stair",
   stair_down_e = "stair",
   stair_down_w = "stair",
+  stair_n = "stair",
+  stair_down_n = "stair",
+  ladder_up = "stair",
+  ladder_down = "stair",
+  ladder = "billboard",
 }
 
 local spec = nil          -- the loaded data file, or false when absent
@@ -330,19 +342,58 @@ local function shapeFor(class, heights, authored)
            authored = authored or false }
 end
 
+-- A few public stair drawings are also ordinary doorway/counter art.
+-- A warp_stairs rule therefore requires BOTH a complete 2x2 source cell
+-- and an actual engine warp. Resolve all four tiles together, before the
+-- generic door fold, without changing tile pins or actor ride heights.
+-- Malformed rules are ignored; non-warp aliases keep their original shape.
+local function authoredWarpStairs(map, entry, heights)
+  local rules = type(entry) == "table" and entry.warp_stairs
+  if type(rules) ~= "table" then return nil end
+  local out, any = {}, false
+  for _, warp in ipairs(map.def and map.def.warps or {}) do
+    local cx, cy = warp.x, warp.y
+    if type(cx) == "number" and type(cy) == "number" then
+      for _, rule in ipairs(rules) do
+        local grid = type(rule) == "table" and rule.tiles
+        local valid = type(grid) == "table" and #grid == 2
+          and type(grid[1]) == "table" and #grid[1] == 2
+          and type(grid[2]) == "table" and #grid[2] == 2
+          and ART[rule.class] == "stair" and heights[rule.class]
+        if valid then
+          for dz = 0, 1 do for dx = 0, 1 do
+            local tile = grid[dz + 1][dx + 1]
+            if type(tile) ~= "number" or tile < 0 or tile ~= math.floor(tile) then valid = false end
+          end end
+        end
+        if valid then
+          out[cy] = out[cy] or {}
+          out[cy][cx] = out[cy][cx] or {}
+          local shape = shapeFor(rule.class, heights, true)
+          shape.warpStair = true
+          out[cy][cx][#out[cy][cx] + 1] = { tiles = grid, shape = shape }
+          any = true
+        end
+      end
+    end
+  end
+  return any and out or nil
+end
+
 -- Resolved TILE-LEVEL shapes for the tileset `map` uses: a list indexed by
 -- tile id holding { class, h, art, flat, authored }, plus `classes`, one
 -- canonical shape per class for the cell-level overrides in TileShape.at.
 -- Cached per tileset id -- this table depends only on the tileset record
--- and the data file, both constant for a given id. The per-map part of
--- resolution (cell walkability) lives in TileShape.at, NOT here.
+-- and the data file, both constant for a given id. Profiles with explicit
+-- warp rules cache per map; other positional resolution stays in at().
 function TileShape.forMap(map)
   local tileset = map.tileset
   local id = tileset.id
   local profile = load()
   local base = profile and profile.tilesets and profile.tilesets[id]
   local perMap = profile and profile.maps and profile.maps[map.id]
-  local cacheKey = perMap and (tostring(id) .. ":" .. tostring(map.id)) or id
+  local positionRules = (perMap and perMap.warp_stairs) or (base and base.warp_stairs)
+  local cacheKey = (perMap or positionRules) and (tostring(id) .. ":" .. tostring(map.id)) or id
   if cache[cacheKey] then return cache[cacheKey] end
 
   local heights = TileShape.heights()
@@ -395,7 +446,7 @@ function TileShape.forMap(map)
   end
 
   local shapes = { classes = {}, cond = authoredConditions(entry, heights),
-                   saplingTiles = {} }
+                   saplingTiles = {}, warpStairs = authoredWarpStairs(map, entry, heights) }
   for _, tile in ipairs(type(entry) == "table"
       and type(entry.sapling_tiles) == "table" and entry.sapling_tiles or {}) do
     shapes.saplingTiles[tile] = true
@@ -444,6 +495,20 @@ end
 -- `shapes` is the table forMap returned for this map; `tile` is
 -- map:tileAt(tx, ty), passed in because every caller already has it.
 function TileShape.at(map, shapes, tile, tx, ty)
+  local cx, cy = math.floor(tx / 2), math.floor(ty / 2)
+  local row = shapes.warpStairs and shapes.warpStairs[cy]
+  local candidates = row and row[cx]
+  -- Cache immutable warp/rule candidates, not the current block drawing:
+  -- the Game Corner poster reveals its stair source in place at runtime.
+  if candidates then
+    for _, rule in ipairs(candidates) do
+      local matches = true
+      for dz = 0, 1 do for dx = 0, 1 do
+        if map:tileAt(cx * 2 + dx, cy * 2 + dz) ~= rule.tiles[dz + 1][dx + 1] then matches = false end
+      end end
+      if matches then return rule.shape end
+    end
+  end
   local s = shapes[tile]
   -- The source Battle Art profile pins these four graphics as its original
   -- thin prop. Reclassify them only for the opt-in Legendary renderer; this

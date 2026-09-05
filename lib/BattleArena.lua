@@ -136,11 +136,16 @@ BattleArena.SHAPES = {
 -- camera is fine and stays: it is far enough forward to project low and wide
 -- across the bottom of the frame, where it reads as a field rather than as
 -- something in the way.
-local function openCell(map, cx, cy, surfing)
+local function openCell(map, cx, cy, surfing, allowSteps)
   if not map:inBounds(cx, cy) then return false end
   if map:warpAtCell(cx, cy) then return false end
   if map:isWarpTileCell(cx, cy) then return false end
   if map.isGrassCell and map:isGrassCell(cx, cy) then return false end
+  -- The stage shares one height for both battlers. A traversed cave flight
+  -- is not a flat arena; choose nearby ordinary floor without changing
+  -- walkability or explicit/custom arena placement.
+  if not allowSteps and map.def and map.def.tileset == "CAVERN"
+      and V.require("CaveSteps").match(map,cx,cy) then return false end
   if map:isWalkableCell(cx, cy) then return true end
   return (surfing and map:isWaterCell(cx, cy)) or false
 end
@@ -150,13 +155,13 @@ BattleArena.openCell = openCell
 -- The map's open cells as one flat boolean grid, so the rectangle test
 -- below is a lookup rather than a tileset walk per cell. Built once per
 -- search; a battle asks for one.
-local function openGrid(map, surfing)
+local function openGrid(map, surfing, allowSteps)
   local w, h = map.widthCells, map.heightCells
   local grid = {}
   for cy = 0, h - 1 do
     local row = cy * w
     for cx = 0, w - 1 do
-      grid[row + cx] = openCell(map, cx, cy, surfing)
+      grid[row + cx] = openCell(map, cx, cy, surfing, allowSteps)
     end
   end
   return grid, w, h
@@ -217,7 +222,7 @@ local function heightAt(map, wx, wz)
     -- ring is trees; treat it as solid so an arena is never framed through it
     return 32
   end
-  local ok, h = pcall(V.require("VoxelScene").groundAt, map, cx, cy)
+  local ok, h = pcall(V.require("VoxelScene").groundAt, map, cx, cy, wx-8, wz-8)
   return (ok and h) or 0
 end
 
@@ -298,7 +303,7 @@ function BattleArena.find(map, fromX, fromY, surfing)
       -- point of it -- the surf routes fight in the middle of their own
       -- ocean rather than on a scrap of beach at the edge of the map. Land
       -- entries are unaffected: land passes the test either way.
-      local grid, gw = openGrid(host, true)
+      local grid, gw = openGrid(host, true, true)
       if fits(grid, gw, pick.x, pick.y, shape.w, shape.h) then
         local arena = place(shape, pick.x, pick.y)
         arena.map = host

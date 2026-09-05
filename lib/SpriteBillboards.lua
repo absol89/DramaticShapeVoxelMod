@@ -37,6 +37,47 @@ local Voxel3D = V.require("Voxel3D")
 local SpriteBillboards = {}
 
 local meshes = {}
+local tableAnchors = {}
+
+-- Oak's original item card has two transparent rows below its visible ball.
+-- Measure the source before offering a per-pose 3D anchor; replacement art,
+-- explicit anchors and every ordinary sprite retain their own placement.
+function SpriteBillboards.tableAnchor(def)
+  if def.id ~= "SPRITE_POKE_BALL"
+      or def.image ~= "assets/generated/sprites/poke_ball.png"
+      or (def.frames or 1) ~= 1 or def.walker or def.trueColor
+      or (def.frameWidth or 16) ~= 16 or (def.frameHeight or 16) ~= 16
+      or def.anchorX ~= nil or def.anchorY ~= nil then return nil end
+  local path = def.image
+  if tableAnchors[path] == nil then
+    local ok, data = pcall(Assets.imageData, path)
+    local anchor = false
+    if ok and data and data.getPixel and data.getDimensions then
+      local w, h = data:getDimensions()
+      if w == 16 and h == 16 then
+        local x0, y0, x1, y1 = w, h, -1, -1
+        local grayscale = true
+        for y = 0, h - 1 do for x = 0, w - 1 do
+          local r, g, b, a = data:getPixel(x, y)
+          if math.abs(r - g) > 0.001 or math.abs(r - b) > 0.001 then
+            grayscale = false
+          end
+          -- Same OBJ color-0 key as SpriteRenderer.getObpImage.
+          if a >= 0.5 and r <= 0.83 then
+            x0, y0 = math.min(x0, x), math.min(y0, y)
+            x1, y1 = math.max(x1, x), math.max(y1, y)
+          end
+        end end
+        if grayscale and x0 == 2 and y0 == 2 and x1 == 13 and y1 == 13 then
+          anchor = y1 + 1
+        end
+      end
+      if data.release then data:release() end
+    end
+    tableAnchors[path] = anchor
+  end
+  return tableAnchors[path] or nil
+end
 
 -- One flat quad -- 16x16 for every vanilla figure, or the def's own
 -- frameWidth x frameHeight for a mod sprite registered bigger than that --
@@ -55,14 +96,14 @@ local meshes = {}
 -- sprite's size -- for fw == 16 that is x0 = 0, the original quad. Custom
 -- anchors use the same convention as SpriteRenderer: anchorX measures from
 -- the frame's left edge and anchorY measures down from its top edge.
-local function buildCard(def, frame)
+local function buildCard(def, frame, visualAnchorY)
   local ok, img = pcall(Assets.image, def.image)
   if not (ok and img) then return nil end
   local iw, ih = img:getDimensions()
   local fw = def.frameWidth or 16
   local fh = def.frameHeight or 16
   local anchorX = def.anchorX or fw / 2
-  local anchorY = def.anchorY or fh
+  local anchorY = def.anchorY or visualAnchorY or fh
   local fy = frame * fh
   if fy + fh > ih then fy = 0 end
   local u0, u1 = 0.02 / iw, (fw - 0.02) / iw
@@ -87,16 +128,16 @@ end
 -- the mesh would read as "behind something" and repaint the figure on open
 -- ground whether or not anything hides it; and the sun must see the same
 -- outline the camera does, or a shadow stops matching what casts it.
-function SpriteBillboards.mesh(def, frame)
+function SpriteBillboards.mesh(def, frame, visualAnchorY)
   -- Geometry-affecting sprite metadata is part of the key too: two defs can
   -- point at the same sheet with different sizes or anchors and must not
   -- alias the first mesh built for that image/frame pair.
   local key = def.image .. "#" .. frame .. "#"
               .. (def.frameWidth or 16) .. "x" .. (def.frameHeight or 16)
               .. "@" .. (def.anchorX or "default")
-              .. "," .. (def.anchorY or "default")
+              .. "," .. (def.anchorY or visualAnchorY or "default")
   if meshes[key] == nil then
-    local ok, m = pcall(buildCard, def, frame)
+    local ok, m = pcall(buildCard, def, frame, visualAnchorY)
     meshes[key] = (ok and m) or false
   end
   return meshes[key] or nil
@@ -109,6 +150,7 @@ SpriteBillboards.shadowQuad = SpriteBillboards.mesh
 
 function SpriteBillboards.invalidate()
   meshes = {}
+  tableAnchors = {}
 end
 
 Assets.register(SpriteBillboards.invalidate)

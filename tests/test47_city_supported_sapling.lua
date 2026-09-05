@@ -27,7 +27,7 @@ assert(flora:find("Five separated bunches", 1, true),
        "sparse young crown is missing")
 assert(structures:find("community_cut_tree_test47", 1, true),
        "round-template signature was not advanced")
-assert(cache:find("Disk.CACHE_REVISION = 25", 1, true),
+assert((tonumber(cache:match("Disk%.CACHE_REVISION%s*=%s*(%d+)")) or 0) >= 25,
        "persistent mesh revision was not advanced")
 assert(main:find("city sapling with two support stakes and dark ties", 1, true),
        "WORLD option description was not updated")

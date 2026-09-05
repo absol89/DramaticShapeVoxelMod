@@ -1,3 +1,13 @@
+## PR 45 integration: 2026-09-05
+
+Merged PR 45 atop 6e99ed5 without conflicts or content overrides. Review was
+limited to the six user-named integration files. Their Lua syntax checks pass,
+as do pillar cache/layout (25), terrain shading (34), disk storage (6), battle
+sidecars (37), and hosted trainer/ball tests. Cave-step and public-stair tests
+could not initialize because external ASTRA fixture paths were not configured.
+No new in-game validation was performed. The PR retains its documented 0.2.53
+playtest limitation. Release tag and installed mod are not changed by this merge.
+
 ## Flat Stadium trainer and Pokeball pass: 2026-09-05
 
 User confirms backgrounds, HUD and Stadium FX now work in all flat fills.
@@ -64,6 +74,29 @@ HUD bands, settings/styles, and companion compose handoff pass under LuaJIT.
 The paired fix requires the importer gen1_battle.lua change. In-game visual
 checks, including prompts and party balls, remain pending. Master and tag are
 not moved by this fix.
+
+## S.S. Anne cabin details: 2026-09-05
+
+Added white bulkhead tops, source-based hollow mugs and raised bunk bedding.
+Cache revision30. Current port:71/73 test commands pass (two known upstream
+failures),105 production Lua files compile. Astra22 native0.2.27 captures cover
+8 matched views; target0.2.53/Quest playtests remain pending. No live install.
+See ASTRA_WORLD_ART.md and astra_cabin_details_test.lua for final scope/evidence.
+
+## Astra world-art PR preparation: 2026-09-05
+
+Integrated the cumulative Astra21 art work onto c3b0ae8 in an isolated
+Legendary-Additions checkout. See [ASTRA_WORLD_ART.md](ASTRA_WORLD_ART.md) for
+scope, file ownership, reproduction instructions and evidence boundaries.
+Current companion/provider APIs, cave behavior and cache layout are retained;
+geometry cache revision is 29. Manifest and engine gameplay files are unchanged.
+
+Current checkout: 57/59 art commands pass; both failures reproduce on untouched
+upstream. All 13 current upstream feature checks and 105 production Lua compile
+checks pass; pillar cache test passes 25 assertions. This is mocked/source
+validation. Historical Astra21 native screenshots were captured on engine
+0.2.27; a native 0.2.53 playtest and Quest validation of this port remain pending.
+Prepared locally for review; no PR, push or live installation performed.
 
 ## Independent Stadium switches: 2026-09-05
 

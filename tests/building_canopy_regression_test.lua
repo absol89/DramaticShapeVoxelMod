@@ -156,12 +156,14 @@ do
     end,
   }
   local sceneVoxel = {}
+  local pillarLive
   local sceneModules = setmetatable({
     ChunkMesher = chunk,
     TerrainAtlas = { setLive = function() end },
     VoxelState = sceneVoxel,
     RenderDistance = { neighbor = function() return false end },
-    GranitePillars = { invalidate = function() end },
+    GranitePillars = { invalidate = function() end,
+      setLive = function(live) pillarLive = live end },
     CommunityFlora = {
       invalidate = function() end,
       shadowSignature = function() return "" end,
@@ -180,6 +182,9 @@ do
   T.check(requests[1] and requests[1].body == true
       and requests[2] and requests[2].body == false,
     "a cold warp queues the current body before the full border-ring mesh")
+
+  T.check(pillarLive and pillarLive.VIRIDIAN_FOREST == true,
+    "pillar GPU retention follows the terrain neighborhood")
 
   local heldFrame = upvalue(VoxelScene.render, "heldFrame")
   local canvas = { getDimensions = function() return 320, 240 end }
