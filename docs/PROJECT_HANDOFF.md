@@ -437,3 +437,10 @@ extracts the first 80x80 frame directly from `back-animated/redplayer.png` or
 `greenplayer.png`; authors do not need duplicate files under `back-static`.
 Old explicit GREEN option values continue to select Green directly. The Green
 strip is a valid 400x80 five-frame atlas and remains registered for ANIMATED.
+
+Oak's three scripted roles now have explicit asset contracts. The introduction
+calls `introOakImage()` and reads the selected TRAINER ART generation's dotted
+`prof.oak.png`. `OPP_PROF_OAK` slugs to `prof-oak` and reads the hyphenated
+file from that generation. Yellow's Pallet Town old-man-style Pikachu capture
+sets `demoName` to `PROF.OAK`; `applyTrainers()` consequently reads the
+independent `assets/battle/back-static/oak.png` back sprite.

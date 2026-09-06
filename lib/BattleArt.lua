@@ -541,11 +541,10 @@ function BattleArt.trainerImage(name)
     if not path then return nil end
     return prepare(path, displayMode())
   end
-  -- The engine class slug is prof-oak; accept the authored engine-style
-  -- filename first while retaining existing hyphenated collections.
-  if name == "prof-oak" or name == "prof.oak" then
-    return load("prof.oak") or load("prof-oak")
-  end
+  -- OPP_PROF_OAK slugs to prof-oak. Keep his battle portrait independent
+  -- from the dotted prof.oak.png used by the introduction.
+  if name == "prof-oak" then return load("prof-oak") end
+  if name == "prof.oak" then return load("prof.oak") end
   if chooseYourHeroRival() == "yellow" then
     local femName = yellowRivalFile(name)
     if femName then
@@ -555,6 +554,13 @@ function BattleArt.trainerImage(name)
     end
   end
   return load(name)
+end
+
+-- Oak's introduction has its own dotted filename in each TRAINER ART set.
+-- Keeping this entry point separate prevents a battle fallback from silently
+-- making the intro and the optional OPP_PROF_OAK fight share one picture.
+function BattleArt.introOakImage()
+  return BattleArt.trainerImage("prof.oak")
 end
 
 -- The normal player trainer intro has its own collection, independent of

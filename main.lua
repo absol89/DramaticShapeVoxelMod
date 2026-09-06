@@ -1746,7 +1746,7 @@ end)
 -- to replace that portrait without changing generated ROM assets or scripts.
 mod.hooks:wrap("intro.oak_speech.build", function(next, steps, speech)
   local out = next(steps, speech)
-  local oak = BattleArt.trainerImage("prof.oak")
+  local oak = BattleArt.introOakImage()
   if speech and oak then
     speech.oakPic, speech.oakTrueColor = oak, true
     -- The custom trainer sheets are 96px tall. The intro's ROM-authentic

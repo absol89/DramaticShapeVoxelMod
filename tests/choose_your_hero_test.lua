@@ -63,10 +63,12 @@ for _,gen in ipairs({'gen1','gen2','gen3'}) do
  local dotted='assets/battle/front-static/'..gen..'/prof.oak.png'
  local legacy='assets/battle/front-static/'..gen..'/prof-oak.png'
  assets[dotted],assets[legacy]='custom-oak','legacy-oak'
- assert(api.trainerImage('prof-oak')=='custom-oak')
- assert(api.trainerImage('prof.oak')=='custom-oak')
- assets[dotted]=nil; assert(api.trainerImage('prof.oak')=='legacy-oak')
- assets[legacy]=nil; assert(api.trainerImage('prof-oak')==nil)
+  assert(api.trainerImage('prof-oak')=='legacy-oak')
+  assert(api.trainerImage('prof.oak')=='custom-oak')
+  assert(api.introOakImage()=='custom-oak')
+  assets[dotted]=nil; assert(api.trainerImage('prof.oak')==nil)
+  assert(api.trainerImage('prof-oak')=='legacy-oak')
+  assets[legacy]=nil; assert(api.trainerImage('prof-oak')==nil)
 end
 local f=assert(io.open('main.lua','rb')); local main=f:read('*a');f:close()
 local a=assert(main:find('mod.hooks:wrap("intro.oak_speech.build"',1,true))
