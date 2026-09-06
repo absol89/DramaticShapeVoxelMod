@@ -66,7 +66,8 @@ function Screen:update()
   end
   if not self.names[self.index]
       or (self.limit ~= nil and self.loaded >= self.limit) then
-    collectgarbage("collect")
+    -- Restricted mobile mod sandboxes may remove collectgarbage entirely.
+    pcall(collectgarbage, "collect")
     self:finish()
   end
 end

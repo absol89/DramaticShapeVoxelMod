@@ -3,6 +3,7 @@ package.path = "./?.lua;./?/init.lua;" .. package.path
 local T = require("tests.modkit")
 local root = os.getenv("DS_MOD_PATH") or "mods/DramaticShapeVoxelMod"
 local loaded = {}
+local ios = false
 local V = {
   mod = {
     id = "BATTLE_ART_VOXEL_FORK",
@@ -11,6 +12,9 @@ local V = {
 }
 
 function V.require(name)
+  if name == "Voxel3D" then
+    return { metalRenderer = function() return ios end }
+  end
   if loaded[name] then return loaded[name] end
   local chunk = assert(loadfile(root .. "/lib/" .. name .. ".lua"))
   local module = chunk(V)
@@ -37,6 +41,10 @@ setting:setIndex(9)
 T.eq(RamPrecache.bytes(), nil, "FULL has no byte ceiling")
 setting:setIndex(10)
 T.eq(RamPrecache.bytes(), 0, "OFF requests no eager preload")
+ios = true
+T.eq(RamPrecache.bytes(), nil,
+  "OFF selects the 1.9.6 full preload on Phosphor/iOS")
+ios = false
 
 local maps = {
   ROUTE_2 = { connections = {

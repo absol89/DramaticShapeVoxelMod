@@ -444,3 +444,17 @@ calls `introOakImage()` and reads the selected TRAINER ART generation's dotted
 file from that generation. Yellow's Pallet Town old-man-style Pikachu capture
 sets `demoName` to `PROF.OAK`; `applyTrainers()` consequently reads the
 independent `assets/battle/back-static/oak.png` back sprite.
+
+## Phosphor Route 1 compatibility preload (2026-09-06)
+
+Tag 1.9.6 gated CONTINUE on loading every compressed BAVC container into RAM.
+The later budget ladder allowed a partial preload, while OFF skipped it and
+made the Pallet-to-Route-1 transition call `mod.storage.readBytes` and LZ4
+decode during play. Reports identify the old full preload as stable on iOS.
+
+On the sandbox-safe LÖVE 12 Metal detection used elsewhere in the mod,
+RAM PRECACHE MB: OFF therefore resolves to an uncapped preload. On other
+platforms OFF remains a zero-byte preload with on-demand reads. The loading
+screen's final `collectgarbage` is guarded because that global can be absent in
+restricted mobile mod environments. This is source-tested; physical iOS
+Phosphor validation remains required.

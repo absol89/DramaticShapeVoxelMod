@@ -9,6 +9,8 @@
 - Separate Oak artwork routes: dotted `prof.oak.png` for the introduction,
   hyphenated `prof-oak.png` for his trainer battle, and `back-static/oak.png`
   for Yellow's Pallet Town capture demonstration.
+- On Phosphor/iOS, RAM PRECACHE MB: OFF now uses 1.9.6's full compressed-cache
+  preload before CONTINUE, avoiding storage reads during the Route 1 crossing.
 
 - **Legendary Visuals options.** The WORLD menu can now opt into the community
   granite pillar layouts (separate, bottom-linked, or crown-interlocked), the

@@ -669,7 +669,9 @@ local SETTINGS = {
   { RamPrecache.setting,
     "Maximum compressed voxel cache eagerly loaded after CONTINUE, in MiB. "
     .. "FULL loads every generated cache file; OFF skips the preload and "
-    .. "handles voxel data on demand during play.",
+    .. "handles voxel data on demand during play. On Phosphor/iOS, OFF uses "
+    .. "the compatible 1.9.6 full preload to avoid transition-time storage "
+    .. "reads.",
     full = true },
   { Water.setting,
     "Reflections on water. FULL adds screen-space reflections of the "
