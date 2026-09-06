@@ -124,15 +124,21 @@ package.loaded["src.render.PaletteFX"] = {
 local drawn = {}
 love = love or {}
 love.graphics = love.graphics or {}
+love.filesystem = love.filesystem or {}
+love.filesystem.getInfo = function() return true end
 love.graphics.draw = function(image, ...)
   drawn[#drawn + 1] = { image=image, args={...} }
 end
 
+local missingAsset
 local V = { mod = {
   hooks = { wrap = function(_, name, fn)
     if name == "pokemon.sprite" then wrapped = fn end
   end },
-  assets = { path = function(_, rel) return "mod/" .. rel end },
+  assets = { path = function(_, rel)
+    if missingAsset then return nil end
+    return "mod/" .. rel
+  end },
 } }
 function V.require(name)
   return assert(({ ModSetting=ModSetting, BattleArt=BattleArt,
@@ -277,5 +283,26 @@ local shinyPath = wrapped(function(old) return old end,
   "rom-shiny-static.png", shinyStaticCtx)
 ok(shinyPath == "mod/assets/battle/front-static/shiny/pikachu.png",
   "mon-aware static interfaces route shiny Pokemon through the shiny folder")
+
+local battleMenuCtx = {
+  kind="battle", side="front", species="PIKACHU", trueColor=false,
+}
+local battleMenuPath = wrapped(function() return "provider-front.png" end,
+  "rom-front.png", battleMenuCtx)
+ok(battleMenuPath == "mod/assets/battle/front-static/pikachu.png"
+  and battleMenuCtx.trueColor,
+  "battle-kind menu fronts use Battle Art's static front")
+ok(wrapped(function() return "provider-back.png" end, "rom-back.png",
+  {kind="battle",side="back",species="PIKACHU"}) == "provider-back.png",
+  "battle backs remain owned by the battle pipeline")
+missingAsset = true
+ok(wrapped(function() return "provider-missing.png" end, "rom-front.png",
+  {kind="battle",side="front",species="PIKACHU"}) == "provider-missing.png",
+  "a missing Battle Art menu front preserves the provider result")
+missingAsset = false
+artMode = "rom"
+ok(wrapped(function() return "provider-rom.png" end, "rom-front.png",
+  {kind="battle",side="front",species="PIKACHU"}) == "provider-rom.png",
+  "ROM mode preserves the provider result for battle-kind menus")
 
 print(("%d checks passed (Interface Sprites install/playback)"):format(checks))

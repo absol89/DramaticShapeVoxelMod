@@ -371,6 +371,35 @@ function InterfaceSprites.installTitle()
   titleInstalled = true
 end
 
+-- Party, Pokédex and PC ask for kind="battle" fronts so they match combat.
+-- Combat itself installs prepared Images in BattleArt.apply; those UIs only
+-- consume a path. Serve the same front-static file (never an atlas sheet).
+local function battleMenuFront(ctx)
+  if not ctx or ctx.kind ~= "battle" then return nil end
+  if ctx.side == "back" then return nil end
+  if BattleArt.setting:get() == "rom" then return nil end
+  local species = ctx.species
+    or (ctx.mon and ctx.mon.species)
+    or (ctx.data and ctx.data.species)
+  if not species then return nil end
+  local shiny = BattleArt.isShiny(ctx.mon)
+  local function resolve(useShiny)
+    local rel = BattleArt.staticSpeciesRelativePath(species, "front", useShiny)
+    if not rel then return nil end
+    local assetPath = V.mod.assets:path(rel)
+    if not assetPath then return nil end
+    if love and love.filesystem and love.filesystem.getInfo
+        and not love.filesystem.getInfo(assetPath) then
+      return nil
+    end
+    return assetPath
+  end
+  local assetPath = resolve(shiny) or (shiny and resolve(false)) or nil
+  if not assetPath then return nil end
+  ctx.trueColor = true
+  return assetPath
+end
+
 -- Register the pokemon.sprite seam. Called from main.lua after the module is
 -- required, so V.mod (and its hooks table) is fully populated.
 function InterfaceSprites.install()
@@ -390,8 +419,11 @@ function InterfaceSprites.install()
         dexSources[ctx.species] = out
       end
     end
-    -- Battles are handled by main.lua's own wrap (player back -> front).
-    -- Leave every battle picture strictly alone here.
+    -- Menu portraits that request the battle front (Modern Party / Dex / PC).
+    -- Do not touch battle BACK slots; main.lua owns player back -> front.
+    local menuFront = battleMenuFront(ctx)
+    if menuFront then return menuFront end
+    -- Remaining battle requests (backs, ROM mode, missing file) stay stock.
     if ctx and ctx.kind == "battle" then return out end
     -- Only a BACK slot must keep the engine's back sprite. Title and summary
     -- were already intercepted above because they need Image frames, not paths.
