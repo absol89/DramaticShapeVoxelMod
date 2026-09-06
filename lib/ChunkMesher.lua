@@ -469,6 +469,16 @@ local function shadeRect(c, shade, axisU, u0, u1, axisV, v0, v1, tone)
   return out
 end
 
+-- Passage returns do not lie on the parent wall plane, so they cannot sample
+-- shadeRect's two wall axes. They still need the old scalar/per-corner shade
+-- multiplier. PR45 removed this helper while converting ordinary masonry to
+-- shadeRect, leaving the five cave-mouth return faces calling nil.
+local function shadeTimes(shade, tone)
+  if type(shade) ~= "table" then return shade * tone end
+  return { shade[1] * tone, shade[2] * tone,
+           shade[3] * tone, shade[4] * tone }
+end
+
 local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local push = sink.push
   local waterPush = waterSink and waterSink.push or nil

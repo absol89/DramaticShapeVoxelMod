@@ -54,6 +54,16 @@ Metal renderer probe identifies iOS; other platforms use neutral UNKNOWN
 metadata. This field does not select rendering behavior. A regression test
 uses a sandbox proxy that throws on love.system access and passes both paths.
 
+## Route 2/Cerulean Legendary wall build fix: 2026-09-06
+
+PR45 replaced shadeTimes with plane-aware shadeRect for detailed masonry but
+left five calls in retainingCaveMouthSide. Legendary WALLS & LEDGES therefore
+failed outdoor meshes containing the Diglett's Cave or Cerulean Cave mound
+with `attempt to call global 'shadeTimes' (a nil value)`. The small scalar and
+per-corner multiplier is restored specifically for passage return faces.
+Terrain shading and real-map cave-exit regressions pass. Gameplay retest is
+pending; unrelated working-tree edits are preserved.
+
 ## Oak portraits and player animation default: 2026-09-05
 
 PLAYER ANIM defaults to GEN 1 (saved selections retained); TRAINER ART remains

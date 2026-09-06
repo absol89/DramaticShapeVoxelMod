@@ -75,6 +75,16 @@ end
 local runGeometry = assert(upvalue(C.geometry,'runGeometry'))
 local shadeRect = upvalue(runGeometry,'shadeRect')
 check(type(shadeRect)=='function','production subface sampler is reachable')
+local shadeTimes = upvalue(runGeometry,'shadeTimes')
+check(type(shadeTimes)=='function','cave-mouth shade multiplier is reachable')
+if shadeTimes then
+  local scaled=shadeTimes({.2,.4,.6,.8},.5)
+  check(near(scaled[1],.1) and near(scaled[2],.2)
+    and near(scaled[3],.3) and near(scaled[4],.4),
+    'cave-mouth return faces preserve per-corner shade')
+  check(near(shadeTimes(.8,.5),.4),
+    'cave-mouth return faces preserve scalar shade')
+end
 if shadeRect then
   local shade={.2,.6,1,.8}
   local whole={{8,0,16},{16,0,16},{16,0,24},{8,0,24}}
