@@ -1,3 +1,7 @@
+## Safari and interior texture follow-up (2026-09-06)
+
+Ported the approved desktop candidate onto master after PR47. See SAFARI_INTERIOR_REWORK.md for scope, preserved upstream changes, exact-checkout tests and platform limitations. Mesh cache revision33; no manifest version change. Horizons artwork remains separate.
+
 ## Museum cases and exterior cave/cliff repairs (2026-09-06)
 
 Based on current master after merged PR46. MuseumFossils replaces only the two

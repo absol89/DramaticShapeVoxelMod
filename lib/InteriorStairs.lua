@@ -21,17 +21,10 @@ function Stairs.build(S,map,data,cx,cy,s)
   local perRow=map.tileset.tilesPerRow or 16
   local aw,ah=map.tileset.imageWidth or 128,map.tileset.imageHeight or 48
   local quads=S.objectQuads
-  local function uv(x,y)
-    x=math.max(.05,math.min(15.95,x));y=math.max(.05,math.min(15.95,y))
-    local tx,tz=cx*2+math.floor(x/8),cy*2+math.floor(y/8)
-    local tile=S.tileAt[key(tx,tz)]
-    assert(tile~=nil,"interior stair source cell")
-    return{((tile%perRow)*8+x%8)/aw,(math.floor(tile/perRow)*8+y%8)/ah}
-  end
   local function vertex(x,y,z)return{mx+x,y,mz+z}end
   local function put(points,coords,shade,role)
     local q={points[1],points[2],points[3],points[4],uv={},shade=shade}
-    if s.warpStair then
+    do
       -- Shared public drawings need not occupy adjacent atlas tiles.
       -- Select the source tile from this face's center, keeping an edge
       -- at pixel 8/16 inside that same tile instead of jumping to its neighbor.
@@ -39,13 +32,12 @@ function Stairs.build(S,map,data,cx,cy,s)
       for i=1,4 do ax=ax+coords[i][1]/4;ay=ay+coords[i][2]/4 end
       local bx,by=math.floor(ax/8),math.floor(ay/8)
       local tile=S.tileAt[key(cx*2+bx,cy*2+by)]
+      q.stairSourceTile=tile
       for i=1,4 do
         local x=math.max(.05,math.min(7.95,coords[i][1]-bx*8))
         local y=math.max(.05,math.min(7.95,coords[i][2]-by*8))
         q.uv[i]={((tile%perRow)*8+x)/aw,(math.floor(tile/perRow)*8+y)/ah}
       end
-    else
-      for i=1,4 do q.uv[i]=uv(coords[i][1],coords[i][2])end
     end
     -- Diagnostic roles do not participate in batching or material selection.
     q.interiorStairRole=role

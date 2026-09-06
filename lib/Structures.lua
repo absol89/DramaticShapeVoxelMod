@@ -428,10 +428,13 @@ function Structures.forMap(map)
     V.require("HangingScrolls").build(S, map)
   end
   if map.id == "MUSEUM_1F" then V.require("MuseumFossils").build(S,map,pixels(tileset),perRow) end
+  V.require("SafariFoliage").build(S,map)
+  V.require("SafariStatues").build(S,map)
   Buildings.build(S, map, pixels(tileset), perRow)
   if tileset.id == "PLATEAU" then
     V.require("FacadeEntrances").build(S, map, pixels(tileset), perRow)
   end
+  if map.id == 'SAFARI_ZONE_CENTER' then V.require('SafariGatehouse').build(S,map,pixels(tileset)) end
 
   -- Fold doors into their buildings. A door cell is WALKABLE (the player
   -- steps onto it to warp), so it resolves to ground and punches a hole in
@@ -521,6 +524,7 @@ function Structures.forMap(map)
   -- says is behind the object, so the wall band it was painted into keeps
   -- resolving as the wall it is -- without a second copy of the drawing
   -- flat on its face.
+  V.require("HouseWallDecor").build(S, map, x0, x1, y0, y1)
   Structures.buildMounted(S, map, x0, x1, y0, y1)
 
   -- ---- flood-fill regions of structural tiles ----
@@ -2300,23 +2304,14 @@ local function stairCell(S, map, data, cx, cy, s)
   local runW = 16 / STAIR_STEPS
   local z0, z1 = mz, mz + 16
 
-  -- cell-space art coords (16x16, row 0 the top) -> atlas uv; callers keep
-  -- a quad's range inside one 8px tile so it never samples across a seam
-  local function uv(px, py)
-    px = math.max(0.05, math.min(15.95, px))
-    py = math.max(0.05, math.min(15.95, py))
-    local tile = S.tileAt[keyOf(cx * 2 + (px >= 8 and 1 or 0),
-                                cy * 2 + (py >= 8 and 1 or 0))]
-    return ((tile % perRow) * 8 + px % 8) / atlasW,
-           (math.floor(tile / perRow) * 8 + py % 8) / atlasH
-  end
   -- corners run bottom-left, bottom-right, top-right, top-left as seen
   -- from outside (the mesher's side convention); art rect in cell space
   local function face(c1, c2, c3, c4, ax0, ay0, ax1, ay1, shade)
-    if s.warpStair then
-      -- Newly authored public stairs use shared/nonadjacent atlas tiles.
+    do
+      -- All stair faces need atlas-safe subdivision, including legacy stairs.
+      -- Source tiles need not be adjacent in the atlas.
       -- Split both source seams and the eight-pixel world-curve lattice;
-      -- the historical Red/Ship path below remains exactly as authored.
+      -- Keep geometry, direction and the original source drawings intact.
       local us, vs = { 0, 1 }, { 0, 1 }
       local function cuts(out, a, b)
         if math.abs(b-a) < .000001 then return end
@@ -2346,15 +2341,11 @@ local function stairCell(S, map, data, cx, cy, s)
           return {((tile%perRow)*8+x)/atlasW,(math.floor(tile/perRow)*8+y)/atlasH}
         end
         quads[#quads+1]={point(a,c),point(b,c),point(b,d),point(a,d),
-          uv={source(a,c),source(b,c),source(b,d),source(a,d)},shade=shade}
+          uv={source(a,c),source(b,c),source(b,d),source(a,d)},shade=shade,stairSourceTile=tile}
       end end
       return
     end
-    local u0, v0 = uv(ax0, ay0)
-    local u1, v1 = uv(ax1, ay1)
-    quads[#quads + 1] = { c1, c2, c3, c4,
-      uv = { { u0, v1 }, { u1, v1 }, { u1, v0 }, { u0, v0 } },
-      shade = shade }
+
   end
   -- a vertical face spanning heights [fy0, fy1] wearing art rows
   -- [ay0, ay1], emitted per 8-row art band so no quad crosses the seam

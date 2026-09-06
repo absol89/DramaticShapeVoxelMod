@@ -134,6 +134,8 @@ function WorldUnderlay.resolve(state, colors)
       and biomes.black and biomes.black[mapId] then
     return COLORS.black, "nature:black"
   end
+  local safariColor = TerrainAtlas.safariGroundColor(map)
+  if safariColor then return safariColor, "safari:grass" end
   if map and map.def and not Map.isOutdoor(map.def) then
     local borderId = TileRenderer.borderBlockFor(map)
     if borderId == false then return { 0, 0, 0, 1 }, "indoor:black" end

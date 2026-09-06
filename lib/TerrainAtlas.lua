@@ -916,7 +916,7 @@ function TerrainAtlas.animate(map, colors, base, baked)
   local caveMaterial = map.tileset and map.tileset.id == "CAVERN"
     and "#test36-warm-brick-rough-cap" or ""
   local key = map.tileset.image .. "#a#" .. paletteKey(colors or {})
-    .. "#community#" .. communityKey() .. caveMaterial .. (perMap or "")
+    .. "#community#" .. communityKey() .. caveMaterial .. (perMap or "") .. ((map.id or ""):match("^SAFARI_ZONE_") and ("#safari#"..map.id) or "")
   local entry = animated[key]
   if entry == nil then
     entry = newEntry(map, base, baked)
@@ -949,10 +949,60 @@ function TerrainAtlas.animate(map, colors, base, baked)
   return entry.image
 end
 
+-- Safari owns a local grass/dry-earth treatment, never a global palette swap.
+local safariMaps={SAFARI_ZONE_CENTER=true,SAFARI_ZONE_EAST=true,SAFARI_ZONE_NORTH=true,SAFARI_ZONE_WEST=true}
+-- Shared with the distant floor so it uses this terrain treatment too.
+function TerrainAtlas.safariGroundColor(map)
+ if map and safariMaps[map.id] and map.tileset and map.tileset.id=='FOREST' then
+  return {.48,.50,.265,1}
+ end
+end
+local safariAtlases={}
+local function releaseSafari(entry)
+ if entry then entry.image:release();entry.data:release()end
+end
+local function safariGround(map,base,baked)
+ if not(safariMaps[map.id]and map.tileset.id=='FOREST')then return base,baked end
+ local old=safariAtlases[map.id]
+ if old and old.base==base then return old.image,old.data end
+ local ok,entry=pcall(function()
+  local raw=baked
+  if not raw then
+   love.graphics.push('all');love.graphics.setShader();love.graphics.setDepthMode()
+   raw=readback(base)
+   love.graphics.pop()
+  end
+  if not raw then return nil end
+  local w,h=raw:getDimensions();local data=love.image.newImageData(w,h);data:paste(raw,0,0,0,0,w,h)
+  if not baked then raw:release()end
+  local perRow=map.tileset.tilesPerRow or 16
+  for _,tile in ipairs({0,48,32,52,55,57,72,73,74,80,81,82,83,95})do
+   local sx,sy=tile%perRow*8,math.floor(tile/perRow)*8
+   for y=0,7 do for x=0,7 do
+    local rr,gg,bb,aa=data:getPixel(sx+x,sy+y)
+    if tile==0 or tile==48 then
+     local hsh=(x*37+y*61+x*y*11)%97
+     local c={.48,.50,.265}
+     if hsh<12 then c={.53,.46,.29}elseif hsh>88 then c={.61,.57,.34}elseif hsh<23 then c={.40,.44,.235}end
+     data:setPixel(sx+x,sy+y,c[1],c[2],c[3],aa)
+    elseif gg>rr*1.08 and gg>bb*1.3 then
+     local v=math.max(rr,gg,bb)
+     data:setPixel(sx+x,sy+y,.19+v*.33,.25+v*.31,.095+v*.19,aa)
+    end
+   end end
+  end
+  local image=love.graphics.newImage(data);image:setFilter('nearest','nearest')
+  return {base=base,image=image,data=data}
+ end)
+ if ok and entry then releaseSafari(old);safariAtlases[map.id]=entry;return entry.image,entry.data end
+ return base,baked
+end
+
 function TerrainAtlas.forMap(map, colors)
   local base, baked = staticAtlas(map, colors)
   if not base then return nil end
   base, baked = communityAtlas(map, colors, base, baked)
+  base, baked = safariGround(map, base, baked)
   return TerrainAtlas.animate(map, colors, base, baked) or base
 end
 
@@ -1061,6 +1111,7 @@ end
 -- per map ever entered, and each pins the engine's own baked ImageData
 -- alive behind it.
 function TerrainAtlas.setLive(live)
+  for id,entry in pairs(safariAtlases)do if not live[id]then releaseSafari(entry);safariAtlases[id]=nil end end
   for key, entry in pairs(animated) do
     if entry and entry.mapId and not live[entry.mapId] then
       releaseAnimatedEntry(entry)
@@ -1075,6 +1126,8 @@ function TerrainAtlas.setLive(live)
 end
 
 function TerrainAtlas.invalidate()
+  for _,entry in pairs(safariAtlases)do releaseSafari(entry)end
+  safariAtlases={}
   cache = {}
   cacheData = {}
   community = {}

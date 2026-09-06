@@ -24,7 +24,7 @@ end }
 function namespace.require(name)
   return assert(({
     Voxel3D = { newMesh = function() end },
-    Mat4 = {}, ModSetting = ModSetting, TerrainAtlas = {},
+    Mat4 = {}, ModSetting = ModSetting, TerrainAtlas = { safariGroundColor = function() return nil end },
   })[name], "unexpected WorldUnderlay dependency " .. tostring(name))
 end
 package.loaded["src.world.Map"] = {

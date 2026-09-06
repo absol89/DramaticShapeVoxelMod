@@ -67,7 +67,7 @@ local STATIC_PLAYTHROUGH = "bavc_static_mesh_v2"
 -- Jagged TEST38 masonry, ordinary floors and the distant perimeter are locked.
 -- Revision 31 adds explicit rear entrances, clean rear facades, cave exit
 -- portals and hanging scrolls while retaining the current disk-record layout.
-Disk.CACHE_REVISION = 32
+Disk.CACHE_REVISION = 33
 -- Patch releases which do not change emitted vertices must keep the existing
 -- world cache usable. This token matches the first static-mesh-cache-v2 build;
 -- CACHE_REVISION, not the public mod version, owns geometry compatibility.
