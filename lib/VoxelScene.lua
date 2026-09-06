@@ -1488,6 +1488,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
     pcall(companion.render, companion, "translucent_after_actors", state)
   end
 
+  if state.map.id == "MUSEUM_1F" then V.require("MuseumFossils").drawGlass(state.map) end
   local finished = Voxel3D.endScene()
   -- The delta belongs only to this overworld render. Do not let it reach a
   -- later battle or another owner of Voxel3D's placed-camera seam.

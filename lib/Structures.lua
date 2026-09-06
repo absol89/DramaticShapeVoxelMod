@@ -427,6 +427,7 @@ function Structures.forMap(map)
   if map.id == "OAKS_LAB" or map.id == "FIGHTING_DOJO" then
     V.require("HangingScrolls").build(S, map)
   end
+  if map.id == "MUSEUM_1F" then V.require("MuseumFossils").build(S,map,pixels(tileset),perRow) end
   Buildings.build(S, map, pixels(tileset), perRow)
   if tileset.id == "PLATEAU" then
     V.require("FacadeEntrances").build(S, map, pixels(tileset), perRow)

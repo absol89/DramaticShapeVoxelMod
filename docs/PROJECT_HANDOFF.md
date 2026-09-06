@@ -1,3 +1,21 @@
+## Museum cases and exterior cave/cliff repairs (2026-09-06)
+
+Based on current master after merged PR46. MuseumFossils replaces only the two
+exact first-floor fossil displays with Kabutops/Aerodactyl skeletons in framed
+glass cases. Solid geometry uses the existing atlas and chunk mesh; glass uses
+10 low-alpha panes with graphics state restored. Two exhibits add 12,576 solid
+vertices. Cache revision32 invalidates prior geometry. No map or collision edits.
+
+Exterior retaining cave mouths use a six-pixel recess and stepped stone crown.
+The exact 55,19/19,39 upright cliff-corner pattern uses stone rather than the raw
+blue diagonal sprite. A local shade helper handles scalar and corner AO shading.
+
+Validation: portable museum placement/bounds/fallback tests; private real Route4
+geometry regression (88 recessed mouth vertices, stepped heights9/12/13,70
+corner faces without tile19 UV). Desktop native captures verified museum views
+with engine0.2.27. Exact0.2.53 and Quest performance remain unverified. Desktop
+Astra19 backport installed separately with backups; PR preserves current upstream.
+
 ## Absol follow-up: building backs, entrances, cave exits and scrolls (2026-09-05)
 
 Separate follow-up to merged PR #45, integrated with master38e389c (1.10.3).

@@ -1,3 +1,10 @@
+local function shadeTimes(shade, factor)
+  if type(shade) == "table" then
+    return {shade[1]*factor, shade[2]*factor, shade[3]*factor, shade[4]*factor}
+  end
+  return shade * factor
+end
+
 -- Voxel world mode: turn a map's tile layer into one static 3D mesh.
 --
 -- The scene description comes from Structures.lua, which -- 3dSen-style --
@@ -742,10 +749,18 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     return false
   end
 
-  local function isKantoRetainingWall(s, tile, run)
+  local function isKantoRetainingWall(s, tile, run, tx, ty)
+    -- The southeast cliff corner is a shared ledge/wall cell, so it does
+    -- not inherit a volume run. Match the exact original 2x2 footprint.
+    local corner = false
+    if tile == 19 and tx and ty then
+      local x, z = math.floor(tx / 2) * 2, math.floor(ty / 2) * 2
+      corner = map:tileAt(x,z)==55 and map:tileAt(x+1,z)==19
+        and map:tileAt(x,z+1)==19 and map:tileAt(x+1,z+1)==39
+    end
     return CommunityVisuals.customWalls() and tileset.id == "OVERWORLD" and (
       (run and run.kantoRetaining == true)
-      or (s and s.class == "wall" and KANTO_RETAINING_TILE[tile] == true)
+      or (s and s.class == "wall" and (KANTO_RETAINING_TILE[tile] == true or corner))
     )
   end
 
@@ -1732,81 +1747,45 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   -- through as a blue-white hairline below the black recess.
   -- Other compass faces remain ordinary retaining wall, preventing the source
   -- door art from wrapping around the mound.
-  local function retainingCaveMouthSide(d, tx, ty, x0, z0,
-                                         y0, y1, h, shade)
-    if d ~= 5 then
-      retainingRockSide(d, x0, z0, y0, y1, shade)
-      return
+  local function retainingCaveMouthSide(d, tx, ty, x0, z0, y0, y1, h, shade)
+    if d ~= 5 then retainingRockSide(d,x0,z0,y0,y1,shade);return end
+    local first,last=tx,tx
+    while S.runs[keyOf(first-1,ty)] and S.runs[keyOf(first-1,ty)].door do first=first-1 end
+    while S.runs[keyOf(last+1,ty)] and S.runs[keyOf(last+1,ty)].door do last=last+1 end
+    local left=x0-(tx-first)*8;local width=(last-first+1)*8
+    local crown=math.max(4,math.min(h-3,24));local depth=-6
+    local dark=rockUV(RETAINING_SWATCH_TILE,ROCK_TEXEL.dark)
+    local stone=rockUV(RETAINING_SWATCH_TILE,ROCK_TEXEL.body)
+    local function put(a,b,c,e,uv,tone) pushSolid({a,b,c,e},uv,shadeTimes(shade,tone)) end
+    local function point(x,y,r)return faceAxisPoint(d,x0,z0,x,y,r)end
+    local function opening(x)
+      local edge=math.min(x-left,left+width-x)
+      if edge<2 then return 0 end
+      if edge<4 then return math.max(2,crown-4) end
+      if edge<6 then return math.max(3,crown-1) end
+      return crown
     end
-
-    local openTop = math.max(4, math.min(h - 3, 24))
-    local mouthTop = math.min(y1, openTop)
-    if mouthTop > y0 then
-      local leftRun = S.runs[keyOf(tx - 1, ty)]
-      local rightRun = S.runs[keyOf(tx + 1, ty)]
-      local leftEdge = not (leftRun and leftRun.door)
-      local rightEdge = not (rightRun and rightRun.door)
-      local axis0, axis1 = x0, x0 + 8
-      local recess = -1.65
-      local uvDark = rockUV(RETAINING_SWATCH_TILE, ROCK_TEXEL.dark)
-
-      -- Passage subfaces sample the same side-light field as the masonry.
-      -- This also handles both scalar and per-corner ambient shades.
-      -- A dark back wall, far enough behind the facade for camera movement to
-      -- reveal a real passage instead of a black card laid on the masonry.
-      sideSolid({ faceAxisPoint(d, x0, z0, axis0, y0, recess),
-                  faceAxisPoint(d, x0, z0, axis1, y0, recess),
-                  faceAxisPoint(d, x0, z0, axis1, mouthTop, recess),
-                  faceAxisPoint(d, x0, z0, axis0, mouthTop, recess) },
-                uvDark, shade, 0.34, d, x0, z0, y0, y1)
-
-      -- Dark passage floor from the facade plane to the recessed back wall.
-      -- Emit it only for the ground-touching band so stacked wall courses do
-      -- not produce overlapping coplanar quads. This is visual geometry only:
-      -- the ROM threshold, collision and warp trigger remain unchanged.
-      if y0 <= 0 and y1 > 0 then
-        sideSolid({ faceAxisPoint(d, x0, z0, axis0, 0, recess),
-                    faceAxisPoint(d, x0, z0, axis1, 0, recess),
-                    faceAxisPoint(d, x0, z0, axis1, 0, 0),
-                    faceAxisPoint(d, x0, z0, axis0, 0, 0) },
-                  uvDark, shade, 0.30, d, x0, z0, y0, y1)
+    for x=x0,x0+6,2 do
+      local top=opening(x+1);local upper=math.min(y1,top)
+      if top<=y0 then
+        -- Same stone donor as surrounding masonry, bounded to this strip.
+        put(point(x,y0,0),point(x+2,y0,0),point(x+2,y1,0),point(x,y1,0),stone,.78)
+      else
+        put(point(x,y0,depth),point(x+2,y0,depth),point(x+2,upper,depth),point(x,upper,depth),dark,.22)
+        if y0==0 then put(point(x,0,depth),point(x+2,0,depth),point(x+2,0,0),point(x,0,0),stone,.40) end
+        if y1>=top then
+          put(point(x,top,depth),point(x+2,top,depth),point(x+2,top,0),point(x,top,0),stone,.55)
+          if y1>top then put(point(x,top,0),point(x+2,top,0),point(x+2,y1,0),point(x,y1,0),stone,.78) end
+        end
+        for _,side in ipairs({-1,1}) do
+          local neighbor=opening(x+1+side*2)
+          local low=math.max(y0,neighbor)
+          if upper>low then
+            local edge=side==-1 and x or x+2
+            put(point(edge,low,0),point(edge,low,depth),point(edge,upper,depth),point(edge,upper,0),stone,side==-1 and .65 or .48)
+          end
+        end
       end
-
-      -- Only the two outside tiles of a multi-tile door run receive vertical
-      -- returns. Every face uses the darkest masonry texel, eliminating the
-      -- blue/gold sampled edge strips seen in TEST16.
-      if leftEdge then
-        sideSolid({ faceAxisPoint(d, x0, z0, axis0, y0, 0),
-                    faceAxisPoint(d, x0, z0, axis0, y0, recess),
-                    faceAxisPoint(d, x0, z0, axis0, mouthTop, recess),
-                    faceAxisPoint(d, x0, z0, axis0, mouthTop, 0) },
-                  uvDark, shade, 0.54, d, x0, z0, y0, y1)
-      end
-      if rightEdge then
-        sideSolid({ faceAxisPoint(d, x0, z0, axis1, y0, recess),
-                    faceAxisPoint(d, x0, z0, axis1, y0, 0),
-                    faceAxisPoint(d, x0, z0, axis1, mouthTop, 0),
-                    faceAxisPoint(d, x0, z0, axis1, mouthTop, recess) },
-                  uvDark, shade, 0.48, d, x0, z0, y0, y1)
-      end
-
-      -- Emit the ceiling return once, in the band that reaches the opening's
-      -- top. This produces a visible lintel thickness while leaving collision,
-      -- the source door volume and its warp trigger unchanged.
-      if y0 < openTop and y1 >= openTop then
-        sideSolid({ faceAxisPoint(d, x0, z0, axis0, openTop, recess),
-                    faceAxisPoint(d, x0, z0, axis1, openTop, recess),
-                    faceAxisPoint(d, x0, z0, axis1, openTop, 0),
-                    faceAxisPoint(d, x0, z0, axis0, openTop, 0) },
-                  uvDark, shade, 0.44, d, x0, z0, y0, y1)
-      end
-    end
-
-    -- Courses above the opening form a natural lintel and reconnect to the
-    -- unchanged retaining-wall field across the top of the mound.
-    local lintelBottom = math.max(y0, openTop)
-    if y1 > lintelBottom then
-      retainingRockSide(d, x0, z0, lintelBottom, y1, shade)
     end
   end
 
@@ -1963,7 +1942,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           local caveKind = caveSurfaceKind(s, tile)
           if caveKind then
             caveNaturalTop(tx, ty, x0, z0, h, VOLUME_TOP_SHADE, caveKind)
-          elseif isKantoRetainingWall(s, tile, run) then
+          elseif isKantoRetainingWall(s, tile, run, tx, ty) then
             ledgeRockTop(tx, ty, x0, z0, h, RETAINING_SWATCH_TILE,
                          aoShades(tx, ty, h, VOLUME_TOP_SHADE))
           else
@@ -2039,7 +2018,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                  and s.class == "ledge" then
             ledgeRockTop(tx, ty, x0, z0, h, topTile,
                          aoShades(tx, ty, h, 1))
-          elseif isKantoRetainingWall(s, tile, run) then
+          elseif isKantoRetainingWall(s, tile, run, tx, ty) then
             ledgeRockTop(tx, ty, x0, z0, h, RETAINING_SWATCH_TILE,
                          aoShades(tx, ty, h, VOLUME_TOP_SHADE))
           else
@@ -2127,11 +2106,11 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                 -- mouth on their south face. Their side/back faces stay
                 -- masonry, preventing the raw door sheet from wrapping around
                 -- the mound as blue/gold decoration.
-                elseif isKantoRetainingWall(s, tile, run)
+                elseif isKantoRetainingWall(s, tile, run, tx, ty)
                        and run and run.door then
                   retainingCaveMouthSide(d, tx, ty, x0, z0,
                                          y0, y1, h, faceShade)
-                elseif isKantoRetainingWall(s, tile, run) then
+                elseif isKantoRetainingWall(s, tile, run, tx, ty) then
                   retainingRockSide(d, x0, z0, y0, y1, faceShade)
                 else
                   sideQuad(d, x0, z0, y0, y1, src,
