@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Use the terrain side-light sampler for Legendary outdoor cave-mouth passage
+  faces, preserving per-corner ambient light while fixing their failed builds.
+- Add RED/GREEN to static PLAYER ART. It follows Choose Your Hero and extracts
+  frame one directly from the matching five-frame player animation strip.
+
 - **Legendary Visuals options.** The WORLD menu can now opt into the community
   granite pillar layouts (separate, bottom-linked, or crown-interlocked), the
   finalized S/M/L/XL tree family, natural terrain finishes, timber fences and

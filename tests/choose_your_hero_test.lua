@@ -25,6 +25,9 @@ setfenv(chunk,env); chunk()
 assert(api.effectivePlayerAnimationSet()=='red')
 player='green'; rival='yellow'
 assert(api.effectivePlayerAnimationSet()=='green')
+art='red'; assert(api.effectivePlayerArtSet()=='green')
+player='red'; assert(api.effectivePlayerArtSet()=='red')
+art='gen3'
 assert(api.chooseYourHeroRival()=='yellow')
 animated='ash'; assert(api.effectivePlayerAnimationSet()=='ash')
 animated='rom'; assert(api.effectivePlayerAnimationSet()=='rom')

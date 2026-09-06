@@ -3291,6 +3291,7 @@ T.eq(Art.playerAnimationSetting.labels[1], "PNG",
 T.eq(Art.playerAnimationSetting.defaultIndex, 9,
   "adding front-player choices does not change the established Red default")
 local expectedStaticPlayers = {
+  red = "RED/GREEN",
   boy = "BOY", lass = "LASS", hilbert = "HILBERT",
 }
 for value, label in pairs(expectedStaticPlayers) do

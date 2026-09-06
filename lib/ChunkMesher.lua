@@ -469,16 +469,6 @@ local function shadeRect(c, shade, axisU, u0, u1, axisV, v0, v1, tone)
   return out
 end
 
--- Passage returns do not lie on the parent wall plane, so they cannot sample
--- shadeRect's two wall axes. They still need the old scalar/per-corner shade
--- multiplier. PR45 removed this helper while converting ordinary masonry to
--- shadeRect, leaving the five cave-mouth return faces calling nil.
-local function shadeTimes(shade, tone)
-  if type(shade) ~= "table" then return shade * tone end
-  return { shade[1] * tone, shade[2] * tone,
-           shade[3] * tone, shade[4] * tone }
-end
-
 local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local push = sink.push
   local waterPush = waterSink and waterSink.push or nil
@@ -1760,53 +1750,55 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
       local recess = -1.65
       local uvDark = rockUV(RETAINING_SWATCH_TILE, ROCK_TEXEL.dark)
 
+      -- Passage subfaces sample the same side-light field as the masonry.
+      -- This also handles both scalar and per-corner ambient shades.
       -- A dark back wall, far enough behind the facade for camera movement to
       -- reveal a real passage instead of a black card laid on the masonry.
-      pushSolid({ faceAxisPoint(d, x0, z0, axis0, y0, recess),
+      sideSolid({ faceAxisPoint(d, x0, z0, axis0, y0, recess),
                   faceAxisPoint(d, x0, z0, axis1, y0, recess),
                   faceAxisPoint(d, x0, z0, axis1, mouthTop, recess),
                   faceAxisPoint(d, x0, z0, axis0, mouthTop, recess) },
-                uvDark, shadeTimes(shade, 0.34))
+                uvDark, shade, 0.34, d, x0, z0, y0, y1)
 
       -- Dark passage floor from the facade plane to the recessed back wall.
       -- Emit it only for the ground-touching band so stacked wall courses do
       -- not produce overlapping coplanar quads. This is visual geometry only:
       -- the ROM threshold, collision and warp trigger remain unchanged.
       if y0 <= 0 and y1 > 0 then
-        pushSolid({ faceAxisPoint(d, x0, z0, axis0, 0, recess),
+        sideSolid({ faceAxisPoint(d, x0, z0, axis0, 0, recess),
                     faceAxisPoint(d, x0, z0, axis1, 0, recess),
                     faceAxisPoint(d, x0, z0, axis1, 0, 0),
                     faceAxisPoint(d, x0, z0, axis0, 0, 0) },
-                  uvDark, shadeTimes(shade, 0.30))
+                  uvDark, shade, 0.30, d, x0, z0, y0, y1)
       end
 
       -- Only the two outside tiles of a multi-tile door run receive vertical
       -- returns. Every face uses the darkest masonry texel, eliminating the
       -- blue/gold sampled edge strips seen in TEST16.
       if leftEdge then
-        pushSolid({ faceAxisPoint(d, x0, z0, axis0, y0, 0),
+        sideSolid({ faceAxisPoint(d, x0, z0, axis0, y0, 0),
                     faceAxisPoint(d, x0, z0, axis0, y0, recess),
                     faceAxisPoint(d, x0, z0, axis0, mouthTop, recess),
                     faceAxisPoint(d, x0, z0, axis0, mouthTop, 0) },
-                  uvDark, shadeTimes(shade, 0.54))
+                  uvDark, shade, 0.54, d, x0, z0, y0, y1)
       end
       if rightEdge then
-        pushSolid({ faceAxisPoint(d, x0, z0, axis1, y0, recess),
+        sideSolid({ faceAxisPoint(d, x0, z0, axis1, y0, recess),
                     faceAxisPoint(d, x0, z0, axis1, y0, 0),
                     faceAxisPoint(d, x0, z0, axis1, mouthTop, 0),
                     faceAxisPoint(d, x0, z0, axis1, mouthTop, recess) },
-                  uvDark, shadeTimes(shade, 0.48))
+                  uvDark, shade, 0.48, d, x0, z0, y0, y1)
       end
 
       -- Emit the ceiling return once, in the band that reaches the opening's
       -- top. This produces a visible lintel thickness while leaving collision,
       -- the source door volume and its warp trigger unchanged.
       if y0 < openTop and y1 >= openTop then
-        pushSolid({ faceAxisPoint(d, x0, z0, axis0, openTop, recess),
+        sideSolid({ faceAxisPoint(d, x0, z0, axis0, openTop, recess),
                     faceAxisPoint(d, x0, z0, axis1, openTop, recess),
                     faceAxisPoint(d, x0, z0, axis1, openTop, 0),
                     faceAxisPoint(d, x0, z0, axis0, openTop, 0) },
-                  uvDark, shadeTimes(shade, 0.44))
+                  uvDark, shade, 0.44, d, x0, z0, y0, y1)
       end
     end
 

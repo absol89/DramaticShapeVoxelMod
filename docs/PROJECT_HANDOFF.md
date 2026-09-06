@@ -424,3 +424,16 @@ Stadium ROM import plus existing model loading. Runtime and Android tests remain
 pending; archive validation does not prove import success. Test the new Battle
 Art shadow build in a world-backed arena with sprite lighting on/off. Continue
 the separate Stadium 1 provider investigation and cave-door geometry work.
+
+## Cave-mouth lighting and RED/GREEN static player art (2026-09-06)
+
+The creator-provided Cerulean hotfix replaces the temporary restored
+`shadeTimes` helper with the mesher's existing `sideSolid` path for all five
+recessed cave-mouth faces. This retains the repaired topology and samples the
+same scalar or per-corner ambient field as adjacent masonry.
+
+STATIC mode now exposes PLAYER ART: RED/GREEN. It follows Choose Your Hero and
+extracts the first 80x80 frame directly from `back-animated/redplayer.png` or
+`greenplayer.png`; authors do not need duplicate files under `back-static`.
+Old explicit GREEN option values continue to select Green directly. The Green
+strip is a valid 400x80 five-frame atlas and remains registered for ANIMATED.

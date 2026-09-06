@@ -27,8 +27,8 @@ BattleArt.trainerSetting = ModSetting.new(
   { "gen1", "gen2", "gen3" }, { "GEN 1", "GEN 2", "GEN 3" })
 BattleArt.playerArtSetting = ModSetting.new(
   "playerArtSet", "PLAYER ART",
-  { "png", "gen1", "gen2", "gen3", "gen4", "gen5", "ash", "gary", "boy", "lass", "hilbert", "rom" },
-  { "PNG", "GEN 1", "GEN 2", "GEN 3", "GEN 4", "GEN 5", "ASH", "GARY", "BOY", "LASS", "HILBERT", "ROM" })
+  { "png", "gen1", "gen2", "gen3", "gen4", "gen5", "ash", "gary", "red", "boy", "lass", "hilbert", "rom" },
+  { "PNG", "GEN 1", "GEN 2", "GEN 3", "GEN 4", "GEN 5", "ASH", "GARY", "RED/GREEN", "BOY", "LASS", "HILBERT", "ROM" })
 BattleArt.playerAnimationSetting = ModSetting.new(
   "playerAnimatedSet", "PLAYER ANIM",
   { "png", "gen1", "gen2", "gen3", "gen4", "gen5", "ash", "gary", "red",
@@ -508,8 +508,8 @@ BattleArt.chooseYourHeroRival = chooseYourHeroRival
 
 function BattleArt.effectivePlayerAnimationSet()
   local selected = BattleArt.playerAnimationSetting:get()
-  -- Old saves that still store GREEN are the combined RED/GREEN row.
-  if selected == "green" then selected = "red" end
+  -- RED/GREEN follows Choose Your Hero. Old saves that explicitly stored
+  -- GREEN keep selecting the Green atlas directly.
   if selected == "red" then
     return chooseYourHeroPlayer() == "green" and "green" or "red"
   end
@@ -517,7 +517,11 @@ function BattleArt.effectivePlayerAnimationSet()
 end
 
 function BattleArt.effectivePlayerArtSet()
-  return BattleArt.playerArtSetting:get()
+  local selected = BattleArt.playerArtSetting:get()
+  if selected == "red" then
+    return chooseYourHeroPlayer() == "green" and "green" or "red"
+  end
+  return selected
 end
 
 local function yellowRivalFile(name)
@@ -565,9 +569,28 @@ function BattleArt.playerTrainerImage()
     local path = V.mod.assets:path(rel)
     return prepare(path, displayMode())
   end
+  local function loadFirstAnimatedFrame(name)
+    local rel = "assets/battle/back-animated/" .. name .. "player.png"
+    local path = V.mod.assets:path(rel)
+    if not path then return nil end
+    local cacheKey = path .. "#first#" .. displayMode()
+    local hit = cache[cacheKey]
+    if hit ~= nil then return hit or nil end
+    local made
+    local ok = pcall(function()
+      local sheet = love.image.newImageData(path)
+      local width, height = sheet:getDimensions()
+      if width < 5 or width % 5 ~= 0 or height < 1 then return end
+      local frame = love.image.newImageData(width / 5, height)
+      frame:paste(sheet, 0, 0, 0, 0, width / 5, height)
+      made = BattleArt.prepareData(frame, displayMode())
+    end)
+    cache[cacheKey] = (ok and made) or false
+    return made
+  end
   if set == "png" then return load("player.png") end
-  if set == "green" then
-    return load("greenplayer.png") or load("player.png")
+  if set == "red" or set == "green" then
+    return loadFirstAnimatedFrame(set) or load("player.png")
   end
   -- A named collection may be incomplete without making every battle fall
   -- all the way back to ROM. player.png is the collection-independent BYO
