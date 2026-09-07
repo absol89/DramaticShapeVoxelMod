@@ -1,3 +1,7 @@
+## Safari leaf material detail (2026-09-06)
+
+Follow-up to merged PR48: replace constant-color foliage swatches with a 48x8 procedural leaf atlas. Preserve nearest filtering, olive palette, mesh positions, topology and draw-call count. Cache revision34 rebuilds UVs. Private desktop native comparisons and all 376 foliage footprint checks passed; geometry/topology were compared exactly against the prior material. Quest testing remains outstanding.
+
 ## Safari and interior texture follow-up (2026-09-06)
 
 Ported the approved desktop candidate onto master after PR47. See SAFARI_INTERIOR_REWORK.md for scope, preserved upstream changes, exact-checkout tests and platform limitations. Mesh cache revision33; no manifest version change. Horizons artwork remains separate.
