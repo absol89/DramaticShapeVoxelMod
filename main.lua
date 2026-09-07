@@ -115,6 +115,7 @@ local FirstPerson = V.require("FirstPerson")
 local FreeMove = V.require("FreeMove")
 local PoisonFlash = V.require("PoisonFlash")
 local MomHealFlash = V.require("MomHealFlash")
+local HealOverlay = V.require("HealOverlay")
 local TransformCompat = V.require("TransformCompat")
 local VoxelCompanion = V.require("VoxelCompanion")
 local CompanionLifecycle = V.require("CompanionLifecycle")
@@ -373,10 +374,16 @@ mod.content.render_pipelines:register("voxel", {
     -- them announces it. Ahead of the active() gate, so switching it
     -- while voxel mode is OFF still invalidates what is cached.
     voidFill.check()
-    if not Voxel.active() then return end
+    local ramOnly = RamPrecache.off()
+    local policyChanged = VoxelMeshDisk.setSessionOnly(ramOnly)
+    if ramOnly then VoxelPrecache.reset() end
     local Game = require("src.core.Game")
+    if policyChanged and not ramOnly then VoxelMeshDisk.bind(Game, false) end
+    if not Voxel.active() then return end
     local ow = Game and Game.overworld
     if ow and ow.map and ow.camera then
+      -- Also covers enabling/reloading the mod after the title menu.
+      VoxelMeshDisk.beginSession(ramOnly)
       pcall(VoxelScene.prefetch, ow)
       -- Once the visible neighbourhood is ready, cooperatively prepare the
       -- current map's real warp/connection destinations.  This is automatic:
@@ -472,9 +479,36 @@ mod.content.render_pipelines:register("voxel", {
       -- else -- so the scale goes up with it, or the "!" bubble lands the
       -- right place at half the size.  project() already answers in canvas
       -- pixels, so only the scale needs saying.
-      ctx.drawFx(function(wx, wy) return Voxel3D.project(wx, 0, wy) end,
-                 ctx.scale * AntiAlias.factor())
+      local scale = ctx.scale * AntiAlias.factor()
+      -- Every field FX but one is anchored to the ground point of the thing
+      -- it belongs to -- the character wearing the "!", the cell the dust
+      -- puffs on -- so its flat closure lands unchanged through this.  The
+      -- heal machine's is not: it is anchored to the PLAYER, three tiles from
+      -- the art it paints, and slid rigidly onto that one point.  A camera
+      -- with any pitch foreshortens that lever arm, so the balls and the
+      -- monitor float off the cabinet.  Hide it from drawFx -- both the
+      -- dispatch and fxHeal itself read state.healAnim -- and put its pieces
+      -- on the machine's own surfaces instead.
+      --
+      -- healAnim goes back whatever drawFx does with the frame: the heal
+      -- script is waiting on that record to count its jingle out, and losing
+      -- it would strand the player at the counter.
+      local state = ctx.state
+      local healAnim = state and state.healAnim
+      if healAnim then state.healAnim = nil end
+      local drawn, err = pcall(ctx.drawFx,
+                               function(wx, wy) return Voxel3D.project(wx, 0, wy) end,
+                               scale)
+      if healAnim then
+        state.healAnim = healAnim
+        -- cosmetic, and last: a fault here must not retire the pipeline and
+        -- drop the whole world back to 2D mid-heal
+        if not pcall(HealOverlay.draw, healAnim, Voxel3D.project, scale, ctx) then
+          love.graphics.setShader()
+        end
+      end
       Voxel3D.endOverlay()
+      if not drawn then error(err, 0) end
     end
     -- and back to the window's own size, which is what the engine composites
     -- one canvas pixel to one display pixel.  A pass-through when AA is off.
@@ -669,9 +703,8 @@ local SETTINGS = {
   { RamPrecache.setting,
     "Maximum compressed voxel cache eagerly loaded after CONTINUE, in MiB. "
     .. "FULL loads every generated cache file; OFF skips the preload and "
-    .. "handles voxel data on demand during play. On Phosphor/iOS, OFF uses "
-    .. "the compatible 1.9.6 full preload to avoid transition-time storage "
-    .. "reads.",
+    .. "predictive loading on every platform. OFF generates live areas and "
+    .. "keeps their cache in session RAM without automatic disk reads.",
     full = true },
   { Water.setting,
     "Reflections on water. FULL adds screen-space reflections of the "
@@ -682,6 +715,11 @@ local SETTINGS = {
     "Enable shadows. OFF removes both the real cast-shadow map and its flat "
     .. "fallback from free roam and staged battles; UNLIT battle cards also "
     .. "decline shadows even while this global switch is ON.",
+    full = true },
+  { InterfaceSprites.scalingSetting,
+    "BATTLE ART in Pokedex and status screens: FIT keeps artwork within "
+    .. "56x56. FULL draws complete frames at native size for testing; large "
+    .. "sprites may overlap text or extend beyond the screen. Title is unchanged.",
     full = true },
   { InterfaceSprites.setting,
     "INTERFACE SPRITES: show BATTLE ART's regular-form FRONT outside battle. "
@@ -1000,7 +1038,8 @@ local OPTION_CATEGORIES = {
     Shadows.setting, AntiAlias.setting,
   } },
   { id = "pokemon", label = "POKEMON ART", settings = {
-    InterfaceSprites.setting, BattleArt.setting, BattleArt.trainerSetting,
+    InterfaceSprites.setting, InterfaceSprites.scalingSetting,
+    BattleArt.setting, BattleArt.trainerSetting,
     BattleArt.playerArtSetting, BattleArt.playerAnimationSetting,
     BattleArt.frontAnimationSetting, BattleArt.backAnimationSetting,
     BattleArt.duplicateSetting, BattleArt.viewSetting,
@@ -1311,24 +1350,29 @@ mod.hooks:wrap("ui.title_menu.items", function(next, game, items)
   -- actually persist a disk cache is decided inside VoxelPrecacheScreen,
   -- which shows the "not available" message on builds whose storage
   -- backend would otherwise freeze (e.g. Windows 0.1.84+).
-  VoxelMeshDisk.bind(game, true)
-  local cacheAvailable = VoxelMeshDisk.available()
+  -- OFF must not even enumerate/probe persistent caches merely to continue.
+  if not RamPrecache.off() then VoxelMeshDisk.bind(game, true) end
   for _, item in ipairs(out) do
     if tostring(item and item.label or "") == "CONTINUE"
-        and type(item.onSelect) == "function" and cacheAvailable then
+        and type(item.onSelect) == "function" then
       local continue = item.onSelect
       item.onSelect = function()
-        VoxelMeshDisk.beginSession()
+        local limit = RamPrecache.bytes()
+        VoxelMeshDisk.beginSession(limit == 0)
+        if limit == 0 or not VoxelMeshDisk.available() then
+          VoxelPrecache.reset()
+          continue()
+          return
+        end
         local savedMap
         local okSave, saved = pcall(require("src.core.SaveData").load)
         if okSave and saved and saved.player then savedMap = saved.player.map end
         local priority = RamPrecache.priorityMaps(game.data, savedMap, 2)
         local names, total = VoxelMeshDisk.ramPlan(priority)
-        local limit = RamPrecache.bytes()
         local held = VoxelMeshDisk.ramStats().bytes or 0
         local ready = limit ~= nil and held >= limit
                    or limit == nil and VoxelMeshDisk.ramReady(names)
-        if limit == 0 or not names or #names == 0 or ready then
+        if not names or #names == 0 or ready then
           continue()
         else
           game.stack:push(VoxelCacheRamScreen.new(
@@ -1343,15 +1387,18 @@ mod.hooks:wrap("ui.title_menu.items", function(next, game, items)
         -- gameplay layer. Its first adjacent maps are generated lazily and
         -- may later be persisted with pause-menu CACHE -> SAVE.
         newGame()
-        VoxelMeshDisk.bind(game, false)
-        VoxelMeshDisk.beginSession()
+        if not RamPrecache.off() then VoxelMeshDisk.bind(game, false) end
+        VoxelMeshDisk.beginSession(RamPrecache.off())
+        if RamPrecache.off() then VoxelPrecache.reset() end
       end
     end
   end
-  if not VoxelMeshDisk.precacheAvailable() then return out end
+  if not RamPrecache.off() and not VoxelMeshDisk.precacheAvailable() then return out end
   local entry = {
     label = "PRECACHE",
     onSelect = function()
+      -- Explicit generation remains available; OFF only disables automatic work.
+      VoxelMeshDisk.bind(game, true)
       VoxelMeshDisk.beginPrecache()
       game.stack:push(VoxelPrecacheScreen.new(game))
     end,
@@ -1376,7 +1423,7 @@ mod.hooks:wrap("ui.start_menu.items", function(next, game, items)
   if type(out) ~= "table" then return out end
   -- CACHE is always offered; VoxelPrecacheScreen surfaces the
   -- "not available" message on builds without a usable storage backend.
-  VoxelMeshDisk.bind(game, false)
+  if not RamPrecache.off() then VoxelMeshDisk.bind(game, false) end
   for _, item in ipairs(out) do
     if tostring(item and item.label or "") == "CACHE" then return out end
   end
@@ -1394,6 +1441,7 @@ mod.hooks:wrap("ui.start_menu.items", function(next, game, items)
       local function reopen() Screens.push(game, "StartMenu") end
       game.stack:push(Menu.new(game, {
         { label = "SAVE", onSelect = function()
+          VoxelMeshDisk.bind(game, false) -- explicit persistence, including OFF
           local before = VoxelMeshDisk.ramStats()
           local ok, saved, failed, errors = VoxelMeshDisk.saveRamToDisk()
           if not ok then
@@ -1504,7 +1552,9 @@ do
       local before = self:blockAt(bx, by)
       setBlock(self, bx, by, block)
       if self.id and self:blockAt(bx, by) ~= before then
-        ChunkMesher.refresh(self.id)
+        -- naming the block lets the mesher drop what stood there from the
+        -- mesh on screen, so a cut tree goes on this frame
+        ChunkMesher.refresh(self.id, bx, by, self, before)
         Companion:worldChanged("map.setBlock")
       end
     end
@@ -1860,7 +1910,7 @@ mod.hooks:wrap("world.tod", function(next, tod, ctx)
   return DayNight.tod()
 end)
 
-mod.exports.version = "1.10.3"
+mod.exports.version = "1.10.4"
 mod.exports.battlePresentation = BattlePresentation.export()
 mod.exports.battleStage = BattleStage.export(OverworldBattle)
 mod.exports.voxel_companion = Companion.provider

@@ -125,8 +125,8 @@ local FALLBACK_HEIGHTS = {
   stair_down_n = 16,
   ladder_up = 16,
   ladder_down = 16,
-  -- Legacy standee vocabulary retained for third-party/custom profiles.
-  -- Authored cave warps now use ladder_up/down and the open shaft builder.
+  -- Shipped cave warps use PR #41's thin source-art standees. The separate
+  -- ladder_up/down shaft classes remain available to custom profiles.
   ladder = 16,
 }
 

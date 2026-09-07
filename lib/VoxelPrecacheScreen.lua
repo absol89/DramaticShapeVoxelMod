@@ -141,7 +141,7 @@ function Screen:finish(phase)
   -- Whole-world generation touches several route-sized FFI buffers. Runtime
   -- meshes are already released above; collect their Lua/cdata owners before
   -- returning to gameplay so the first warp does not inherit generator debris.
-  collectgarbage("collect")
+  pcall(function() collectgarbage("collect") end)
 end
 
 function Screen:startNext()

@@ -59,6 +59,8 @@ love = { image = {} }
 function love.image.newImageData(a, b)
   if type(a) == "number" then return data(a, b) end
   if a == "provider-atlas.png" then return data(4, 2) end
+  if a == "tight-atlas.png" then return data(2, 1) end
+  if a == "wrong-atlas.png" then return data(6, 2) end
   if a == "rom-front.png" then return data(2, 2) end
   error("missing image")
 end
@@ -96,5 +98,23 @@ ok(shinyFrames and #shinyFrames == 2,
   "mon-aware interface playback selects the shiny atlas definition")
 ok(shinyDurations[1] == 300 and shinyDurations[2] == 400,
   "shiny interface playback retains the shiny atlas timing")
+
+-- Both layouts must work while users replace asset folders incrementally.
+for _, shiny in ipairs({false, true}) do
+  local def = (shiny and shinySets or sets).gen4.SQUIRTLE.front
+  def.width, def.height = 1, 1
+  def.legacyLayout = {width=2, height=2}
+  for _, path in ipairs({"tight-atlas.png", "provider-atlas.png"}) do
+    local images, timing = Animated.interfaceFront(
+      "SQUIRTLE", "gen4", "gbc", path, {shiny=shiny})
+    local size = path == "tight-atlas.png" and 1 or 2
+    ok(images and #images == 2, "tight and legacy sheets both decode")
+    ok(images[1].width == size and images[2].paste.sx == size,
+      "actual sheet dimensions select the correct frame boundaries")
+    ok(timing[2] == (shiny and 400 or 200), "layout selection preserves timing")
+  end
+  ok(Animated.interfaceFront("SQUIRTLE", "gen4", "gbc",
+    "wrong-atlas.png", {shiny=shiny}) == nil, "unknown layouts are rejected")
+end
 
 print(("%d checks passed (external interface atlas decoder)"):format(checks))

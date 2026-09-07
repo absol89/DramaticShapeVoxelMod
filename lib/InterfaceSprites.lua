@@ -30,6 +30,26 @@ InterfaceSprites.setting = ModSetting.new("interfaceSprites",
   { "off", "battle_art", "modded" },
   { "OFF", "BATTLE ART", "MODDED" }, 1)
 
+InterfaceSprites.scalingSetting = ModSetting.new("interfaceScaling",
+  "INTERFACE SCALING", { "fit", "full" }, { "FIT", "FULL" }, 1)
+
+-- FULL preserves visible pixels at native size and removes transparent margins.
+-- Read live so switching modes does not restart or reset animation playback.
+local function screenFrames(state)
+  if InterfaceSprites.scalingSetting:get() == "full" then
+    if not state.nativeFrames then
+      state.nativeFrames = BattleArt.fitPreparedFrames
+        and BattleArt.fitPreparedFrames(state.frames, 56, 56, true) or state.frames
+    end
+    return state.nativeFrames
+  end
+  if not state.fittedFrames then
+    state.fittedFrames = BattleArt.fitPreparedFrames
+      and BattleArt.fitPreparedFrames(state.frames, 56, 56) or state.frames
+  end
+  return state.fittedFrames
+end
+
 local function active()
   return InterfaceSprites.setting:get() == "battle_art"
 end
@@ -205,7 +225,11 @@ local function markTitleFrame(image, x, y, title)
   end
 
   local P = require("src.render.PaletteFX")
+  -- Merge identical runs on consecutive rows. This preserves the exact alpha
+  -- mask while avoiding a separate scaled scissor boundary on every row.
+  local rectangles, previous = {}, {}
   for sy = 0, mon.h - 1 do
+    local current = {}
     local row = mon.rows[sy]
     local start = nil
     for sx = 0, mon.w do
@@ -221,10 +245,22 @@ local function markTitleFrame(image, x, y, title)
       if visible and start == nil then
         start = sx
       elseif not visible and start ~= nil then
-        P.markTrueColor(x + start, y + sy, sx - start, 1)
+        local key = start .. ":" .. sx
+        local rect = previous[key]
+        if rect then
+          rect.h = rect.h + 1
+        else
+          rect = {x=x + start, y=y + sy, w=sx - start, h=1}
+          rectangles[#rectangles + 1] = rect
+        end
+        current[key] = rect
         start = nil
       end
     end
+    previous = current
+  end
+  for _, rect in ipairs(rectangles) do
+    P.markTrueColor(rect.x, rect.y, rect.w, rect.h)
   end
 end
 
@@ -486,18 +522,37 @@ function InterfaceSprites.installSummary()
         or (self and self.__battleArtOriginalSprite),
       self and self.mon)
     if state then
-      if not state.summaryFrames then
-        state.summaryFrames = BattleArt.fitPreparedFrames
-          and BattleArt.fitPreparedFrames(state.frames, 56, 56)
-          or state.frames
-      end
-      self.sprite = state.summaryFrames[state.frame]
+      self.sprite = screenFrames(state)[state.frame]
       self.spriteTrueColor = true
     elseif self and self.__battleArtOriginalCaptured then
       self.sprite = self.__battleArtOriginalSprite
       self.spriteTrueColor = self.__battleArtOriginalTrueColor
     end
-    originalDraw(self, ...)
+    if state and InterfaceSprites.scalingSetting:get() == "full"
+        and self.sprite and self.sprite.getDimensions then
+      -- Center the native canvas in the portrait column before x=72.
+      -- Oversized art starts at x=0 so its left edge remains visible.
+      local graphics = love.graphics
+      local P = require("src.render.PaletteFX")
+      local draw, mark = graphics.draw, P.markTrueColor
+      local sprite = self.sprite
+      local w, h = sprite:getDimensions()
+      local py = math.max(0, 56 - h)
+      local left = math.max(0, math.floor((72 - w) / 2))
+      graphics.draw = function(image, x, y, ...)
+        if image == sprite and type(x) == "number" then x = x + left - 8 end
+        return draw(image, x, y, ...)
+      end
+      P.markTrueColor = function(x, y, width, height)
+        if x == 8 and y == py and width == w and height == h then x = left end
+        return mark(x, y, width, height)
+      end
+      local ok, err = pcall(originalDraw, self, ...)
+      graphics.draw, P.markTrueColor = draw, mark
+      if not ok then error(err, 0) end
+    else
+      originalDraw(self, ...)
+    end
   end
   summaryInstalled = true
 end
@@ -541,11 +596,46 @@ function InterfaceSprites.installDex()
       species and dexSources[species]
         or (self and self.__battleArtOriginalSprite))
     if state then
-      self.sprite = state.frames[state.frame]
+      self.sprite = screenFrames(state)[state.frame]
       self.spriteTrueColor = true
     elseif self and self.__battleArtOriginalCaptured then
       self.sprite = self.__battleArtOriginalSprite
       self.spriteTrueColor = self.__battleArtOriginalTrueColor
+    end
+    if state and InterfaceSprites.scalingSetting:get() == "full"
+        and self.sprite and self.sprite.getDimensions then
+      -- The stock bottom anchor (64-h) clips tall sprites above the screen.
+      -- Use the complete portrait height through the number row instead.
+      local graphics = love.graphics
+      local P = require("src.render.PaletteFX")
+      local draw, mark = graphics.draw, P.markTrueColor
+      local sprite = self.sprite
+      local w, h = sprite:getDimensions()
+      local oldX = 8 + math.floor((8 - w / 8) / 2) * 8
+      local oldY = 64 - h
+      -- Placement is defined by the first pose, not the tallest animation
+      -- frame or the shared canvas. Later poses retain their authored motion.
+      local first = screenFrames(state)[1]
+      local metric = BattleArt.metrics and BattleArt.metrics(first)
+      local firstH = first:getHeight()
+      local firstY = 0
+      if metric then
+        firstY = metric.y0
+        firstH = metric.y1 - metric.y0 + 1
+      end
+      local top = math.max(0, math.floor((72 - firstH) / 2)) - firstY
+      graphics.draw = function(image, x, y, ...)
+        if image == sprite and type(y) == "number" then y = top end
+        return draw(image, x, y, ...)
+      end
+      P.markTrueColor = function(x, y, width, height)
+        if x == oldX and y == oldY and width == w and height == h then y = top end
+        return mark(x, y, width, height)
+      end
+      local ok, result = pcall(originalDraw, self, ...)
+      graphics.draw, P.markTrueColor = draw, mark
+      if not ok then error(result, 0) end
+      return result
     end
     return originalDraw(self, ...)
   end

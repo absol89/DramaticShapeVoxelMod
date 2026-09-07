@@ -758,13 +758,13 @@ end
 -- Fit the union of the complete animation once, rather than centering each
 -- frame independently. That keeps authored translations/swoops intact while
 -- giving every frame the same centered, bottom-aligned 56x56 viewport.
-function BattleArt.fitPreparedFrames(images, boxW, boxH)
+function BattleArt.fitPreparedFrames(images, boxW, boxH, native)
   if type(images) ~= "table" or #images == 0 then return images end
   boxW, boxH = math.floor(tonumber(boxW) or 0), math.floor(tonumber(boxH) or 0)
   if boxW <= 0 or boxH <= 0 then return images end
 
   local cached = fittedFrameSets[images]
-  local cacheKey = boxW .. "x" .. boxH
+  local cacheKey = boxW .. "x" .. boxH .. (native and ":native" or "")
   if cached and cached[cacheKey] then return cached[cacheKey] end
 
   local x0, x1, y0, y1
@@ -779,10 +779,16 @@ function BattleArt.fitPreparedFrames(images, boxW, boxH)
   local unionW, unionH = x1 - x0 + 1, y1 - y0 + 1
   if unionW <= 0 or unionH <= 0 then return images end
 
-  local scale = math.min(1, boxW / unionW, boxH / unionH)
+  -- FULL removes only animation-wide transparent margins. Keep every visible
+  -- pixel and authored movement; top-align instead of inheriting PNG padding.
+  if native then
+    boxW, boxH = math.max(boxW, unionW), math.max(boxH, unionH)
+  end
+  local scale = native and 1 or math.min(1, boxW / unionW, boxH / unionH)
   local drawW = math.max(1, math.min(boxW, math.floor(unionW * scale + 0.5)))
   local drawH = math.max(1, math.min(boxH, math.floor(unionH * scale + 0.5)))
-  local destX, destY = math.floor((boxW - drawW) / 2), boxH - drawH
+  local destX = math.floor((boxW - drawW) / 2)
+  local destY = native and 0 or boxH - drawH
   local fitted, ok = {}, true
   for _, image in ipairs(images) do
     local source = preparedData[image]

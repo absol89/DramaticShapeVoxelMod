@@ -1,6 +1,6 @@
 -- Session RAM budget for compressed voxel containers loaded at CONTINUE.
--- It limits only the eager preload; ordinary play may still create or load
--- map data on demand. OFF skips the preload, FULL has no byte ceiling.
+-- OFF generates only live areas and retains generated records in session RAM.
+-- Other values permit persistent reads and predictive loading; FULL is uncapped.
 
 local V = ...
 local ModSetting = V.require("ModSetting")
@@ -16,20 +16,11 @@ RamPrecache.setting = ModSetting.new(
 function RamPrecache.bytes()
   local mb = RamPrecache.setting:get()
   if mb == false then return nil end -- nil means uncapped/FULL
-  if tonumber(mb) == 0 then
-    -- Phosphor/iOS has been reliable with 1.9.6's pre-game full compressed
-    -- preload, but can terminate while mod.storage is read and decompressed
-    -- during the first Pallet -> Route 1 transition. OFF is the explicit
-    -- compatibility choice there: retain its label/save value while routing
-    -- CONTINUE through that proven full preload. Other platforms keep the
-    -- ordinary on-demand OFF behavior.
-    local ok, Voxel3D = pcall(V.require, "Voxel3D")
-    if ok and Voxel3D and Voxel3D.metalRenderer then
-      local detected, ios = pcall(Voxel3D.metalRenderer)
-      if detected and ios then return nil end
-    end
-  end
   return math.max(0, tonumber(mb) or 0) * 1024 * 1024
+end
+
+function RamPrecache.off()
+  return RamPrecache.bytes() == 0
 end
 
 -- Match the overworld's ordinary connection neighborhood: saved map first,

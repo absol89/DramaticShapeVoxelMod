@@ -7,7 +7,11 @@ end
 local wrapped
 local setting = { value = "battle_art" }
 function setting:get() return self.value end
-local ModSetting = { new = function() return setting end }
+local scaling = {value="fit"}
+function scaling:get() return self.value end
+local ModSetting = { new = function(key)
+  return key == "interfaceScaling" and scaling or setting
+end }
 
 local artMode, generation = "animated", "gen2"
 local function image(id, w, h, opaqueAt)
@@ -49,6 +53,7 @@ local BattleArt = {
   interfaceStaticFrontImage = function() return staticImage end,
   isShiny = function(battler) return battler and battler.shiny == true end,
   metrics = function(img)
+    if img == frame1 and img.testMetric then return img.testMetric end
     if img == footFrame1 or img == footFrame2 then
       return { y1=49, padBottom=6 }
     end
@@ -60,7 +65,8 @@ local BattleArt = {
     cropped[img] = out
     return out
   end,
-  fitPreparedFrames = function(frames, w, h)
+  fitPreparedFrames = function(frames, w, h, native)
+    if native then return frames end
     fittedArgs = { frames=frames, w=w, h=h }
     return { summaryFrame1, summaryFrame2 }
   end,
@@ -87,6 +93,10 @@ function SummaryMenu.update() end
 function SummaryMenu.draw(self, marker)
   if marker == "kept" then summaryCalls = (summaryCalls or 0) + 1 end
   summarySprite = self and self.sprite
+  if self.testDrawSprite then
+    local w,h = self.sprite:getDimensions()
+    love.graphics.draw(self.sprite,8+w,math.max(0,56-h),0,-1,1)
+  end
 end
 package.loaded["src.ui.SummaryMenu"] = SummaryMenu
 
@@ -102,7 +112,13 @@ function DexEntryMenu.new(_, species)
   return { def={id=species}, sprite={id="rom-dex"}, spriteTrueColor=false }
 end
 function DexEntryMenu.update() end
-function DexEntryMenu.draw(self) dexSprite = self.sprite end
+function DexEntryMenu.draw(self)
+  dexSprite = self.sprite
+  if self.testDrawSprite then
+    local w,h = self.sprite:getDimensions()
+    love.graphics.draw(self.sprite, 8 + math.floor((8-w/8)/2)*8+w,64-h,0,-1,1)
+  end
+end
 package.loaded["src.ui.DexEntryMenu"] = DexEntryMenu
 
 local legacyTrainerData
@@ -187,6 +203,14 @@ ok(not marked(82, 80),
 ok(marked(83, 80),
   "alpha-aware title replay restores Pokemon pixels behind transparent trainer space")
 
+ok(#trueColorMarks == 3, "title merges matching rows into three rectangles")
+for py = 80, 135 do
+  for px = 40, 95 do
+    ok(marked(px, py) == not (px == 82 and py == 80),
+      "merged replay preserves exact Pokemon coverage and trainer exclusion")
+  end
+end
+
 -- Legacy 0.1.83 moves the title mon in pixels with monOffset (newer engines
 -- use slideIn in tiles). True-color marks must move with the drawn frame.
 trueColorMarks = {}
@@ -236,13 +260,13 @@ wrapped(function() return "provider-dex.png" end, "rom-dex.png",
   {kind="dex", species="LUGIA"})
 local dex = DexEntryMenu.new({}, "LUGIA")
 DexEntryMenu.draw(dex)
-ok(dexSprite == frame1 and dex.spriteTrueColor,
+ok(dexSprite == summaryFrame1 and dex.spriteTrueColor,
   "Pokédex uses the selected prepared generation frame")
 ok(lastInterfaceSource == "provider-dex.png",
   "Pokédex decoder receives the provider atlas path")
 DexEntryMenu.update(dex, 0.11)
 DexEntryMenu.draw(dex)
-ok(dexSprite == frame2, "Pokédex animation advances with atlas timing")
+ok(dexSprite == summaryFrame2, "Pokédex animation advances with atlas timing")
 
 local summaryMon = {species="LUGIA", shiny=true}
 wrapped(function() return "provider-summary.png" end, "rom-summary.png",
@@ -261,6 +285,42 @@ ok(lastInterfaceBattler == summaryMon,
 SummaryMenu.update(summary, 0.11)
 SummaryMenu.draw(summary)
 ok(summarySprite == summaryFrame2, "fitted summary animation advances")
+
+scaling.value = "full"
+SummaryMenu.draw(summary)
+DexEntryMenu.draw(dex)
+ok(summarySprite == frame2 and dexSprite == frame2,
+  "FULL uses complete native frames in both screens without resetting animation")
+-- Exercise actual draw/mark coordinates through the scoped summary adapter.
+local savedWidth = frame2.w
+frame2.w = 80
+local oldDraw = love.graphics.draw
+-- The SummaryMenu mock records the sprite; temporarily add the engine draw seam
+-- through its original implementation below via a test flag.
+summary.testDrawSprite = true
+SummaryMenu.draw(summary)
+ok(drawn[#drawn].args[1] == 80, "oversized mirrored FULL frame starts at x=0")
+frame2.w = savedWidth
+summary.testDrawSprite = nil
+ok(love.graphics.draw == oldDraw, "summary restores the graphics draw function")
+dex.testDrawSprite = true
+local savedHeight = frame2.h
+frame2.h = 80
+frame1.testMetric = {y0=20,y1=59}
+DexEntryMenu.draw(dex)
+ok(drawn[#drawn].args[2] == -4,
+  "Dex centers first pose height and removes its top margin despite taller later frame")
+frame1.testMetric = nil
+frame2.h = 56
+DexEntryMenu.draw(dex)
+ok(drawn[#drawn].args[2] == 8, "FULL Dex sprite centers in 72-pixel portrait area")
+frame2.h = savedHeight
+dex.testDrawSprite = nil
+scaling.value = "fit"
+SummaryMenu.draw(summary)
+DexEntryMenu.draw(dex)
+ok(summarySprite == summaryFrame2 and dexSprite == summaryFrame2,
+  "FIT restores fitted frames immediately in both screens")
 
 setting.value, artMode = "off", "animated"
 SummaryMenu.draw(summary)

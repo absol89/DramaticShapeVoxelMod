@@ -17,6 +17,7 @@ local V = ...
 
 local ChunkMesher = V.require("ChunkMesher")
 local MeshDisk = V.require("VoxelMeshDisk")
+local RamPrecache = V.require("RamPrecache")
 
 local Precache = {}
 
@@ -162,6 +163,10 @@ end
 -- existing ChunkMesher.pump call remains the single place CPU/GPU work runs,
 -- under the same 5 ms idle slice as neighbour streaming.
 function Precache.update(game)
+  if RamPrecache.off() then
+    Precache.reset()
+    return
+  end
   local overworld = game and game.overworld
   local data = game and game.data
   if not (overworld and overworld.map and data and data.maps) then return end
@@ -225,6 +230,7 @@ function Precache.update(game)
 end
 
 function Precache.reset()
+  if active then ChunkMesher.cancelSpeculative(active.id, false) end
   rootId, candidates, nextCandidate, active = nil, {}, 1, nil
 end
 

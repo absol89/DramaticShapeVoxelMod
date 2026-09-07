@@ -480,3 +480,108 @@ platforms OFF remains a zero-byte preload with on-demand reads. The loading
 screen's final `collectgarbage` is guarded because that global can be absent in
 restricted mobile mod environments. This is source-tested; physical iOS
 Phosphor validation remains required.
+
+## Integrated local follow-up (2026-09-07)
+
+The earlier Phosphor OFF-to-FULL workaround above is superseded by the user's
+requested platform-independent OFF behaviour. Pending local changes disable
+automatic preloading, predictive destination work and persistent reads with OFF,
+while retaining live-generated session RAM. See `OFF_MODE_CRASH_AUDIT.md` and
+the repository-root `PROJECT_HANDOFF.md` for evidence and tests.
+
+PR #47 and PR #48 are integrated at master `7743de9` alongside those local
+changes and the requested ladder/heal/reflection/cut restorations. Their combined
+cache revision is 34, superseding upstream 33 and the local-only 32. Manifest
+`1.10.4` is preserved as a pending user edit. No local edits were committed/pushed.
+
+## Gen 4 tight atlas migration (2026-09-07)
+
+Inspected `dev/gen4_front_tight-1.10.3` (770 regular/shiny PNG atlases).
+Compared every frame against installed originals after a constant per-animation
+translation: no altered visible pixels, clipped pixels, or empty frames. All
+sheet dimensions match supplied metadata. Species, paths, timings and frame
+counts are unchanged. No Unown PNG is supplied (existing metadata also refers
+to an absent unown.png).
+
+Merged only frame dimensions into both Gen 4 data tables, retaining original
+sizes as legacyLayout. AnimatedBattleArt selects tight or legacy cells by exact
+sheet dimensions, so incremental asset overlays remain compatible. No assets
+were copied; the owner will overlay supplied assets onto the mod assets folder,
+retaining files absent from the pack, then restart. Do not overwrite the merged
+data tables with the supplied ones: that removes legacy compatibility.
+
+Keep Summary BATTLE ART fitting: 580/770 opaque animation bounds exceed 56x56;
+removing it overlaps name/HP/number UI. Existing fitting already uses scale <=1
+and does not downscale artwork whose opaque bounds fit. Cropping preserves the
+visible art size, so it cannot eliminate required fitting. Dex uses native
+frames and benefits from reduced padding. Runtime/device visual QA remains
+outstanding. Decoder and interface playback: 55 checks pass; metadata-only
+comparison and Lua syntax checks pass.
+
+## Interface scaling and Android title banding (2026-09-07)
+
+Added INTERFACE SCALING: FIT/FULL (default FIT) beside INTERFACE SPRITES in
+POKEMON ART. It applies to BATTLE ART Summary and Dex Image adapters. FIT uses
+56x56 opaque-union fitting; FULL uses complete native prepared frames. Switching
+is live and retains animation progress. FULL may overlap the stock screen UI.
+Title rendering is independent. This supersedes the previous decision to keep
+status fitting mandatory; the user explicitly requested FULL as a test option.
+
+Android screenshot (user reports engine 0.2.56) shows horizontal bands on Ditto.
+A suspected contributor is fractional display scaling of the title alpha-mask
+true-color replay, previously one scissored pass per horizontal pixel run.
+Coalesced identical consecutive runs into taller rectangles without changing
+covered pixels or trainer exclusion. This reduces internal scissor boundaries
+and draw calls, but is a mitigation, not a confirmed Android fix. Engine renderer
+also has DPI-aware scissor rounding; device scaling and GPU behavior still need
+verification. Ask tester to compare integer display scaling if bands persist.
+
+Mocked interface/title tests: 3169 checks passed, including pixel-by-pixel mask
+coverage, trainer occlusion, FIT/FULL live changes, and animation. Lua syntax and
+git diff whitespace checks passed. No actual Android/device visual test performed.
+
+## FULL interface anchor correction (2026-09-07)
+
+User screenshots show padded Dewgong/Croconaw frames positioned too low. FULL
+now removes shared animation-wide transparent margins and top-aligns visible
+art at native resolution in a canvas at least 56x56. Oversized art retains all
+pixels and can overlap UI. FIT is unchanged. Shared bounds preserve authored
+animation motion. Native and fitted results use separate caches. Synthetic
+production-fitter tests verify pixel preservation, top alignment, motion and
+cache separation; device visual verification remains outstanding.
+
+## Status centering and installed deployment (2026-09-07)
+
+FULL Summary portraits now center within x=0..71; wider canvases start at x=0
+to preserve the left edge. Only the sprite draw and matching true-color mark
+move; scoped wrappers restore on errors. FIT remains unchanged. Kanto-Reforged
+installed ui/summary_ui.lua labels now use ATK, DEF, SPEED, SPATK, SPDEF to
+fit before three-digit values. Companion patch staged separately at
+D:/gen1recomp/.codex-temp/interface-deploy/summary_ui.lua.
+Compared tracked Battle Art runtime/data/shaders/main/manifest to installed
+BATTLE_ART_VOXEL_FORK and copied only differences (2 files); also deployed
+1 companion UI file. All copied hashes verified. Backups retained at
+D:/gen1recomp/.codex-temp/interface-deploy/backup-20260907-030042.
+No asset copying or deletion. Local playback/centering tests passed; in-game
+visual verification requires restart.
+
+## FULL Dex vertical centering (2026-09-07)
+
+FULL Dex sprites now center vertically in the 72-pixel portrait area including
+the number row, clamped at y=0 for oversized art instead of stock 64-h which
+clips the top. Number remains drawn over the sprite as authorized. Matching
+true-color marks move with the sprite; FIT is unchanged. 3173 mocked interface
+checks and syntax/whitespace checks pass. Deployed InterfaceSprites.lua to the
+installed BATTLE_ART_VOXEL_FORK with backup and matching SHA256. Device visual
+verification remains outstanding.
+
+## First-pose Dex anchor (2026-09-07)
+
+Per user correction, FULL Dex vertical position now uses the first prepared
+frame opaque y0/y1, not maximum animation/canvas height. Subtract first y0
+from centered placement, keeping placement constant across animation. Shared
+canvas still preserves pixels; it does not determine placement. Status remains
+unchanged (user approved Charizard). 3173 mock checks and syntax/whitespace pass.
+Deployed InterfaceSprites.lua with backup and SHA256 verification. Actual
+animation stretching is not established by the screenshot; native pixels are
+not rescaled by this anchor change. Device visual confirmation remains pending.

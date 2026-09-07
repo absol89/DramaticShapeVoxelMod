@@ -101,6 +101,21 @@ local function decodeFrames(def, mode, source)
     local autoColumns = tonumber(def.autoColumns)
     local count = cells and #cells or autoColumns or assert(tonumber(def.frames))
     if count < 1 then return end
+    -- Tightened Gen 4 sheets and the original sheets may coexist during copying.
+    -- Select only an exact sheet layout, never slice an old atlas with tight cells.
+    local layout = def
+    if def.legacyLayout and not cells and not autoColumns then
+      local columns = assert(tonumber(def.columns))
+      local rows = math.ceil(count / columns)
+      local function matches(candidate)
+        return sheetW == candidate.width * columns
+          and sheetH == candidate.height * rows
+      end
+      if not matches(def) then
+        if not matches(def.legacyLayout) then return end
+        layout = def.legacyLayout
+      end
+    end
     local autoWidth
     if autoColumns then
       if autoColumns % 1 ~= 0 or sheetW % autoColumns ~= 0 then return end
@@ -116,8 +131,8 @@ local function decodeFrames(def, mode, source)
         x, y = index * autoWidth, 0
         width, height = autoWidth, sheetH
       else
-        width = assert(tonumber(def.width))
-        height = assert(tonumber(def.height))
+        width = assert(tonumber(layout.width))
+        height = assert(tonumber(layout.height))
         local columns = assert(tonumber(def.columns))
         x = (index % columns) * width
         y = math.floor(index / columns) * height

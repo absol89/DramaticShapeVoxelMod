@@ -42,8 +42,9 @@ T.eq(RamPrecache.bytes(), nil, "FULL has no byte ceiling")
 setting:setIndex(10)
 T.eq(RamPrecache.bytes(), 0, "OFF requests no eager preload")
 ios = true
-T.eq(RamPrecache.bytes(), nil,
-  "OFF selects the 1.9.6 full preload on Phosphor/iOS")
+T.eq(RamPrecache.bytes(), 0,
+  "OFF skips eager loading on Phosphor/iOS too")
+T.eq(RamPrecache.off(), true, "OFF exposes the session-only policy")
 ios = false
 
 local maps = {

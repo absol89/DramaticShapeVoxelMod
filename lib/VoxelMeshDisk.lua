@@ -26,7 +26,8 @@ end
 
 local Disk = {}
 local ramFiles, sessionActive = {}, false
-local ramDirty, ramRejected = {}, {}
+local sessionOnly = false
+local ramDirty, ramRejected, ramGenerated = {}, {}, {}
 local ramBytes = 0
 local storage
 local knownSizes = {}
@@ -46,7 +47,7 @@ end
 -- a pcall-guarded wrapper so the forced GC in beginPrecache/dropRam degrades
 -- to a no-op instead of crashing on those builds.
 local function diskGc()
-  pcall(collectgarbage, "collect")
+  pcall(function() collectgarbage("collect") end)
 end
 
 -- Static geometry is shared by every journey through one game version. Keep
@@ -67,7 +68,9 @@ local STATIC_PLAYTHROUGH = "bavc_static_mesh_v2"
 -- Jagged TEST38 masonry, ordinary floors and the distant perimeter are locked.
 -- Revision 31 adds explicit rear entrances, clean rear facades, cave exit
 -- portals and hanging scrolls while retaining the current disk-record layout.
-Disk.CACHE_REVISION = 33
+-- Revision 34 combines upstream museum/Safari/interior geometry (33) with
+-- restored prop-span records and PR #41 ladders; neither old cache is reusable.
+Disk.CACHE_REVISION = 34
 -- Patch releases which do not change emitted vertices must keep the existing
 -- world cache usable. This token matches the first static-mesh-cache-v2 build;
 -- CACHE_REVISION, not the public mod version, owns geometry compatibility.
@@ -85,8 +88,8 @@ local FORMAT = 2
 local RAW_CHUNK = 1024 * 1024
 
 local function available()
-  return storage ~= nil
-    and love.data and love.data.pack and love.data.unpack
+  return (storage ~= nil or sessionActive)
+    and love and love.data and love.data.pack and love.data.unpack
     and love.data.newByteData and love.data.compress and love.data.decompress
     and love.graphics and love.graphics.newMesh
 end
@@ -556,6 +559,7 @@ local function discard(path, rejected)
   if held then ramBytes = math.max(0, ramBytes - #held) end
   ramFiles[path] = nil
   ramDirty[path] = nil
+  ramGenerated[path] = nil
   if rejected then ramRejected[path] = true end
 end
 
@@ -608,7 +612,9 @@ function Disk.orderRamNames(names, priority)
 end
 
 function Disk.ramPlan(priority)
-  if not available() then return {}, 0 end
+  if (sessionActive and sessionOnly) or not storage or not available() then
+    return {}, 0
+  end
   local names, bytes = {}, 0
   local ok, listed = pcall(storage.list, storage, Disk.DIRECTORY)
   if not ok then return names, bytes end
@@ -623,19 +629,34 @@ function Disk.ramPlan(priority)
   return names, bytes
 end
 
-function Disk.beginSession()
+-- Switching OFF drops clean disk-preloaded records, but retains records built
+-- during play (including unsaved edits). No filesystem calls or full GC here.
+function Disk.setSessionOnly(enabled)
+  enabled = enabled == true
+  if sessionOnly == enabled then return false end
+  sessionOnly = enabled
+  if enabled then
+    for path in pairs(ramFiles) do
+      if not ramGenerated[path] then discard(path) end
+    end
+  end
+  return true
+end
+
+function Disk.beginSession(ramOnly)
   sessionActive = true
+  if ramOnly ~= nil then Disk.setSessionOnly(ramOnly) end
 end
 
 function Disk.beginPrecache()
-  ramFiles, ramDirty, ramRejected = {}, {}, {}
+  ramFiles, ramDirty, ramRejected, ramGenerated = {}, {}, {}, {}
   ramBytes = 0
   sessionActive = false
   diskGc()
 end
 
 function Disk.loadIntoRam(name)
-  if not sessionActive or type(name) ~= "string"
+  if not sessionActive or sessionOnly or not storage or type(name) ~= "string"
      or name:sub(1, #Disk.DIRECTORY + 1) ~= Disk.DIRECTORY .. "/" then
     return false, 0
   end
@@ -674,7 +695,7 @@ end
 -- requests repopulate this table lazily from disk or freshly generated data.
 function Disk.dropRam()
   local stats = Disk.ramStats()
-  ramFiles, ramDirty, ramRejected = {}, {}, {}
+  ramFiles, ramDirty, ramRejected, ramGenerated = {}, {}, {}, {}
   ramBytes = 0
   sessionActive = true
   diskGc()
@@ -729,7 +750,13 @@ end
 -- validates every stream before gameplay uses it.
 local function headerMatches(path, expected, map)
   if not available() then return false, "cache backend unavailable" end
-  local ok, blob = pcall(storage.readBytes, storage, path)
+  local ok, blob = true, ramFiles[path]
+  if not blob then
+    if (sessionActive and sessionOnly) or not storage then
+      return false, "record not generated this session"
+    end
+    ok, blob = pcall(storage.readBytes, storage, path)
+  end
   if not ok then return false, "read error: " .. tostring(blob) end
   if type(blob) ~= "string" or #blob == 0 then
     return false, "missing or empty cache record"
@@ -795,7 +822,7 @@ end
 function Disk.stats()
   local out = { bytes = 0, files = 0, maps = 0,
                 aux = 0, full = 0, body = 0 }
-  if not available() then return out end
+  if not storage or not available() then return out end
   local ok, names = pcall(storage.list, storage, Disk.DIRECTORY)
   if not ok then return out end
   local maps = {}
@@ -867,6 +894,7 @@ local function readValidated(path, fp, map)
   if not available() then return nil end
   local blob = ramFiles[path]
   if not blob then
+    if (sessionActive and sessionOnly) or not storage then return nil end
     if sessionActive and ramRejected[path] then return nil end
     local ok, loaded = pcall(storage.readBytes, storage, path)
     if not ok or not loaded then return nil end
@@ -887,6 +915,26 @@ local function readValidated(path, fp, map)
   return blob, pos
 end
 
+-- Prop runs stored with a record: a u32 count, then four floats per run.
+-- A precached map never runs the geometry pass, so without these the cut
+-- fast path in ChunkMesher would never fire on one.
+local function readSpans(blob, pos)
+  local count = readU32(blob, pos)
+  if not count or count > 1048576 then return nil end
+  pos = pos + 4
+  local spans = {}
+  for _ = 1, count do
+    if pos + 15 > #blob then return nil end
+    local a, b, c, d, nextPos = love.data.unpack("<ffff", blob, pos)
+    spans[#spans + 1] = a
+    spans[#spans + 1] = b
+    spans[#spans + 1] = c
+    spans[#spans + 1] = d
+    pos = nextPos
+  end
+  return spans, pos
+end
+
 function Disk.loadTerrain(map, slot, masks)
   if not Disk.staticEligible(map) then return nil end
   local path = pathFor(map, slot, "terrain")
@@ -894,13 +942,15 @@ function Disk.loadTerrain(map, slot, masks)
   local blob, pos = readValidated(path, fp, map)
   if not blob then return nil end
   local terrain, nextPos = streamRecord(blob, pos)
-  local water, finalPos
-  if nextPos then water, finalPos = streamRecord(blob, nextPos) end
-  if not terrain or not water or finalPos ~= #blob + 1 then
+  local water, afterWater
+  if nextPos then water, afterWater = streamRecord(blob, nextPos) end
+  local spans, finalPos
+  if afterWater then spans, finalPos = readSpans(blob, afterWater) end
+  if not terrain or not water or not spans or finalPos ~= #blob + 1 then
     discard(path, true)
     return nil
   end
-  return { terrain = terrain, water = water }
+  return { terrain = terrain, water = water, spans = spans }
 end
 
 local function float4(blob, pos)
@@ -933,7 +983,14 @@ function Disk.loadAux(map)
     figures[#figures + 1] = stream
     pos = finalPos
   end
-  if pos ~= #blob + 1 then discard(path, true); return nil end
+  -- tuft and billboard runs, after the figures
+  local grassSpans, afterGrass = readSpans(blob, pos)
+  local flowerSpans, finalPos
+  if afterGrass then flowerSpans, finalPos = readSpans(blob, afterGrass) end
+  if not grassSpans or not flowerSpans or finalPos ~= #blob + 1 then
+    discard(path, true); return nil
+  end
+  grass.spans, flowers.spans = grassSpans, flowerSpans
   return { grass = grass, flowers = flowers, figures = figures }
 end
 
@@ -1005,6 +1062,7 @@ local function remember(path, blob, dirty)
   ramBytes = ramBytes + #blob
   knownSizes[path] = #blob
   ramDirty[path] = dirty and true or nil
+  ramGenerated[path] = true
   ramRejected[path] = nil
 end
 
@@ -1076,7 +1134,9 @@ end
 -- failures remain dirty so granting storage permission and selecting SAVE
 -- again retries exactly the unsaved set.
 function Disk.saveRamToDisk()
-  if not available() then return false, 0, 0, { "cache API unavailable" } end
+  if not storage or not available() then
+    return false, 0, 0, { "cache API unavailable" }
+  end
   local paths = {}
   for path in pairs(ramDirty) do paths[#paths + 1] = path end
   table.sort(paths)
@@ -1101,6 +1161,16 @@ function Disk.saveRamToDisk()
   return failures == 0, saved, failures, errors
 end
 
+local function writeSpans(file, spans)
+  local count = math.floor(#(spans or {}) / 4)
+  write(file, u32(count))
+  for i = 1, count * 4, 4 do
+    write(file, love.data.pack("string", "<ffff",
+                               spans[i], spans[i + 1],
+                               spans[i + 2], spans[i + 3]))
+  end
+end
+
 function Disk.saveTerrain(map, slot, masks, terrain, water)
   if not Disk.staticEligible(map) then return false end
   local path = pathFor(map, slot, "terrain")
@@ -1108,6 +1178,7 @@ function Disk.saveTerrain(map, slot, masks, terrain, water)
   return writeFile(path, fp, function(file)
     writeChunked(file, terrain)
     writeChunked(file, water)
+    writeSpans(file, terrain and terrain.spans)
   end)
 end
 
@@ -1128,6 +1199,8 @@ function Disk.saveAux(map, aux)
       write(file, f32x4(figure.wx, figure.wz, figure.y, figure.w))
       Budget.check()
     end
+    writeSpans(file, aux.grass and aux.grass.spans)
+    writeSpans(file, aux.flowers and aux.flowers.spans)
   end)
 end
 
@@ -1169,7 +1242,7 @@ function Disk.purge()
       end
     end
   end
-  ramFiles, ramDirty, ramBytes, ramRejected = {}, {}, 0, {}
+  ramFiles, ramDirty, ramBytes, ramRejected, ramGenerated = {}, {}, 0, {}, {}
   return removed
 end
 

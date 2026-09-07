@@ -357,6 +357,45 @@ Water.WAVE_SLOPE = 3.5
 -- the same tilt on its way past (see LEAN_FROM)
 Water.WAVE_SLOPE_LEAN = 1.5
 
+-- ------- the cast, reflected in the plane rather than marched for
+--
+-- See Voxel3D.beginCast. The cast is drawn a second time through a camera
+-- mirrored about the water plane, and this composites that canvas at each
+-- fragment's OWN screen position, which is exactly where a flat mirror
+-- would put it.
+--
+-- Composited AFTER the fresnel mix rather than into the reflection before
+-- it, and that is deliberate. Fresnel is smallest looked straight down at,
+-- so folding a person into `refl` would fade them out at precisely the
+-- camera this exists to serve -- which is the same mistake the march made
+-- by handing its ray to the horizon lean.
+Water.CAST_ALPHA = 0.55
+-- How far the wave normal drags the lookup, in screen widths. Small: this
+-- ripples a reflection along with the surface carrying it, and much more
+-- than a few thousandths tears the figure apart rather than disturbing it.
+Water.CAST_WOBBLE = 0.006
+
+-- How far the reflection is lifted from where a true mirror would put it,
+-- in world pixels, toward the surface.
+--
+-- An honest mirror leaves a gap, and surfing is where it shows. Water is a
+-- recessed class and groundAt does not lower what stands on a recessed one,
+-- so a surfing player floats at ground level, two pixels over a surface
+-- drawn at -2. Mirrored, the reflection sits two pixels under it, and the
+-- four between them are open water: correct, and it reads as a reflection
+-- floating loose rather than one belonging to anybody.
+--
+-- Worse than the four, and the reason this is a dial rather than a fix: a
+-- sprite's art does not sit flush with the bottom of its card. Whatever
+-- empty space it carries there appears ABOVE the card upright and BELOW the
+-- anchor flipped, so the visible gap is the geometric one plus twice the
+-- padding, and no amount of correct arithmetic closes it.
+--
+--   0   a true mirror
+--   2   the reflection hangs from the waterline
+--   4   joined at the character's own feet
+Water.CAST_RAISE = 6
+
 -- THE MARCH. Steps are in world pixels and lengthen as they go: near the
 -- surface the reflection needs precision (a shoreline is a few pixels), far
 -- from it reach matters more than accuracy, and a geometric ramp gets both
@@ -489,6 +528,20 @@ uniform Image reflectTex;
 uniform LOVE_HIGHP_OR_MEDIUMP Image depthTex;
 uniform float rays;          // 0 = sky only, 1 = march the screen too
 #endif
+
+// The cast, mirrored in the water plane (Voxel3D.beginCast).
+//
+// OUTSIDE the SKY_ONLY guard, unlike the march's own buffers: this is a
+// texture lookup at a fixed uv, not a walk, so the rung that cannot afford
+// to march can still afford to have people in its water.
+//
+// Declared and bound whatever castOn says: an unbound sampler is a
+// driver-dependent crash rather than a fallback, the same reason sunMap is
+// always given something.
+uniform LOVE_HIGHP_OR_MEDIUMP Image castTex;
+uniform float castOn;        // 0 = there is no cast canvas this frame
+uniform float castAlpha;
+uniform float castWobble;
 uniform vec3 lookFlat;       // the way the horizon lies from this camera
 uniform float lean;          // and how far the reflection tilts toward it
 uniform float leanElev;      // the elevation it aims at, in radians
@@ -1084,6 +1137,25 @@ vec4 effect(mediump vec4 color, Image tex, mediump vec2 tc, mediump vec2 sc) {
             + (fresnelCeil - fresnelFloor) * pow(1.0 - ct, fresnelPower);
   vec3 rgb = mix(base, refl, clamp(f, 0.0, 1.0));
 
+  // THE CAST, mirrored in this plane (see CAST_ALPHA). Read at this
+  // fragment's own place on the screen, because that is where the mirrored
+  // camera has already put it -- nothing here has to work out where a
+  // reflection belongs, which is the whole reason this is drawn with a
+  // camera rather than by nudging sprites about.
+  //
+  // The uv is LOVE's own screen size for the same reason the depth test
+  // above uses it: `sc` arrives in canvas pixels, and on a highdpi surface
+  // that is not the same count as `screen`, which is measured in units.
+  //
+  // Dragged by the wave normal so a figure ripples with the surface holding
+  // it rather than lying flat on top of it, and the canvas's ALPHA decides
+  // where there is anything to composite at all.
+  if (castOn > 0.5) {
+    vec2 cuv = sc / love_ScreenSize.xy + n.xz * castWobble;
+    vec4 person = Texel(castTex, cuv);
+    rgb = mix(rgb, person.rgb, clamp(person.a * castAlpha, 0.0, 1.0));
+  }
+
 #ifdef VOXEL_GRID
   rgb *= 1.0 - gridDark * columnSeam(hit, sheet, axis);
 #endif
@@ -1272,6 +1344,17 @@ function Water.begin(ctx, skyOnly)
   local texel = 1 / ShadowMap.res
   send("sunTexel", { texel, texel })
   send("dayTint", Voxel3D.tint or { 1, 1, 1 })
+
+  -- the cast's planar reflection. The sampler is bound whatever happens --
+  -- an unbound one is a driver-dependent crash, not a fallback -- so where
+  -- there is no cast canvas this frame it borrows a texture that certainly
+  -- exists and castOn switches the lookup off. Same shape as sunMap above.
+  local castTex = ctx.cast
+  send("castOn", castTex and 1 or 0)
+  send("castAlpha", Water.CAST_ALPHA)
+  send("castWobble", Water.CAST_WOBBLE)
+  local castBound = castTex or ctx.reflect or Sky.ramp()
+  if castBound then send("castTex", castBound) end
 
   if not skyOnly then send("rays", level >= 2 and 1 or 0) end
   -- the horizon lean, and the direction it leans toward (see Water.lean)

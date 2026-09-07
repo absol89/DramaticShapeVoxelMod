@@ -138,7 +138,8 @@ end
 local dead = {}
 for setId, entry in pairs(spec.tilesets) do
   for class, tiles in pairs(entry) do
-    if type(tiles) == "table" and type(tiles[1]) == "number"
+    if class ~= "sapling_tiles" -- explicit detector metadata, not a shape pin
+       and type(tiles) == "table" and type(tiles[1]) == "number"
        and heights[class] == nil then
       dead[#dead + 1] = setId .. "." .. class
     end

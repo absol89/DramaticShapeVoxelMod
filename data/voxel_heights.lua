@@ -487,10 +487,9 @@ return {
     -- every other surface is above it.  A cave is underground, not
     -- underwater, and the only class in this file that goes negative is
     -- `water` (-2), which exists to cut the overworld's shoreline lip.
-    -- It is deliberately NOT used anywhere in this entry.  The one thing
-    -- that does reach below the datum is the DOWN ladder's stairwell,
-    -- which is a hole on purpose: it is the shaft to the floor below,
-    -- and no walkable surface is drawn in it.
+    -- It is deliberately NOT used anywhere in this entry. Both ladder
+    -- directions use PR #41's standee artwork above the floor datum;
+    -- the engine's warp data still chooses the destination floor.
     --
     -- What the detector made of it: the rock EDGES towered.  A shelf's
     -- side is drawn as a cap over a run of face tiles over a corner
@@ -614,11 +613,9 @@ return {
       ground = { 32, 33, 42,       -- $20/$21/$2A, the dark lower floor
                  20,               -- $14, the surfable cave water
                  47, 34 },         -- $2F over $22, the drop hole
-      -- Source rails and rungs form separate, open 3D ladders. Downward
-      -- warps have an uncapped shaft, with a rim matching adjacent ground
-      -- or a raised shelf. Actor support stays at the native warp datum0.
-      ladder_up = { 10, 11, 26, 27 },
-      ladder_down = { 8, 9, 24, 25 },
+      -- PR #41: stand the original dark ladder artwork up as a thin
+      -- per-pixel prop. Both warp directions use the same standee path.
+      ladder = { 10, 11, 26, 27, 8, 9, 24, 25 },
       -- ---- 3: the boulder switches ----
       --
       -- Victory Road's four plates ($2B/$2C over $2D/$2E, on 1F, 2F and

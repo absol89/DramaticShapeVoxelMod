@@ -306,11 +306,41 @@ end
 -- carries one pose into the other -- the lean eases out as the yaw eases in
 -- -- and cardBlend is zero for every camera that is not the first-person
 -- rig, the battle's placed shot included, so nothing else moves.
+-- While set, billboardMatrix builds every card as its own REFLECTION in the
+-- horizontal plane at this height. Ambient rather than threaded through the
+-- four functions between here and the draw, which is how Voxel3D.glass and
+-- Voxel3D.seams already switch a pass's character.
+local reflectPlane = nil
+
+-- A card is a BILLBOARD, and that is why the reflection cannot simply be the
+-- scene drawn through a mirrored camera.
+--
+-- The card leans back by exactly the camera's pitch so it reads face-on.
+-- Mirror the CAMERA and it leans away instead, and what lands in the water
+-- is a foreshortened sliver rather than a person -- correct for the flat
+-- quad it really is, and useless as a reflection of the character it is
+-- pretending to be. A billboard is a fake that only works from one side, so
+-- reflecting it has to be faked too.
+--
+-- So the POSITION is reflected and the card keeps facing the camera. Its
+-- feet move to the mirrored height (a point on the plane is its own image,
+-- so the waterline still agrees), and the card is flipped about them, which
+-- turns it upside down and takes its texture with it. Same lean, same size,
+-- the right way up for a reflection.
 local function billboardMatrix(px, py, y, mirror)
   local Voxel = V.require("VoxelState")
   local b = FirstPerson.cardBlend()
   local yaw = b > 0 and (FirstPerson.cardYaw(px + 8, py + 8) * b) or 0
   local pitch = (Voxel.angle - math.pi / 2) * (1 - b)
+  if reflectPlane then
+    -- the mesh stands on its own y = 0, so scaling local y by -1 hangs it
+    -- from the anchor instead of standing it on it. CAST_RAISE lifts the
+    -- anchor off the true mirror toward the surface; see Water.
+    return Mat4.mul(
+      Mat4.billboard(px, py, 2 * reflectPlane - y + Water.CAST_RAISE,
+                     yaw, pitch, mirror),
+      Mat4.scale(1, -1, 1))
+  end
   return Mat4.billboard(px, py, y, yaw, pitch, mirror)
 end
 
@@ -538,7 +568,7 @@ function VoxelScene.prefetch(state)
   local ready = terrain ~= nil
   for i, nb in ipairs(nbs) do
     if RenderDistance.neighbor(nb, state.player) then
-      ChunkMesher.request(nb.map, true)
+      ChunkMesher.request(nb.map, true, nil, "visible")
       nbMeshBuf[i], nbWaterBuf[i], _, nbVisualShadowBuf[i] =
         ChunkMesher.pair(nb.map, true)
       if not nbMeshBuf[i] then
@@ -817,7 +847,16 @@ local function drawCast(state, posed, atlasFor)
   Voxel3D.glass(true)
   -- Figures after the walkers, so a player standing in front of the couch
   -- wins the overlap -- the order the flat game draws them in.
+  --
+  -- Left out of a REFLECTION pass: a figure is not a card, it is a mesh in
+  -- its own local space placed by Mat4.figure, so the card flip above does
+  -- not reach it -- and it is a person drawn INTO a piece of furniture,
+  -- indoors, which is not somewhere water is.
   local figPull = billboardPull()
+  if reflectPlane then
+    Voxel3D.seams(true)
+    return
+  end
   eachFigure(state.map, 0, 0, function(mesh, model, caster)
     Voxel3D.draw(mesh, atlasFor(state.map), model, figPull,
                  ShadowMap.snug(caster))
@@ -911,10 +950,35 @@ function VoxelScene.drawWater(draws, cast)
   end
   local plain = not curved
   local reflected = false
+  -- The cast's planar reflection, drawn before the frame is taken apart --
+  -- beginWater rebinds canvases and detaches the depth buffer, and this
+  -- wants the frame intact. Mirrored about the WATER PLANE, read from
+  -- TileShape rather than restated here, so an override in
+  -- data/voxel_heights.lua moves the reflection with the water it belongs
+  -- to. nil where the canvas could not be made, which simply leaves the
+  -- water as it was.
+  -- Gated on depthReadable as well as the row, because the shader that
+  -- COMPOSITES this is the one that needs a readable depth target: without
+  -- it the water falls back to a plain terrain draw, nothing samples the
+  -- canvas, and the whole cast would have been drawn a second time for a
+  -- picture no one reads.
+  local castTex = nil
+  if cast and Water.enabled() and Water.CAST_ALPHA > 0
+     and Voxel3D.depthReadable() then
+    castTex = Voxel3D.beginCast()
+    if castTex then
+      -- cleared unconditionally, so a cast() that throws cannot leave every
+      -- later card in the frame drawn upside down under the pier
+      reflectPlane = (TileShape.heights() or {}).water or 0
+      pcall(cast)
+      reflectPlane = nil
+      Voxel3D.endCast()
+    end
+  end
   local function waterContext(reflect, depth)
     local w, h = Voxel3D.size()
     return {
-      reflect = reflect, depth = depth,
+      reflect = reflect, depth = depth, cast = castTex,
       vp = Voxel3D.vp, eye = Voxel3D.eye, curve = { Voxel3D.curveX or 0,
                                                     Voxel3D.curveZ or 0,
                                                     Voxel3D.curveK or 0 },
