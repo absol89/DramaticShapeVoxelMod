@@ -53,7 +53,7 @@ function M.geometry(ps)
    while true do local full=true;for j=0,w-1 do if not g.cells[(u+j)..','..(v+h)]then full=false;break end end;if not full then break end;h=h+1 end
    for y=v,v+h-1 do for x=u,u+w-1 do g.cells[x..','..y]=nil end end
    local ax=axes[g.f];local base,size={0,0,0},{0,0,0};base[ax[1]]=g.plane;base[ax[2]]=u;base[ax[3]]=v;size[ax[2]]=w;size[ax[3]]=h
-   local b=#verts;for _,c in ipairs(D.FACE_CORNERS[g.f])do verts[#verts+1]={(base[1]+c[1]*size[1])*2,(base[2]+c[2]*size[2])*2,(base[3]+c[3]*size[3])*2,(g.color-.5)/6,.5,D.FACE_SHADE[g.f]}end
+   local b=#verts;for _,c in ipairs(D.FACE_CORNERS[g.f])do verts[#verts+1]={(base[1]+c[1]*size[1])*2,(base[2]+c[2]*size[2])*2,(base[3]+c[3]*size[3])*2,((g.color-1)*8+.5+c[ax[2]]*7)/48,(.5+c[ax[3]]*7)/8,D.FACE_SHADE[g.f]}end
    for _,i in ipairs({1,2,3,1,3,4})do indices[#indices+1]=b+i end
   end end
  end
@@ -78,7 +78,21 @@ local function prepare(map)
  local ok,r=pcall(function()
   if not texture then
    local colors={{.12,.18,.065},{.24,.31,.105},{.34,.41,.14},{.43,.48,.20},{.64,.57,.29},{.29,.23,.12}}
-   local data=love.image.newImageData(6,1);for i,c in ipairs(colors)do data:setPixel(i-1,0,c[1],c[2],c[3],1)end
+   -- Two crisp leaf clusters per swatch, with shaded edges and a small ridge.
+   -- Geometry stays unchanged; nearest filtering preserves the pixel details.
+   local leafRows={
+    '00110000','01221000','12221000','01210000',
+    '00000110','00001221','00012221','00001210',
+   }
+   local data=love.image.newImageData(48,8)
+   for i,c in ipairs(colors)do for y=0,7 do for x=0,7 do
+    local shade=1
+    if i>=2 and i<=5 then
+     local d=tonumber(leafRows[y+1]:sub(x+1,x+1))
+     shade=d==0 and .83 or (d==1 and .96 or 1.16)
+    end
+    data:setPixel((i-1)*8+x,y,math.min(1,c[1]*shade),math.min(1,c[2]*shade),math.min(1,c[3]*shade),1)
+   end end end
    texture=love.graphics.newImage(data);data:release();texture:setFilter('nearest','nearest')
   end
   local verts,indices=M.geometry(ps)
