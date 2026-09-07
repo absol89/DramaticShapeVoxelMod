@@ -30,6 +30,8 @@ local WorldUnderlay = V.require("WorldUnderlay")
 local WorldFillProps = V.require("WorldFillProps")
 local GranitePillars = V.require("GranitePillars")
 local ShipHull = V.require("ShipHull")
+local SafariStatues = V.require("SafariStatues")
+local SafariFoliage = V.require("SafariFoliage")
 local CommunityFlora = V.require("CommunityFlora")
 local CavePerimeter = V.require("CavePerimeter")
 local RenderDistance = V.require("RenderDistance")
@@ -143,7 +145,7 @@ end
 -- void to wants -- the overworld battle's arena shot is one of those. The
 -- gradient is added on top of this by skyFor, for the free-roam camera alone.
 function VoxelScene.skyColor(map, t)
-  if not (map and map.def and Map.isOutdoor(map.def)) then return nil end
+  if not (map and map.def and (Map.isOutdoor(map.def) or map.id == 'SAFARI_ZONE_CENTER')) then return nil end
   if not t or t <= 0 then return nil end
   local sky = VoxelScene.skyShade(SKY_SHADE, t)
   -- outdoors the flat fill follows the CLOCK: it becomes the hour's haze --
@@ -485,6 +487,8 @@ local function rebuildNeighborhood(state)
   cachedMasks = masks
   ChunkMesher.setLive(live)
   TerrainAtlas.setLive(live)
+  SafariFoliage.setLive(live)
+  SafariStatues.setLive(live)
   if GranitePillars.setLive then GranitePillars.setLive(live) end
 end
 
@@ -576,6 +580,8 @@ end
 
 function VoxelScene.invalidate()
   GranitePillars.invalidate()
+  SafariFoliage.invalidate()
+  SafariStatues.invalidate()
   CommunityFlora.invalidate()
   lastCompleteCanvas, lastCompleteW, lastCompleteH = nil, 0, 0
   lastCompleteMapId = nil
@@ -1092,6 +1098,10 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
   -- ShadowMap.sprites) so water can decline them: everything the world casts
   -- still shades a lake, a silhouette of somebody standing beside it does
   -- not. Ground, roofs and the characters themselves take them as before.
+  SafariFoliage.draw(state.map,0,0,ShadowMap)
+  for _,nb in ipairs(state.neighbors or {})do if RenderDistance.neighbor(nb,state.player)then SafariFoliage.draw(nb.map,nb.ox or 0,nb.oy or 0,ShadowMap)end end
+  SafariStatues.draw(state.map,0,0,ShadowMap,atlasFor(state.map))
+  for _,nb in ipairs(state.neighbors or {})do if RenderDistance.neighbor(nb,state.player)then SafariStatues.draw(nb.map,nb.ox or 0,nb.oy or 0,ShadowMap,atlasFor(nb.map))end end
   ShadowMap.sprites(true)
   -- authored figures cast too, for the same reason the flowers do: a
   -- handful of cards per map, and a person with no shadow reads as pasted on
@@ -1175,7 +1185,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- every surface by. A CANOPY map (Viridian Forest) is the case between:
   -- the rig stays at noon and no sky is painted, but the hour's tint still
   -- falls through the leaves -- night reaches a forest floor.
-  local outdoor = state.map.def and Map.isOutdoor(state.map.def) or false
+  local outdoor = state.map.def and (Map.isOutdoor(state.map.def) or state.map.id == 'SAFARI_ZONE_CENTER') or false
   DayNight.applyRig(outdoor)
   Voxel3D.tint = DayNight.tint(outdoor or DayNight.isCanopy(state.map))
   -- and the window glass: the tileset's own panes (found in its art --
@@ -1306,6 +1316,10 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
     end
   end
 
+  SafariFoliage.draw(state.map,0,0)
+  for _,nb in ipairs(state.neighbors or {})do if RenderDistance.neighbor(nb,state.player)then SafariFoliage.draw(nb.map,nb.ox or 0,nb.oy or 0)end end
+  SafariStatues.draw(state.map,0,0,nil,atlasFor(state.map))
+  for _,nb in ipairs(state.neighbors or {})do if RenderDistance.neighbor(nb,state.player)then SafariStatues.draw(nb.map,nb.ox or 0,nb.oy or 0,nil,atlasFor(nb.map))end end
   GranitePillars.draw(state.map,0,0)
   for _,nb in ipairs(state.neighbors or {}) do if RenderDistance.neighbor(nb,state.player) then GranitePillars.draw(nb.map,nb.ox or 0,nb.oy or 0) end end
 
