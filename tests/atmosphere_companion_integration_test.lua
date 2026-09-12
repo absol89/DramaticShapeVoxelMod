@@ -318,6 +318,38 @@ end
 
 
 local C=assert(loadfile('lib/VoxelCompanion.lua'))(namespace(cleanMod()))
+
+local currentMod = cleanMod()
+function currentMod:read(path)
+  local file = assert(io.open(path, "rb"))
+  local source = file:read("*a")
+  file:close()
+  return source
+end
+local currentHost = C.new({mod=currentMod})
+local currentHandle, currentError = currentHost.provider.register({
+  api=1, id='current-host-integrity', update=function() end,
+})
+assert(currentHandle, currentError or 'current built-in host markers were rejected')
+assert(currentHost:status().integrity.clean, 'current built-in markers reported contamination')
+
+local legacyMod = cleanMod()
+local contaminated = false
+function legacyMod:read(path)
+  if contaminated and path == "lib/VoxelScene.lua" then
+    return "local function __dsMod(name, statusKey) end\n"
+  end
+  return "-- clean upstream host\n"
+end
+local legacyHost = C.new({mod=legacyMod})
+contaminated = true
+local refused, legacyError = legacyHost.provider.register({
+  api=1, id='legacy-host-integrity', update=function() end,
+})
+assert(not refused, 'genuine legacy splice was accepted')
+assert(legacyError:find('legacy KFP splice markers detected in lib/VoxelScene.lua', 1, true),
+  'legacy rejection did not name the contaminated target')
+
 local host=C.new{mod=cleanMod()};local h
 h=assert(host.provider.register{api=1,id='weather',requires={'atmosphere_effects_draft'},update=function()
  local api=assert(h:effects());assert(api:submitAtmosphere{sky={dim=.3}})

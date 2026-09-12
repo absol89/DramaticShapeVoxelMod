@@ -113,8 +113,7 @@ local LEGACY_MARKERS = {
   ["lib/VoxelScene.lua"] = {
     "pcall(Ceiling.draw",
     "pcall(Flora.draw",
-    "pcall(Backdrop.draw",
-    "pcall(SkyLayer.draw",
+    -- Backdrop/SkyLayer draw calls are native host calls as of 1.10.5.
     "local function __dsMod(name, statusKey)",
     "__ds_ceiling_status",
   },
@@ -134,15 +133,17 @@ local LEGACY_MARKERS = {
   ["lib/ChunkMesher.lua"] = {
     "ds_fp_ceilings __ds_round_base",
     "ds_fp_ceilings fastchunks",
-    'rawget(_G, "__ds_round_base")',
+    -- Current Legendary tree-cache code also reads __ds_round_base.
   },
   ["main.lua"] = {
     "Ceiling.setting",
     "__ds_ceiling_config",
   },
   ["lib/Ceiling.lua"] = { "payload-version:", "__ds_ceiling_config" },
-  ["lib/Backdrop.lua"] = { "payload-version:", "__ds_ceiling_config" },
-  ["lib/SkyLayer.lua"] = { "payload-version:", "__ds_ceiling_config" },
+  -- Current Backdrop/SkyLayer modules have payload-version provenance headers.
+  -- A header alone is not a legacy injection; keep the configuration marker.
+  ["lib/Backdrop.lua"] = { "__ds_ceiling_config" },
+  ["lib/SkyLayer.lua"] = { "__ds_ceiling_config" },
   ["lib/Flora.lua"] = { "payload-version:", "__ds_ceiling_config" },
   ["lib/Jump.lua"] = { "payload-version:", "Jump.eyeOffset" },
 }
