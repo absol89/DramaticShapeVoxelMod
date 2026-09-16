@@ -8,6 +8,7 @@ tests/arena_pick.lua
 tests/battle_shots.lua
 tests/battle_art_voxel_fork_test.lua
 tests/voxel_seam_ao_test.lua
+tests/cut_regrow_test.lua
 tests/voxel_anim_probe.lua
 tests/voxel_door_probe.lua
 tests/voxel_mem_probe.lua
