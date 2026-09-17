@@ -461,11 +461,11 @@ Old explicit GREEN option values continue to select Green directly. The Green
 strip is a valid 400x80 five-frame atlas and remains registered for ANIMATED.
 
 Oak's three scripted roles now have explicit asset contracts. The introduction
-calls `introOakImage()` and reads the selected TRAINER ART generation's dotted
-`prof.oak.png`. `OPP_PROF_OAK` slugs to `prof-oak` and reads the hyphenated
-file from that generation. Yellow's Pallet Town old-man-style Pikachu capture
-sets `demoName` to `PROF.OAK`; `applyTrainers()` consequently reads the
-independent `assets/battle/back-static/oak.png` back sprite.
+calls `introOakImage()` and reuses `assets/battle/back-static/oak.png`, the same
+asset used by Yellow's Pallet Town old-man-style Pikachu capture. `OPP_PROF_OAK`
+still slugs to `prof-oak` and reads the hyphenated file from the selected TRAINER
+ART generation. This keeps the intro and Yellow capture on one Oak backsprite
+without changing the opponent-trainer lookup rules.
 
 ## Phosphor Route 1 compatibility preload (2026-09-06)
 

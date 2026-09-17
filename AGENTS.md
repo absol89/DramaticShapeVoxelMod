@@ -53,7 +53,7 @@ reported location. Passing Lua tests alone is insufficient.
 | `D:\gen1recomp` | Engine source root, including `main.lua`, `conf.lua`, `src`, and `tests/drivers/util.lua`. Run source commands here. |
 | `D:\gen1recomp\dev\DramaticShapeVoxelMod` | Authoritative mod checkout, with its own Git repository. |
 | `D:\gen1recomp\mods\BATTLE_ART_VOXEL_FORK` | Engine-facing mod folder. On 2026-09-15 this was a junction to the checkout above. Verify each session. |
-| `D:\games\gen1recompwin64` | User-named packaged Windows install. Absent during the 2026-09-15 documentation audit. Verify availability and executable names. |
+| `D:\Games\gen1recomp-win64` | Current packaged Windows install. The directory and `gen1recomp.exe` were verified on 2026-09-15. Window inventory also observed running instances from this executable; package contents/capabilities must still be checked separately. |
 | `D:\gen1recomp\tmp\battle-art-repro\<case>\<run>` | Suggested scratch directory for drivers, logs, and screenshots. Use a fresh run directory. |
 
 The manifest ID is `BATTLE_ART_VOXEL_FORK`; directory and display names need not
@@ -64,7 +64,7 @@ about a fix.
 ```powershell
 $engineRoot = 'D:\gen1recomp'
 $modRoot = Join-Path $engineRoot 'dev\DramaticShapeVoxelMod'
-$packageRoot = 'D:\games\gen1recompwin64'
+$packageRoot = 'D:\Games\gen1recomp-win64'
 git -C $modRoot status --short
 git -C $modRoot branch --show-current
 Get-Item (Join-Path $engineRoot 'mods\BATTLE_ART_VOXEL_FORK') |
@@ -81,6 +81,8 @@ Yellow without errors or conflicting voxel mods. If the loaded code differs,
 inspect source and save-directory mod copies; see engine
 `src/mods/LauncherMods.lua` and shadow-copy regression tests. Never replace an
 existing junction or installed package blindly.
+
+For the shared stateful reproduction sequence, see the engine [shared reproduction workflow](../../AGENTS.md#shared-reproduction-workflow). This guide supplies the generation-specific recipe.
 
 ## Game selection, saves, and reproducibility
 
@@ -230,7 +232,7 @@ files: this survey logs capture requests without verifying disk writes.
 
 ## Route B: packaged game and developer console
 
-1. Verify `D:\games\gen1recompwin64` exists and list executables and archives.
+1. Verify `D:\Games\gen1recomp-win64` exists and list executables and archives.
    Determine whether it has a fused game executable or a standalone LÖVE runtime
    plus `.love` archive. Do not guess an executable name or assume an older
    package includes source driver helpers or current flags.

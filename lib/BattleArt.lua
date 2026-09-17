@@ -556,11 +556,14 @@ function BattleArt.trainerImage(name)
   return load(name)
 end
 
--- Oak's introduction has its own dotted filename in each TRAINER ART set.
--- Keeping this entry point separate prevents a battle fallback from silently
--- making the intro and the optional OPP_PROF_OAK fight share one picture.
+-- Oak's introduction reuses the Yellow opening-battle backsprite. Keep this
+-- entry point separate so the intro hook does not change the normal opponent
+-- trainer lookup rules.
 function BattleArt.introOakImage()
-  return BattleArt.trainerImage("prof.oak")
+  if BattleArt.setting:get() == "rom" then return nil end
+  local path = V.mod.assets:path("assets/battle/back-static/oak.png")
+  if not path then return nil end
+  return prepare(path, displayMode())
 end
 
 -- The normal player trainer intro has its own collection, independent of
