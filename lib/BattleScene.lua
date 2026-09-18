@@ -151,6 +151,9 @@ function BattleScene.normalBallAnimEvent(moveId)
 
   if moveId == "POOF_ANIM" or moveId == "HIDEPIC_ANIM" then
     if not n.captureOpened then
+      local contactNow=(love and love.timer and love.timer.getTime and love.timer.getTime()) or os.clock()
+      n.contactAt=n.contactAt or math.min(contactNow,(n.started or contactNow)+Ballistics.THROW_SECONDS)
+      n.intakeAt=contactNow
       n.captureOpened = true
       n.captureClosed = false
       n.phase = "capture_open"
@@ -232,7 +235,7 @@ end
 -- with diminishing restitution.  This is deliberately a tiny visual physics
 -- layer only: engine capture/shake timing remains authoritative.
 local REBOUND_G = 156.96         -- q57 gravity: 9.81 m/s^2 * 16 world px/m
-local REBOUND_DROP = 6.5         -- existing suspended capture height
+local REBOUND_DROP = 14.5         -- existing suspended capture height
 local REBOUND_E1 = 0.40          -- first ground rebound
 local REBOUND_E2 = 0.24          -- second, softer rebound
 
@@ -337,7 +340,11 @@ local function normalBallTick(arena, groundY)
       local remain = math.max(0, math.min(1, n.captureFxT / PokeballSettings.captureDuration()))
       local raw = 1 - remain
       -- Brief full-size color charge, then the existing intake within the same duration.
-      local motion = math.max(0, math.min(1, (raw - 0.18) / 0.82))
+      local duration=PokeballSettings.captureDuration()
+      local hopDuration=math.min(Ballistics.CONTACT_SECONDS,duration*.55)
+      local contactRemaining=math.max(0,hopDuration-((n.intakeAt or now)-(n.contactAt or now)))
+      local charge=math.max(.18,math.min(.55,contactRemaining/duration))
+      local motion = math.max(0, math.min(1, (raw - charge) / (1-charge)))
       local q = motion * motion * (3 - 2 * motion)
       n.owner.dramaticShape3DBallIntake = {
         active = true,
@@ -428,21 +435,18 @@ local function normalBallTick(arena, groundY)
     return
   end
 
-  -- The cosmetic throw is complete, but contact is not guessed from this
-  -- module's clock anymore. Hold at the target until the engine announces
-  -- POOF/HIDEPIC through normalBallAnimEvent().
-  if not n.captureOpened then
-    n.ball.spin, n.ball.tumble = 0, 0
-    n.ball.pos[1], n.ball.pos[3] = e[1], e[2]
-    n.ball.pos[2] = groundY + R + 6.5
-    n.ball.yaw = n.flightYaw
-    return
-  end
-
-  if n.phase == "capture_open" and n.captureFxT and n.captureFxT > 0 then
-    n.ball.pos[1], n.ball.pos[3] = e[1], e[2]
-    n.ball.pos[2] = groundY + R + 6.5
-    n.ball.yaw = n.flightYaw
+  -- TEST76: recoil out of the subject instead of pinning the shell inside it.
+  -- The first engine contact event may arrive before or after cosmetic flight.
+  n.contactAt=n.contactAt or (n.started+throwT)
+  local contactDuration=math.min(Ballistics.CONTACT_SECONDS,PokeballSettings.captureDuration()*.55)
+  local contactAge=math.max(0,now-n.contactAt)
+  local cx,cy,cz,roll=Ballistics.contactPose(n.flight.target,n.flight.origin,contactAge,contactDuration)
+  local intakeYaw,intakePitch=Ballistics.facePoint(cx,cy,cz,n.flight.target)
+  if not n.captureOpened or (n.phase=="capture_open" and not n.captureClosed) then
+    n.ball.spin,n.ball.tumble=0,0
+    n.ball.spinAngle,n.ball.tumbleAngle=0,roll+intakePitch*math.min(1,contactAge/contactDuration)
+    n.ball.pos[1],n.ball.pos[2],n.ball.pos[3]=cx,cy,cz
+    n.ball.yaw=Ballistics.turnAngle(n.flightYaw,intakeYaw,contactAge/contactDuration)
     return
   end
 
@@ -482,9 +486,14 @@ local function normalBallTick(arena, groundY)
     n.ball.tumbleAngle = 0
     n.ball.rollAngle = 0
   end
-  n.ball.pos[1], n.ball.pos[3] = e[1], e[2]
+  n.ball.pos[1], n.ball.pos[3] = cx, cz
   n.ball.pos[2] = groundY + R + reboundY
-  n.ball.yaw = n.flightYaw
+  -- Face the Pokémon for intake; turn toward the trainer by first landing.
+  local landingTime=math.sqrt(2*REBOUND_DROP/REBOUND_G)
+  local turn=math.max(0,math.min(1,(now-(n.reboundStart or now))/landingTime))
+  local trainerYaw=math.atan2(n.flight.origin[1]-cx,n.flight.origin[3]-cz)
+  n.ball.yaw=Ballistics.turnAngle(intakeYaw,trainerYaw,turn)
+  n.ball.tumbleAngle=Ballistics.turnAngle(intakePitch,0,turn)
 
   local after = n.t - throwT
   -- TEST41: SHAKE_ANIM now drives every visible rock above. Retain only a
@@ -785,12 +794,14 @@ end
 
 local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
                            atlasFor, cards, models, token, host, neighbors,
-                           water, nbWater, visuals, nbVisuals)
+                           water, nbWater, visuals, nbVisuals, battle, groundY)
   if not ShadowMap.available() then return end
   local sig = shadowSignature(state, arena, terrain, nbMesh, visuals,
                               nbVisuals, token, #neighbors)
   sig = sig .. "|community-tree:"
     .. CommunityFlora.shadowSignature(state, arena.mid[1], arena.mid[2])
+  sig = sig .. "|trainer:" .. tostring(CharacterRenderers.battleActive())
+    .. ":" .. tostring(CharacterRenderers.revision())
   if not ShadowMap.stale(sig) then return end
   if not ShadowMap.begin(cx, cy, vw, vh) then return end
 
@@ -863,6 +874,12 @@ local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
                        ShadowMap.snug(card.model))
       end
     end
+  end
+  if battle and CharacterRenderers.battleActive() then
+    CharacterRenderers.first("drawBattleTrainerShadow", {
+      state = state, battle = battle, arena = arena, groundY = groundY,
+      host = { Voxel3D = Voxel3D, Mat4 = Mat4, ShadowMap = ShadowMap },
+    })
   end
   ShadowMap.sprites(false)
 
@@ -1246,6 +1263,13 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
                 and monCards(arena, groundY, textures) or {}
   local stadium = hostedActors and {}
     or StadiumModels.placements(arena, groundY, textures, battle)
+  -- Prepare before terrain/model draws; a per-scene value never persists into overworld.
+  Voxel3D.battleFireLight=nil
+  for _,side in ipairs({"player","enemy"}) do
+    local placement=stadium[side]
+    local light=placement and not placement.flightHidden and placement.actor and placement.actor.fireLight
+    if light then Voxel3D.battleFireLight=light;break end
+  end
   Voxel3D.camera = nil
   if flatFill then
     -- WHITE is a genuinely flat stage: there is no visible world receiver,
@@ -1256,7 +1280,7 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
   else
     castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh, atlasFor,
                 cards, stadium, token, host, neighbors, water, nbWater,
-                visuals, nbVisuals)
+                visuals, nbVisuals, battle, groundY)
   end
 
   -- An opaque void either way. Outdoors the camera is low enough that the

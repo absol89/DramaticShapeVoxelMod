@@ -1,3 +1,37 @@
+# Desktop Test77 integration - 2026-09-17
+
+Merged the user's `C:/Users/User/Desktop/Test77` into the desktop Legendary
+Battle Art checkout on existing branch `1.11.0`, starting at `c66decf` with a
+clean working tree. This is a local, uncommitted file integration; no deployment,
+release, tag, push, or version bump. Manifest and exported version remain 1.10.9.
+
+Imported Test77 capture recoil/facing, scoped translucent effects, battle fire
+lighting, and the standing-trainer shadow callback in BattleScene,
+CharacterRenderers, Voxel3D, and q57/Ballistics. Added the five supplied test-note
+files and README introduction. The donor's notes describe historical paired
+builds and validation, not checks performed here or installed companions.
+
+Preserved newer branch implementations in BattleArt (Oak intro backsprite),
+ChunkMesher (MeshDisk purge), and VoxelCompanion (false legacy-splice detection),
+plus current main.lua and manifest metadata. Line-ending-only donor differences
+were left unchanged. Destination-only files and assets were retained; donor
+files were not modified. One existing sidecar test mock now includes the real
+CharacterRenderers.revision API used by the imported shadow cache signature.
+
+Evidence: `.claude/test77-merge/` contains before-file backups, starting commit,
+SHA-256 inventory/decisions, merge script, validation script, and validation.json.
+LuaJIT 2.1 compiled all 153 production/data Lua files. Existing mocked suites
+battle_scene_visual_sidecar (37 checks), hosted_trainer_visibility,
+stadium_models_api (18 checks), and atmosphere_companion_integration passed.
+Scratch math checks passed recoil endpoints, finite trajectory/facing, and
+shortest-arc turning. Git whitespace validation passed.
+
+Not verified: actual game rendering, GPU shader compilation, battle/capture and
+naming flows, companion-on/off and 2D behavior, or Windows/Android gameplay.
+The documented D:/gen1recomp engine installation is absent on this machine.
+No game/save/slot/map fixture was launched; no screenshots were produced.
+No game process, player save, or game options were changed.
+
 # Lavender Battle Art parity + exact bald-square fix - 2026-09-10
 
 The previous follow-up targeted the wrong rectangle. The large 12x12

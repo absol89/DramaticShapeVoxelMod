@@ -22,6 +22,7 @@ local CALLBACKS = {
   suppressGhost = true,
   afterActors = true,
   drawBattleTrainer = true,
+  drawBattleTrainerShadow = true,
 }
 
 local function logError(entry, method, err)

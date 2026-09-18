@@ -256,6 +256,7 @@ local SHADER = [[
 
   uniform vec3 ghostColor;    // the flat silhouette colour
   uniform float ghost;        // 0 = shade normally, 1 = flatten to it
+  uniform float effectSurface; // scoped translucent VFX; zero for normal world
   uniform float lightOn;      // 1 = scene lighting, 0 = texture true-colour
   uniform float weatherHaze;
   uniform vec3 weatherHazeColor;
@@ -265,6 +266,18 @@ local SHADER = [[
   uniform vec3 fogColor;      // what the active map haze is made of
   uniform Image glassMask;    // opaque where the atlas texel is window glass
   uniform vec2 glassSize;     // the mask's dimensions: tc -> atlas texels
+  // TEST75: camera-relative, unshadowed local breath illumination.
+  uniform vec4 fireLightA;
+  uniform vec4 fireLightB;
+  uniform float fireLightPower;
+  float breathLight() {
+    vec3 segment=fireLightB.xyz-fireLightA.xyz;
+    float along=clamp(dot(vFoliageRay-fireLightA.xyz,segment)/max(dot(segment,segment),0.001),0.0,1.0);
+    vec3 delta=vFoliageRay-mix(fireLightA.xyz,fireLightB.xyz,along);
+    float radius=mix(fireLightA.w,fireLightB.w,along);
+    float f=max(0.0,1.0-length(delta)/max(radius,0.001));
+    return f*f*fireLightPower;
+  }
   uniform float streetLampOn;
   uniform vec3 streetLampA;
   uniform vec3 streetLampB;
@@ -321,6 +334,9 @@ local SHADER = [[
     // ordinary positive shade values and remain double-sided.
     if (vFacadeBack > 0.5) discard;
     vec4 p = Texel(tex, tc);
+    // Effects carry continuous coverage, independently of their emissive RGB.
+    // Keep this ahead of the world sprite cutout and all scene illumination.
+    if (effectSurface > 0.5) return p * color;
     // sprite sheets key GB OBJ color 0 to alpha 0; discarding rather than
     // blending keeps those texels out of the depth buffer, so a model never
     // carves a transparent hole out of whatever stands behind it
@@ -345,6 +361,9 @@ local SHADER = [[
     vec3 litRgb = p.rgb * vShade * sunlight(vSun)
                 * modelSunlight(vModelSun) * dayTint;
     vec3 rgb = litRgb;
+    if (fireLightPower > 0.001) {
+      rgb += p.rgb * vec3(1.65,0.90,0.23) * breathLight();
+    }
     if (streetLampOn > 0.001) {
       float pool=min(1.0,streetPool(streetLampA)+streetPool(streetLampB)
         +streetPool(streetLampC)+streetPool(streetLampD));
@@ -411,6 +430,7 @@ local SHADER = [[
 local shaders = { [false] = nil, [true] = nil }
 local unlitShader = nil       -- nil = untried, false = unavailable
 local backdropShader = nil    -- optional soft focus for low-res flat plates
+local effectLightOn = 1
 local activeShader = nil      -- the shader draws are currently sent to
 local sceneShader = nil       -- the lit variant this pass opened with
 local flattenColor = nil      -- tightly scoped hit-flash state for shader swaps
@@ -1085,6 +1105,8 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow, borrow
   -- Ordinary geometry receives the complete scene light. A tightly scoped
   -- sprite pass may switch this off, but every new scene starts lit so an
   -- interrupted frame cannot leak UNLIT into the next one.
+  effectLightOn = 1
+  pcall(sh.send, sh, "effectSurface", 0)
   pcall(sh.send, sh, "lightOn", 1)
   -- the hour's light, as the caller last set it (see Voxel3D.tint)
   pcall(sh.send, sh, "dayTint", Voxel3D.tint or { 1, 1, 1 })
@@ -1109,6 +1131,13 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow, borrow
     pcall(sh.send, sh, "glassSize", { ok and mw or 1, ok and mh or 1 })
   end
   pcall(sh.send, sh, "glassNight", Voxel3D.glassNight or 0)
+  local fire=slot=="battle" and Voxel3D.battleFireLight or nil
+  local fireEye=Voxel3D.eye or {0,0,0}
+  pcall(sh.send,sh,"fireLightPower",fire and fire.strength or 0)
+  for _,item in ipairs({{"fireLightA",fire and fire.a},{"fireLightB",fire and fire.b}}) do
+    local p=item[2]
+    pcall(sh.send,sh,item[1],p and {p[1]-fireEye[1],p[2]-fireEye[2],p[3]-fireEye[3],p[4]} or {0,0,0,1})
+  end
   local lamps=Voxel3D.streetLamps
   pcall(sh.send,sh,"streetLampOn",lamps and (Voxel3D.glassNight or 0) or 0)
   if lamps then
@@ -1432,6 +1461,41 @@ function Voxel3D.blend(mode)
   end
 end
 
+-- Opt-in VFX scope. Never change world cutout or the legacy blend API.
+-- Both alpha and additive effects test scene depth without writing it.
+-- Restore the bound shader AND our Lua shader pointer, including on errors.
+local effectScopeShader
+function Voxel3D.withEffect(mode, draw)
+  if not (active and activeShader) then return false end
+  assert(mode == "alpha" or mode == "add", "invalid effect blend mode")
+  local g = love.graphics
+  local previousShader, previousScope = activeShader, effectScopeShader
+  local previousLight = effectLightOn
+  g.push("all")
+  local usedShader
+  local ok, err = pcall(function()
+    Voxel3D.lighting(false)
+    usedShader = activeShader
+    -- A failed uniform bind must fail the scope, not silently draw cutouts.
+    usedShader:send("effectSurface", 1)
+    effectScopeShader = usedShader
+    g.setBlendMode(mode, "alphamultiply")
+    g.setDepthMode("lequal", false)
+    if g.setMeshCullMode then g.setMeshCullMode("none") end
+    draw()
+  end)
+  if usedShader then
+    pcall(usedShader.send, usedShader, "effectSurface", previousScope == usedShader and 1 or 0)
+  end
+  effectScopeShader = previousScope
+  activeShader = previousShader
+  effectLightOn = previousLight
+  if previousShader then pcall(previousShader.send, previousShader, "lightOn", previousLight) end
+  g.pop()
+  if not ok then error(err, 0) end
+  return true
+end
+
 -- Whether what is drawn next may consult the glass mask. false for the
 -- length of a sprite-sheet pass, true to put it back.
 --
@@ -1601,6 +1665,7 @@ end
 -- per-face shade, which is what a genuinely UNLIT texture requires.
 function Voxel3D.lighting(on)
   if not (active and activeShader) then return end
+  effectLightOn = on == false and 0 or 1
   if on == false then
     local flat = Voxel3D.unlitShader()
     if flat then
@@ -1756,6 +1821,7 @@ function Voxel3D.endScene()
   -- Map-local lamps are configured by the next world pass. Do not carry
   -- Lavender lighting into a battle or a companion-owned scene.
   Voxel3D.streetLamps = nil
+  Voxel3D.battleFireLight = nil
   if not active then return nil end
   love.graphics.setShader()
   love.graphics.setDepthMode()
