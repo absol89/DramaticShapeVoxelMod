@@ -240,6 +240,7 @@ function namespace.require(name)
     },
     CharacterRenderers = {
       battleActive = function() return false end,
+      revision = function() return 0 end,
       battleHandWorld = function() return nil end,
     },
     Mat4 = Mat4,
