@@ -116,6 +116,7 @@ function M.geometry(ps)
  return verts,indices
 end
 local function prepare(map)
+ if V.require("SafariReserve").enabled(map)then return end
  if not(map and allowed[map.id])then return end
  if cache[map.id]then return cache[map.id]end
  local ps=M.placements(map);if #ps==0 then return end

@@ -72,7 +72,8 @@ CamControl.SURVEY_PINCH = 2.2
 -- angle from before the setting was switched on stands down with it).
 local function battleLive()
   local ok, shot = pcall(function()
-    return V.require("OverworldBattle").shot()
+    local owner = V.require("OverworldBattle")
+    return owner.cameraShot and owner.cameraShot() or owner.shot()
   end)
   return (ok and shot and BattleCam.steerable) and true or false
 end
@@ -90,7 +91,7 @@ end
 function CamControl.zoomTarget()
   if battleLive() then return "battle" end
   if not roaming() then return nil end
-  if Voxel.isThirdPerson(Voxel.level) then return "boom" end
+  if ThirdPerson.surfActive or Voxel.isThirdPerson(Voxel.level) then return "boom" end
   if Voxel.isFirstPerson(Voxel.level) then return nil end
   return "survey"
 end

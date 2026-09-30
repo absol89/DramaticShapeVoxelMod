@@ -135,6 +135,21 @@ CommunityVisuals.forest = ModSetting.new(
   { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
 )
 
+-- Independent Safari presentation; existing artistic choices are never rewritten.
+CommunityVisuals.safari = ModSetting.new(
+  "communitySafari", "SAFARI ZONE",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }, 2
+)
+function CommunityVisuals.customSafari()
+  return CommunityVisuals.safari:get() == "n64memory"
+end
+
+-- Regional nature is independently adjustable; existing choices are preserved.
+CommunityVisuals.kantoLife = ModSetting.new(
+  "communityKantoLife", "KANTO AMBIENCE",
+  { "off", "low", "natural" }, { "OFF", "LOW", "NATURAL" }, 3
+)
+
 -- Keep Battle Art on first use; saved Legendary choices remain authoritative.
 CommunityVisuals.casino = ModSetting.new("communityCasino", "CASINO",
   { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }, 1)
@@ -147,7 +162,18 @@ CommunityVisuals.rocket = ModSetting.new("communityRocket", "ROCKET HIDEOUT",
 CommunityVisuals.elevator = ModSetting.new("communityElevator", "ROCKET ELEVATOR",
   { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }, 1)
 
+-- Independent of the Legendary preset. This release enables Legendary by
+-- default; Installed restores the exact upstream building meshes.
+CommunityVisuals.buildings = ModSetting.new(
+  "vermilionBuildings", "BUILDING STYLE",
+  { "installed", "reference" }, { "INSTALLED", "LEGENDARY" }, 2
+)
+function CommunityVisuals.referenceBuildings()
+  return CommunityVisuals.buildings:get() == "reference"
+end
+
 CommunityVisuals.settings = {
+  CommunityVisuals.buildings,
   CommunityVisuals.casino,
   CommunityVisuals.prizeRoom,
   CommunityVisuals.tunnels,
@@ -172,6 +198,8 @@ CommunityVisuals.settings = {
   CommunityVisuals.courtyards,
   CommunityVisuals.sky,
   CommunityVisuals.forest,
+  CommunityVisuals.safari,
+  CommunityVisuals.kantoLife,
 }
 
 local KEYS = {}
@@ -287,6 +315,9 @@ end
 -- mesh.  Drop only derived runtime geometry; map data, collision and disk
 -- cache files remain untouched and rebuild through Battle Art's normal queue.
 function CommunityVisuals.invalidate()
+  pcall(function() V.require("KantoLife").invalidate() end)
+  pcall(function() V.require("SafariStatues").invalidate() end)
+  pcall(function() V.require("SafariMaterials").invalidate() end)
   pcall(function() V.require("GameCorner").invalidate() end)
   _G.__bav_granite_pillars = nil
   _G.__bav_granite_pillar_base = nil
@@ -296,6 +327,7 @@ function CommunityVisuals.invalidate()
   pcall(function() V.require("GranitePillars").invalidate() end)
   pcall(function() V.require("CommunityFlora").invalidate() end)
   pcall(function() V.require("ForestDressing").invalidate() end)
+  pcall(function() V.require("SafariFoliage").invalidate() end)
   pcall(function() V.require("CaveSconces").invalidate() end)
   pcall(function() V.require("CaveAtmosphere3D").invalidate() end)
   pcall(function() V.require("TowerGraveMist").invalidate() end)

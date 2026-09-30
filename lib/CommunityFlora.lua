@@ -398,6 +398,9 @@ local function uvFor(map, tile)
 end
 
 local function buildTufts(map, perCell)
+  -- TEST113: Safari encounter grass has one native owner (including neighbors).
+  -- Pixel-cutout overlays use a different silhouette and must not reappear.
+  if V.require('SafariReserve').enabled(map) then return nil, 'native Safari grass' end
   local grassTile = map.tileset and map.tileset.grassTile
   if not grassTile then return nil, "tileset names no grass tile" end
   local wc, hc = map.widthCells or 0, map.heightCells or 0
@@ -890,6 +893,7 @@ function MOUND.treeCacheSignature(key, registry, history, nbRects, cfg, snapshot
   local text = table.concat({ table.concat(cells, ";"), table.concat(rects, ";"),
                               cfg and cfg.bouldertrees == true and "b1" or "b0",
                               cfg and cfg.shadows == false and "s0" or "s1" }, "|")
+  if V.require('DistrictBoundary').style(tostring(key),true) then text=text..'|district-boundaries-90:'..tostring(V.require('CommunityVisuals').customRoads())end
   local a, b = 104729, 130363
   for i = 1, #text do
     local byte = text:byte(i)
@@ -1907,7 +1911,18 @@ function MOUND.buildTrunks(map, nbRects, buildGroup, publishedParts,
         tier(9.2, y0 + 4, y0 + 12)     -- the full waist
         tier(6.4, y0 + 11, y0 + 16)    -- the inset cap
       end
-      if boulder then
+      if boulder and V.require('DistrictBoundary').style(tostring(map.id or (map.def or {}).id),V.require('CommunityVisuals').customRoads()) then
+        V.require('DistrictBoundary').build(tostring(map.id or (map.def or {}).id),mx,mz,base,wallDirs,wallPier,function(q,tone,swatch)
+          -- Granite atlas supplies neutral stone/metal. Wood uses the bark batch.
+          local wood=swatch=='wood' and tostring(map.id)~='PALLET_TOWN'
+          local vertices=wood and tV or sV
+          for i=1,4 do local p=q[i]
+            vertices[#vertices+1]={p[1],p[2],p[3],wood and ((i==2 or i==3) and .8 or .1) or .20,
+              wood and (i>=3 and .9 or .1) or swatch=='reflector' and .73 or .16,tone}
+          end
+          if wood then Voxel3D.pushQuad(tI,tQ);tQ=tQ+1 else Voxel3D.pushQuad(sI,sQ);sQ=sQ+1 end
+        end)
+      elseif boulder then
         -- TEST347: refined square granite light pillar. IMPORTANT: this block is the
         -- only geometry change from TEST342; shared tree bookkeeping/hood logic
         -- above remains byte-for-byte intact so the TEST333 trees stay alive.
@@ -5357,6 +5372,8 @@ local function makeQuad()
 end
 
 local function spawn(kind, x, y, z, vx, vy, vz, life, size)
+  -- TEST91: drifting leaves are disabled; other particle families keep their behavior.
+  if kind == "leaf" or kind == "tleaf" then return end
   parts = parts or {}
   local slot = nil
   for i = 1, POOL do
@@ -6071,7 +6088,7 @@ local function drawParticles(state, map, cfg, px, pz, yaw, t, dt, outdoor,
               pz + (math.random() - 0.5) * 150, 0, -46, 0, 1.6, 2.2)
       end
       -- fireflies after dark
-      if not leafOnly and outdoor and isNight() and tex.fly then
+      if not leafOnly and outdoor and isNight() and tex.fly and not V.require("KantoLife").ownsFireflies(map) then
         local flies = 0
         for i = 1, POOL do
           local q = parts and parts[i]
@@ -6465,7 +6482,7 @@ MOUND.AMB = { srcs = {}, beat = -1e9,
                         cstep = "sfx-cavestep.mp3",
                         wstep = "sfx-woodstep.mp3",
                         water = "amb-water.mp3",
-                        night = "amb-night.mp3",
+                        night = "viridian-crickets.wav",
                         rain = "amb-rain.mp3" },
               -- the beds loop; the steps and doors are one-shots.
               -- water is a bed apart: its volume follows the shore
@@ -7386,7 +7403,7 @@ function Flora.drawCommunityTrees(state)
   if not (map and isOutdoor(map)) then return end
   local visuals = V.require("CommunityVisuals")
   if not (visuals.customTrees() or visuals.customCutTrees()
-    or (visuals.customForest() and isCanopy(map))) then return end
+    or (visuals.customForest() and (isCanopy(map) or DayNight.isOpenForest(map)))) then return end
   local player = state.player
   local px, pz = (player and player.px or 0) + 8, (player and player.py or 0) + 8
   local sway = MOUND.canopySway(now(), {})
@@ -7415,7 +7432,11 @@ function Flora.drawCommunityForest(state, atlasFor)
   local visuals = V.require("CommunityVisuals")
   if not visuals.customForest() then return end
   local map = state and state.map
-  if not (map and isCanopy(map)) then return end
+  if not (map and isCanopy(map)) then
+    if canopyCache and canopyCache.mesh then pcall(canopyCache.mesh.release, canopyCache.mesh) end
+    canopyCache = nil
+    return
+  end
 
   local p = state.player
   local px = (p and p.px or 0) + 8

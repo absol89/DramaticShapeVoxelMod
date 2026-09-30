@@ -600,11 +600,13 @@ local lastEye = nil                   -- frozen head pose for player-less frames
 --
 -- Returns nil with the blend fully out, which is the caller's signal to
 -- leave the orbit in charge.
-function FirstPerson.frame(me, cx, cy, vw, vh)
+function FirstPerson.frame(me, cx, cy, vw, vh, posed, state)
   local b = FirstPerson.blend
   if b <= 0 then
     if rig and Voxel3D.camera == rig then Voxel3D.camera = nil end
     rig = nil
+    ThirdPerson.surfActive = false
+    ThirdPerson.surfLiftGoal = 0
     return nil
   end
   local e = ease(b)
@@ -618,7 +620,32 @@ function FirstPerson.frame(me, cx, cy, vw, vh)
   else
     head = lastEye or { cx, FirstPerson.EYE_HEIGHT, cy }
   end
+  local surf = (Voxel.isThirdPerson() or Voxel.isFirstPerson())
+    and V.require("SurfCamera").measure(me, posed, state) or nil
+  ThirdPerson.surfActive = surf ~= nil
+  -- Skip the diorama-to-head interpolation while mounted: its path can
+  -- pass straight through the mount even when the final eye is outside it.
+  if surf then e = 1 end
+  local targetHeight, surfWide
+  if surf then targetHeight, surfWide = V.require("SurfCamera").framing(surf, ThirdPerson.surfZoom) end
+  local lift = surf and math.max(0, targetHeight - head[2]) or 0
+  ThirdPerson.surfLiftGoal = lift
+  -- Rise immediately for safety; settle smoothly after dismount/animation.
+  ThirdPerson.surfLift = math.max(ThirdPerson.surfLift or 0, lift)
+  head = {head[1], head[2] + (ThirdPerson.surfLift or 0), head[3]}
   local lx, ly, lz = lookDir()
+  if surf then
+    -- Keep manual pitch, but flatten the close shoulder view as zoom eases in.
+    local pitch=math.max(0,FirstPerson.pitch)*(0.2+0.8*surfWide)
+    lx,ly,lz=math.sin(FirstPerson.yaw)*math.cos(pitch),-math.sin(pitch),math.cos(FirstPerson.yaw)*math.cos(pitch)
+    surf.wide=surfWide
+  end
+  if surf and ly > 0 then
+    -- Looking upward would swing the boom down into the mount.
+    local flat = math.sqrt(lx*lx + lz*lz)
+    if flat > 1e-6 then lx,lz=lx/flat,lz/flat end
+    ly=0
+  end
   local fpFocus = { head[1] + lx * FirstPerson.FOCUS_DIST,
                     head[2] + ly * FirstPerson.FOCUS_DIST,
                     head[3] + lz * FirstPerson.FOCUS_DIST }
@@ -627,7 +654,7 @@ function FirstPerson.frame(me, cx, cy, vw, vh)
   -- as far as the world allows. Fully in (1ST, and every frame of the
   -- diorama) this hands back the head and the focus untouched, so the two
   -- rungs are one rig with one number between them.
-  local camEye, camFocus = ThirdPerson.place(head, lx, ly, lz, fpFocus)
+  local camEye, camFocus = ThirdPerson.place(head, lx, ly, lz, fpFocus, surf)
 
   local oEye, oFocus, oFov, oUp = orbitRig(cx, cy, vh)
   local function mix(p, q)

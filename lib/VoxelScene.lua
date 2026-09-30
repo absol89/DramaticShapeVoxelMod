@@ -157,7 +157,7 @@ end
 -- void to wants -- the overworld battle's arena shot is one of those. The
 -- gradient is added on top of this by skyFor, for the free-roam camera alone.
 function VoxelScene.skyColor(map, t)
-  if not (map and map.def and (Map.isOutdoor(map.def) or map.id == 'SAFARI_ZONE_CENTER')) then return nil end
+  if not (map and map.def and (Map.isOutdoor(map.def) or DayNight.isOpenForest(map) or map.id == 'SAFARI_ZONE_CENTER')) then return nil end
   if not t or t <= 0 then return nil end
   local sky = VoxelScene.skyShade(SKY_SHADE, t)
   -- outdoors the flat fill follows the CLOCK: it becomes the hour's haze --
@@ -204,6 +204,8 @@ local YAW = {
 -- top of it rather than sunk into it. Uses the same bottom-left collision
 -- tile the engine walks on (Map:cellTile).
 local function groundAt(map, cellX, cellY, px, py)
+  local rampSupport=V.require("SafariAccess").support(map,(px or cellX*16)+8,(py or cellY*16)+8)
+  if rampSupport~=nil then return rampSupport end
   local casinoSupport=V.require("GameCorner").support(map,cellX,cellY)
   if casinoSupport~=nil then return casinoSupport end
   -- Cave shelf flights are traversed, unlike instant warp stairs. Read the
@@ -649,6 +651,8 @@ function VoxelScene.invalidate()
   Backdrop.invalidate()
   SkyLayer.invalidate()
   ForestAtmos.invalidate()
+  V.require("ForestLife").invalidate()
+  V.require("KantoLife").invalidate()
   lastCompleteCanvas, lastCompleteW, lastCompleteH = nil, 0, 0
   lastCompleteMapId = nil
 end
@@ -671,10 +675,12 @@ local poseBuf = {}
 local function poseSlot(i)
   local p = poseBuf[i]
   if not p then p = {}; poseBuf[i] = p end
-  p.isPlayer = nil
-  p.role = nil
-  p.entity = nil
-  p.visualAnchorY = nil
+  -- A slot is a fresh frame, not an entity. Model providers attach transient
+  -- Surf seats/mounts and may compact this list when recalling followers.
+  -- Retaining any of that data can lift a walking player after dismount or
+  -- transfer a previous actor's transform to the next occupant of the slot.
+  -- Reuse the allocation, but let each provider repopulate its live metadata.
+  for key in pairs(p) do p[key] = nil end
   return p
 end
 
@@ -829,6 +835,9 @@ local function actorContext(state, p)
   }
 end
 
+-- Shared normalized player context for Safari presentation; no actor mutation.
+VoxelScene.characterContext=actorContext
+
 -- ------- the cast
 --
 -- Everybody standing on the map: the walkers, and the authored FIGURES the
@@ -946,9 +955,9 @@ end
 -- with the row OFF, no depth texture to read, or a shader that would not
 -- build, the same meshes go through the ordinary scene shader and come out
 -- as the flat animated water this mode always drew.
--- The overworld's alone: the staged battle draws its water plain, always --
--- its placed camera reads this pass wrong, and a stage set wants painted
--- water anyway (see BattleScene, where the choice is argued).
+-- TEST119: staged battles share this pass and its current camera context.
+-- Their optional low-cost fallback keeps visible ripple motion when reflections
+-- are OFF or unsupported; callers retain ownership of their actor passes.
 -- ------- and why the flat draw happens FIRST while the world is curved
 --
 -- The reflective pass writes no depth -- it cannot, the depth canvas is
@@ -982,7 +991,20 @@ end
 -- GPUs they don't reliably (that fight is what put the Android port back on
 -- flat water). Confined to the curve there is no regression to reach: the
 -- flat world never had the far-shore bug in the first place.
-function VoxelScene.drawWater(draws, cast)
+function VoxelScene.drawWater(draws, cast, fallbackDraw)
+  local underColor,underDepth
+  local gardenWater=false
+  for _,d in ipairs(draws)do
+    if (V.require('CommunityVisuals').customRoads()
+        and V.require('DecorAtlas').texelScale(d[2])>1)
+        or V.require('SafariMaterials').texelScale(d[2]) then
+      gardenWater=true;break
+    end
+  end
+  fallbackDraw = fallbackDraw or (gardenWater and Voxel3D.drawBattleWater or Voxel3D.draw)
+  if gardenWater and Water.enabled() and Voxel3D.depthReadable() then
+    underColor,underDepth=Voxel3D.captureUnderwater()
+  end
   -- prepass only under the bend; see the header
   local curved = (Voxel3D.curveK or 0) > 0
   if curved then
@@ -1007,7 +1029,7 @@ function VoxelScene.drawWater(draws, cast)
   local castTex = nil
   if cast and Water.enabled() and Water.CAST_ALPHA > 0
      and Voxel3D.depthReadable() then
-    castTex = Voxel3D.beginCast()
+    castTex = Voxel3D.beginCast((TileShape.heights() or {}).water or 0)
     if castTex then
       -- cleared unconditionally, so a cast() that throws cannot leave every
       -- later card in the frame drawn upside down under the pier
@@ -1021,6 +1043,7 @@ function VoxelScene.drawWater(draws, cast)
     local w, h = Voxel3D.size()
     return {
       reflect = reflect, depth = depth, cast = castTex,
+      underColor = underColor, underDepth = underDepth,
       vp = Voxel3D.vp, eye = Voxel3D.eye, curve = { Voxel3D.curveX or 0,
                                                     Voxel3D.curveZ or 0,
                                                     Voxel3D.curveK or 0 },
@@ -1032,8 +1055,14 @@ function VoxelScene.drawWater(draws, cast)
   -- Use the proven shared reflection pass whenever the driver provides its
   -- targets. SKY sends rays=0 through this same shader; FULL sends rays=1.
   -- The lightweight shader below is only the fallback when this cannot start.
-  if Water.enabled() and Voxel3D.depthReadable() then
-    local mirror, depth = Voxel3D.beginWater(cast)
+  -- Planted water needs the opaque snapshot's precise depth. If capture
+  -- fails, SKY keeps the hardware depth test instead of covering shallow pads
+  -- with the broad tolerance required by the curved-water prepass.
+  if Water.enabled() and Voxel3D.depthReadable()
+      and (not gardenWater or underDepth) then
+    -- A successful planar cast already owns actor reflections. Painting the
+    -- upright cast into SSR as well produces a second smeared silhouette.
+    local mirror, depth = Voxel3D.beginWater(not castTex and cast or nil)
     local ok = mirror and depth
                and Water.begin(waterContext(mirror, depth), false)
     if ok then
@@ -1064,14 +1093,27 @@ function VoxelScene.drawWater(draws, cast)
       -- This path never called beginWater, but the following world passes
       -- still need the scene shader restored after the sky-only shader.
       Voxel3D.endWater()
+      reflected = true
       plain = false
     end
   end
   -- the fallback flat draw -- unless the curve's prepass already put the
   -- same meshes down, in which case a bailed frame is already whole
-  if plain then
+  if plain or (not reflected and fallbackDraw ~= Voxel3D.draw) then
     for _, d in ipairs(draws) do
-      Voxel3D.draw(d[1], d[2], d[3])
+      fallbackDraw(d[1], d[2], d[3])
+    end
+  end
+  -- TEST127: submerged bodies must lose the depth test against the surface.
+  -- Do this after reflection capture, before plants/actors; no water RGB redraw.
+  if gardenWater then V.require('WaterSurfaceDepth').draw(draws) end
+  -- TEST121: restore thin pad silhouettes after the detached-depth water pass.
+  -- Normal hardware depth still hides plants behind piers, walls and the bank.
+  for _,d in ipairs(draws) do
+    for _,visual in ipairs(d[4] or {}) do
+      if visual.id==V.require('CinnabarLilies').VISUAL_ID then
+        Voxel3D.draw(visual.mesh,d[2],d[3])
+      end
     end
   end
 end
@@ -1317,7 +1359,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- every surface by. A CANOPY map (Viridian Forest) is the case between:
   -- the rig stays at noon and no sky is painted, but the hour's tint still
   -- falls through the leaves -- night reaches a forest floor.
-  local outdoor = state.map.def and (Map.isOutdoor(state.map.def) or state.map.id == 'SAFARI_ZONE_CENTER') or false
+  local outdoor = state.map.def and (Map.isOutdoor(state.map.def) or DayNight.isOpenForest(state.map) or state.map.id == 'SAFARI_ZONE_CENTER') or false
   DayNight.applyRig(outdoor)
   Voxel3D.tint = DayNight.tint(outdoor or DayNight.isCanopy(state.map))
   -- and the window glass: the tileset's own panes (found in its art --
@@ -1331,7 +1373,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   Voxel3D.glassPhase, Voxel3D.glassGlint = g.phase, g.amp
   local atmos = CommunityVisuals.customForest()
                 and ForestAtmos.frame(state.map) or nil
-  Voxel3D.fog = atmos and atmos.fog or nil
+  Voxel3D.fog = atmos and (atmos.roamFog or atmos.fog) or nil
 
   renderGeneration = renderGeneration + 1
   local generation = renderGeneration
@@ -1379,6 +1421,9 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
     return posed, me
   end
   local posed, me = Timings.call("actor_prepare", timedPoses)
+  -- Stadium has finished skinning; every visible/reflection/shadow pass shares
+  -- this water contact. Surf seats and sky mounts keep their provider support.
+  V.require("WaterFooting").roaming(posed, state)
 
   -- The first-person rig, built (or blended) for this frame and handed to
   -- Voxel3D BEFORE either pass runs: the sun's box is fitted around this
@@ -1387,7 +1432,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- exactly what it always was. The scene centre it returns walks from
   -- the orbit's view centre into the head, so the curve's focus and the
   -- depth reference follow the camera actually in charge.
-  local fpRig, fpCx, fpCy = FirstPerson.frame(me, cx, cy, vw, vh)
+  local fpRig, fpCx, fpCy = FirstPerson.frame(me, cx, cy, vw, vh, posed, state)
   if fpRig then cx, cy = fpCx, fpCy end
 
   -- The host camera remains authoritative. A companion can return only a
@@ -1427,8 +1472,10 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- and canopy guards, and the option defaults to Battle Art, so this is an
   -- additive background seam rather than a renderer replacement.
   Voxel3D.glass(false)
+  -- TEST133: mountains cover stars; nearby sky life stays in front.
+  pcall(SkyLayer.drawStars, state)
   pcall(Backdrop.draw, state)
-  pcall(SkyLayer.draw, state)
+  pcall(SkyLayer.drawForeground, state)
   Voxel3D.glass(true)
 
   -- Extension backgrounds run after the host has opened its isolated 3D
@@ -1481,6 +1528,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   SafariStatues.draw(state.map,0,0,nil,atlasFor(state.map))
   for _,nb in ipairs(state.neighbors or {})do if RenderDistance.neighbor(nb,state.player)then SafariStatues.draw(nb.map,nb.ox or 0,nb.oy or 0,nil,atlasFor(nb.map))end end
   V.require("StreetLights").draw(state)
+  V.require("CeladonParkFX").draw(state)
   GranitePillars.draw(state.map,0,0)
   for _,nb in ipairs(state.neighbors or {}) do if RenderDistance.neighbor(nb,state.player) then GranitePillars.draw(nb.map,nb.ox or 0,nb.oy or 0) end end
 
@@ -1563,20 +1611,20 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   local waterDraws = VoxelScene._waterDrawBuf
   local waterN = 0
 
-  local function addWaterDraw(mesh, texture, model)
+  local function addWaterDraw(mesh, texture, model, visuals)
     waterN = waterN + 1
     local d = waterDraws[waterN]
     if not d then d = {}; waterDraws[waterN] = d end
-    d[1], d[2], d[3] = mesh, texture, model
+    d[1], d[2], d[3], d[4] = mesh, texture, model, visuals
   end
 
   if water then
-    addWaterDraw(water, atlasFor(state.map), nil)
+    addWaterDraw(water, atlasFor(state.map), nil, visualShadows)
   end
   for i, nb in ipairs(state.neighbors or {}) do
     if RenderDistance.neighbor(nb, state.player) and nbWater and nbWater[i] then
       addWaterDraw(nbWater[i], atlasFor(nb.map),
-                   Mat4.translate(nb.ox, 0, nb.oy))
+                   Mat4.translate(nb.ox, 0, nb.oy), nbVisualShadows and nbVisualShadows[i])
     end
   end
   for i = waterN + 1, #waterDraws do waterDraws[i] = nil end
@@ -1643,11 +1691,13 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   local Voxel = V.require("VoxelState")
   local pull = VoxelScene.pull(math.max(Voxel.angle, 0.05))
   Timings.call("grass_flowers", function()
-  Voxel3D.draw(ChunkMesher.grass(state.map), atlasFor(state.map), nil, pull)
+  Voxel3D.draw(ChunkMesher.grass(state.map), atlasFor(state.map), nil,
+    V.require("SafariLandscape").grassPull(state.map,pull))
   for _, nb in ipairs(state.neighbors or {}) do
     if RenderDistance.neighbor(nb, state.player) then
       Voxel3D.draw(ChunkMesher.grass(nb.map), atlasFor(nb.map),
-                   Mat4.translate(nb.ox, 0, nb.oy), pull)
+                   Mat4.translate(nb.ox, 0, nb.oy),
+                   V.require("SafariLandscape").grassPull(nb.map,pull))
     end
   end
   end)
@@ -1681,7 +1731,10 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- the donor build: terrain, trees, leaves and actors occlude its light.
   if CommunityVisuals.customForest() then
     pcall(ForestAtmos.draw, state.map)
+    pcall(function() V.require("ForestLife").draw(state) end)
   end
+
+  pcall(function() V.require("KantoLife").draw(state) end)
 
   -- The second additive world seam: host actors, water, grass, and flowers
   -- are complete. The companion may add bounded blended packets before the

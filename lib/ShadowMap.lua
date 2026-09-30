@@ -119,10 +119,14 @@ ShadowMap.slack = ShadowMap.BIAS
 
 local SHADER = [[
   varying float vDepth;
+  varying float vForestOpaque;
 #ifdef VERTEX
+  attribute float VertexShade;
   uniform mat4 lightVP;
   uniform mat4 model;
   vec4 position(mat4 transform_projection, vec4 vertex_position) {
+    // The native forest materials use leaf-local UVs and solid geometry.
+    vForestOpaque=step(6528.0,VertexShade)*(1.0-step(7040.0,VertexShade));
     vec4 c = lightVP * (model * vertex_position);
     // the projection is orthographic (w is 1) and fit() maps clip z onto
     // [0,1] directly (see Z01 there), so clip z IS the stored depth,
@@ -137,7 +141,7 @@ local SHADER = [[
   vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     // the same alpha discard the main pass uses: a sprite card casts its
     // silhouette, not its 16x16 bounding box
-    if (Texel(tex, tc).a < 0.5) discard;
+    if (vForestOpaque < 0.5 && Texel(tex, tc).a < 0.5) discard;
     // pack into two channels: the high byte in red, the low in green.
     // Blue says WHAT cast this, which costs a channel that was zero anyway
     // and lets a surface decline one kind of caster -- water does, for the

@@ -1,3 +1,49 @@
+# Desktop Test134 integration - 2026-09-30
+
+Integrated all Test134 code from `C:/Users/User/Desktop/Test134` into this
+desktop checkout on the existing `1.11.1` branch, starting at `5e9f650` with a
+clean working tree. Local uncommitted integration only; no branch switch,
+commit, push, deployment, release, deletion, or version bump. Manifest and
+exported version remain 1.11.0, as they were on this branch before the merge.
+
+Imported 121 changed/new Lua files (33 replacements, 88 additions), covering
+city architecture, forest/Safari presentation, water/surf/battle placement,
+ambience and sky/scenery. Added 13 supplied media/credit files locally under
+the existing ignored `assets/legendary/` path. Preserve those asset exclusions;
+these files are not included by ordinary Git staging. Kept destination-only
+files, existing README/changelog, manifest, packaging exclusions and tests.
+Donor validation captures/history were not imported into the project.
+
+Normalized comparisons and three-way preparation against `a26364d` produced
+no conflicts; incoming code already retains the subsequent cut-tree regrowth
+repair and current exported version. Test134 source files were not edited.
+`.claude/test134-merge/` holds exact before-file backups, starting commit,
+SHA-256 inventory/actions, preparation/apply scripts, review diff and validation
+results. The handoff's original contents are backed up there too.
+
+Checks performed here: LuaJIT 2.1 compiled all 241 production/data Lua files;
+mocked hosted-trainer visibility, atmosphere companion integration, Lavender
+approach visuals (216 checks), and mesh disk format/migration (40 checks)
+passed. Supplied Test134 sky and scenery/runtime checks and all 12 filtering
+and API-refusal configurations passed against this merged checkout.
+Git whitespace validation passed. These are compilation, static and mocked
+checks, not inspected game rendering or GPU shader validation.
+
+Incomplete checks: battle sidecar, Stadium model API, Legendary profile and
+migration, and city-ground suites stop on old mocks lacking newly introduced
+modules/settings (SafariReserve, SafariFooting, new preset members). Water
+reflection/precision suites require missing `tests.modkit`; cut mesh suites
+require missing engine `src.render.Assets`. The donor fallback comparison
+requires its absent `../test131-work` baseline. Exact errors are preserved in
+the scratch validation.json; no tests or production behavior were weakened to
+make them pass. These suites need updated fixtures/full engine validation.
+
+Not verified: live gameplay, game rendering, GPU shaders, companion-on/off,
+battle/capture/naming, movement and 2D fallback, or Android. The documented
+`D:/gen1recomp` engine is absent. No executable, game/save/slot/map/camera
+fixture was launched, no screenshots were generated, and no game processes,
+player saves, options, installed mods or environment settings were changed.
+
 # Desktop Test77 integration - 2026-09-17
 
 Merged the user's `C:/Users/User/Desktop/Test77` into the desktop Legendary

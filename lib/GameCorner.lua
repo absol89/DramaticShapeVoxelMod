@@ -146,10 +146,10 @@ function M.geometry(r,part)
   elseif part=='east' then ox,oz,turn=322,176,-1;wallSpan(-112,112)
   elseif part=='south' then
    ox,oz,turn=160,290,2
-   -- Original two-cell doorway at world x240..272 remains an opening.
+   -- Original two-cell exit stays usable; recessed doors sit beyond the warp.
+   -- Doorway at world x240..272 remains an opening.
    wallSpan(-160,-112);wallSpan(-80,160);wallSpan(-112,-80,36)
-   for _,x in ipairs({-113,-80})do box(x,0,.2,1,36,1.6,3)end
-   box(-113,35,.2,34,1,1.6,3)
+   V.require("CasinoDoors").add(box,quad,-96,false)
   elseif part=='ceiling' then
    -- Downward-facing recessed coffers, all decoration stays above headroom.
    for x=0,319,32 do for z=64,287,32 do

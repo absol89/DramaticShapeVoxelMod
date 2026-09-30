@@ -61,6 +61,7 @@ local CommunityVisuals = V.require("CommunityVisuals")
 local PaletteFX = require("src.render.PaletteFX")
 
 local Sky = {}
+local Celestial = V.require("Celestial")
 
 -- The most bands a phase palette may paint with. Eight leaves headroom over
 -- DayNight's six-band ones without paying for more; the ramp the shader reads
@@ -534,7 +535,21 @@ local function paintDisc(body, edge, cell, w, h)
   if not (body and body.y and g.setScissor) then return end
   local shades = Sky.discShades(body.moon)
   local twilight = looming(body)
-  local _, r = Sky.discRadius(h, cell, body)
+  local radius, r = Sky.discRadius(h, cell, body)
+  local detailed=Celestial.image(body.moon,twilight,shades)
+  if detailed then
+    if body.y-radius*1.3>edge then return end
+    local sx,sy,sw,sh=g.getScissor()
+    g.setScissor(0,0,math.ceil(w),math.max(0,math.floor(edge)))
+    local ok,err=pcall(function()
+      g.setColor(1,1,1,1)
+      local size=radius*2.6
+      g.draw(detailed,body.x-size/2,body.y-size/2,0,size/256,size/256)
+    end)
+    if sx then g.setScissor(sx,sy,sw,sh)else g.setScissor()end
+    if not ok then error(err)end
+    return
+  end
   -- snap the centre to the cell grid, like everything else in this sky
   local bx = math.floor(body.x / cell) * cell + cell / 2
   local by = math.floor(body.y / cell) * cell + cell / 2
@@ -605,6 +620,8 @@ Sky.DISC_BAKE_R = 9          -- bake radius, in cells
 Sky.DISC_BAKE_PX = 8         -- texture pixels per cell
 
 function Sky.discImage(moon, twilight)
+  local detailed=Celestial.image(moon,twilight,Sky.discShades(moon),true)
+  if detailed then return detailed end
   if not (love.graphics and love.graphics.newCanvas) then return nil end
   local shades = Sky.discShades(moon)
   local key = (moon and "m" or "s") .. (twilight and "t" or "-")
@@ -836,6 +853,7 @@ end
 -- context builds a new one instead of drawing with a handle from the old. The
 -- ramp is a GPU object on the same context and goes with it.
 function Sky.invalidate()
+  Celestial.invalidate()
   Sky.resetDeferredBody()
   if fallbackDiscShader then fallbackDiscShader:release();fallbackDiscShader=nil end
   shader = nil

@@ -387,6 +387,53 @@ local function legendaryPlayerCard(ctx)
   return not ((actor and actor.renderer) or (visible and visible.renderer))
 end
 
+local function safariModel(ctx, model, actor)
+  local battle = ctx and ctx.scene and ctx.scene.battle
+  if not (battle and battle.safari) then return model end
+  local arena = OverworldBattle.arena()
+  local map = OverworldBattle.map()
+  if not (arena and map) then return model end
+  local y = V.require("BattleScene").groundY(arena.map or map,arena)
+  local enemyY=V.require("SafariFooting").ground(battle,arena,"enemy",y,map)
+  model=Mat4.mul(Mat4.translate(0,enemyY-y,0),model)
+  local origin = Mat4.translate(arena.mid[1],y,arena.mid[2])
+  local metrics
+  if actor.renderer and actor.renderer.worldMetrics then
+    local ok, value = pcall(actor.renderer.worldMetrics,actor.renderer)
+    if ok then metrics=value end
+  end
+  -- Classic importer matrices preserve positive bind-floor hover. The
+  -- reported grounded quadrupeds must not inherit that presentation lift.
+  -- Arena-mode importer matrices already subtract the complete bind floor.
+  local host=ctx.scene.host
+  if not(host and host.arenaMode)and metrics
+      and V.require("SafariFooting").standing(battle,arena,"enemy",map)then
+    model=V.require("SafariFooting").unhover(model,metrics,1)
+  end
+  local world = V.require("SafariBattleFX").model(battle,"enemy",
+    Mat4.mul(origin,model),metrics,arena)
+  return Mat4.mul(Mat4.translate(-arena.mid[1],-y,-arena.mid[2]),world)
+end
+
+-- External hosted renderers use the same support correction in color/shadow.
+local function supportedModel(ctx, model, actor, side)
+  if side == "enemy" then model = safariModel(ctx,model,actor) end
+  local arena = OverworldBattle.arena()
+  if not (arena and arena.map and arena.map.isWaterCell and actor.renderer
+      and actor.renderer.worldMetrics) then return model end
+  local ok, metrics = pcall(actor.renderer.worldMetrics,actor.renderer)
+  if not (ok and metrics and tonumber(metrics.height)) then return model end
+  local battle=ctx.scene.battle
+  local y=V.require("BattleScene").groundY(arena.map,arena)
+  local support=V.require("SafariFooting").ground(battle,arena,side,y)
+  local host=ctx.scene.host
+  local grounded=(host and host.arenaMode) or
+    (side=="enemy" and V.require("SafariFooting").standing(battle,arena,side))
+  local scale=math.sqrt(model[2]^2+model[6]^2+model[10]^2)
+  return V.require("WaterFooting").model(model,metrics,1,metrics.height*scale,
+    support,battle,arena,side,grounded)
+end
+
 local function drawHostedActors(sceneCtx, providerCtx)
   local host = sceneCtx and sceneCtx.scene and sceneCtx.scene.host
   local renderer = rendererApi()
@@ -408,6 +455,7 @@ local function drawHostedActors(sceneCtx, providerCtx)
       if actor and actor.renderer and host.modelMatrix
           and not (side == "player" and legendaryPlayerCard(sceneCtx)) then
         local localModel, yaw = host:modelMatrix(side, actor)
+        localModel = supportedModel(sceneCtx,localModel,actor,side)
         local model = renderer.matMul(worldFromStadium, localModel)
         local ok = actor.renderer:drawScene(pass, model, {
           viewProjection = providerCtx.vp,
@@ -518,6 +566,7 @@ function StadiumBackground.shadow(next, ctx)
     if actor and actor.renderer and host.modelMatrix
           and not (side == "player" and legendaryPlayerCard(ctx)) then
       local model = host:modelMatrix(side, actor)
+      model = supportedModel(ctx,model,actor,side)
       actor.renderer:drawShadowMap(model, lightVP)
     end
   end

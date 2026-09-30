@@ -535,16 +535,120 @@ function Disk.fingerprint(map, slot, masks, kind)
     "row", tostring(tileset.tilesPerRow),
     "trueColor", tileset.trueColor and "1" or "0",
   }
+  if mapId=='CELADON_CITY' and tileset.id=='OVERWORLD'
+      and (kind=='terrain'or kind=='aux') and V.require('CommunityVisuals').referenceBuildings()then
+    parts[#parts+1]='celadon-luxury-casino-exteriors-120'
+    if kind=='terrain' then parts[#parts+1]='celadon-neon-marquee-122' end
+  end
+  if (mapId=='PEWTER_CITY'or mapId=='CERULEAN_CITY')and(kind=='terrain'or kind=='aux')
+      and tileset.id=='OVERWORLD'and(V.require('CommunityVisuals').customRoads()or V.require('CommunityVisuals').referenceBuildings())then
+    parts[#parts+1]='mineral-waterfront-polish-111'
+  end
+  if (kind=='terrain'or kind=='aux') and V.require('ForestTrees').enabled(map,V.require('CommunityVisuals').customForest())then
+    parts[#parts+1]='forest-readable-floor-94'
+  end
+  if (kind=='terrain'or kind=='aux') and V.require('ForestTrees').enabled(map,V.require('CommunityVisuals').customForest())then
+    parts[#parts+1]=V.require('ForestTrees').REVISION..':'..V.require('ForestTrees').detail(V.require('CommunityVisuals').treeDetailLevel())
+  end
+  if (kind=='terrain'or kind=='aux') and mapId=='CERULEAN_CITY'
+      and V.require('CommunityVisuals').customRoads() and tileset.id=='OVERWORLD'then
+    parts[#parts+1]='cerulean-bridge-arrival-clear-92'
+  end
+  if (kind=='terrain'or kind=='aux') and mapId=='FUCHSIA_CITY'
+      and V.require('CommunityVisuals').customRoads() and tileset.id=='OVERWORLD'then
+    parts[#parts+1]='safari-entrance-clear-108'
+  end
+  if kind=='terrain' and mapId=='CINNABAR_ISLAND'
+      and V.require('CommunityVisuals').customRoads() and tileset.id=='OVERWORLD'then
+    parts[#parts+1]='cinnabar-clear-dock-alley-92'
+    parts[#parts+1]='cinnabar-natural-bed-124'
+  end
+  if kind=='terrain' and V.require('CinnabarCoast').enabled(mapId,
+      V.require('CommunityVisuals').customRoads(),tileset.id) then
+    parts[#parts+1]='cinnabar-coastal-furniture-91'
+  end
+  if kind=='terrain' and V.require('VermilionHarbor').enabled(mapId,
+      V.require('CommunityVisuals').customRoads(),tileset.id) then
+    parts[#parts+1]='vermilion-courtyard-edge-60'
+  end
+  if mapId=='ROUTE_24' and V.require('CommunityVisuals').customRoads() then parts[#parts+1]='cerulean-bridge-89' end
+  if mapId=='ROUTE_17' and V.require('CommunityVisuals').customSigns() then parts[#parts+1]='cycling-information-islands-89' end
+  -- Only the generic OVERWORLD road fallback changed. Bespoke city/trail
+  -- builders retain their existing cache families and accepted geometry.
+  if kind=='terrain' and tileset.id=='OVERWORLD'
+      and V.require('CommunityVisuals').customRoads()
+      and mapId~='CELADON_CITY' and mapId~='ROUTE_11'
+      and not V.require('VermilionHarbor').enabled(mapId,true,tileset.id)
+      and not V.require('CinnabarCoast').enabled(mapId,true,tileset.id) then
+    parts[#parts+1]='legendary-light-cobble-86'
+  end
+  if V.require('CityStreets').themes[mapId] and V.require('CommunityVisuals').referenceBuildings() then
+    parts[#parts+1]='city-facade-detail-89'
+    if mapId=='PEWTER_CITY' or mapId=='FUCHSIA_CITY' or mapId=='VIRIDIAN_CITY'then parts[#parts+1]='landmark-legibility-91'end
+  end
+  if mapId=='CINNABAR_ISLAND' and V.require('CommunityVisuals').referenceBuildings() then
+    parts[#parts+1]='cinnabar-facade-detail-91'
+  end
+  if kind=='terrain' and (mapId=='ROUTE_20' or mapId=='ROUTE_21') and V.require('CommunityVisuals').customRoads() then
+    parts[#parts+1]='coastal-shore-plants-90'
+  end
+  if (kind=='terrain' or kind=='aux') and V.require('CityStreets').enabled(mapId,
+      V.require('CommunityVisuals').customRoads(),tileset.id) then
+    parts[#parts+1]='legendary-town-gardens-90'
+    if mapId~='SAFFRON_CITY' and mapId~='ROUTE_17'then parts[#parts+1]='regional-detail-91'end
+  end
+  if kind=='terrain' and mapId=='CELADON_CITY' then
+    parts[#parts+1]='celadon-light-cobble-86'
+  end
+  if kind=='terrain' and tileset.id=='OVERWORLD' and mapId=='ROUTE_11' and V.require('CommunityVisuals').customRoads() then
+    parts[#parts+1]='route11-taller-sprouts-53'
+  end
+  if tileset.id=='OVERWORLD' or tileset.id=='FOREST' or tileset.id=='PLATEAU' then
+    parts[#parts+1]='kanto-architecture-62:'..V.require('CommunityVisuals').buildings:get()
+  end
+  if tileset.id=='OVERWORLD' and V.require('CommunityVisuals').customCourtyards() then
+    parts[#parts+1]='community-timber-metal-fence-47'
+  end
   -- PR51 changed shrub vertices/UVs; only Safari needs its meshes rebuilt.
   if map.id=='SAFARI_ZONE_CENTER' or map.id=='SAFARI_ZONE_EAST'
       or map.id=='SAFARI_ZONE_NORTH' or map.id=='SAFARI_ZONE_WEST' then
     parts[#parts + 1] = "safari-canopy-source-shading-v1"
+    if kind=="terrain" or kind=="aux" then
+      parts[#parts+1]=V.require("SafariReserve").REVISION..":"..tostring(V.require("SafariReserve").enabled(map))..":"..V.require("CommunityVisuals").treeDetailLevel()
+    end
   end
   -- Community visuals are real geometry/UV inputs. Keep each choice in the
   -- canonical fingerprint so a DEFAULT cache can never be reused for custom
   -- trees/fences/pillars (or vice versa), while every default remains the
   -- creator's original cache family.
   local CommunityVisuals = V.require("CommunityVisuals")
+  if kind == "terrain" and tileset.id == "OVERWORLD"
+      and (CommunityVisuals.customRoads() or CommunityVisuals.customGrass()
+        or (mapId == "LAVENDER_TOWN" and CommunityVisuals.customCityGround())) then
+    parts[#parts + 1] = "rollback16-decor-water-wood-grass"
+  end
+  if kind == "terrain" and tileset.id == "OVERWORLD" and mapId == "LAVENDER_TOWN"
+      and (CommunityVisuals.customCityGround() or CommunityVisuals.customRoads()) then
+    parts[#parts + 1] = "lavender-ambiance-20"
+  end
+  if kind == "terrain" and tileset.id == "OVERWORLD" and CommunityVisuals.customRoads() then
+    parts[#parts + 1] = "walkpath19-dock-emission21"
+  end
+  if kind == "terrain" and tileset.id == "OVERWORLD" then
+    local city=CommunityVisuals.isCityGroundMap(map)
+    if CommunityVisuals.customRoads()
+        or (city and CommunityVisuals.customCityGround())
+        or (not city and CommunityVisuals.customGrass()) then
+      parts[#parts + 1] = "grass-base-deck-grain-22"
+    end
+  end
+  if tileset.id=="OVERWORLD" then
+    local city=CommunityVisuals.isCityGroundMap(map)
+    local grass=(city and CommunityVisuals.customCityGround()) or (not city and CommunityVisuals.customGrass())
+    if kind=="terrain" and (CommunityVisuals.customRoads() or CommunityVisuals.customWalls()) then
+      parts[#parts+1]="dock-masonry-23"
+    elseif kind=="aux" and grass then parts[#parts+1]="grass-variation-23" end
+  end
   -- Final contract: brick courses, bridge boards, crown-lock and the
   -- grain-mapped TEST435 fence must never reuse an older community mesh.
   parts[#parts + 1] = "legendary-visuals-final"
@@ -1801,4 +1905,3 @@ Disk.saveTreeParts = Timings.wrap("cache_other", Disk.saveTreeParts)
 Disk.saveRamToDisk = Timings.wrap("cache_other", Disk.saveRamToDisk)
 
 return Disk
-

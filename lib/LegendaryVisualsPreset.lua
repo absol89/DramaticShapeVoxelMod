@@ -61,6 +61,8 @@ add(CommunityVisuals.walls,       "default", "n64memory",      "n64memory")
 add(CommunityVisuals.courtyards,  "default", "n64memory",      "n64memory")
 add(CommunityVisuals.sky,         "default", "n64memory",      "n64memory")
 add(CommunityVisuals.forest,      "default", "n64memory",      "n64memory")
+add(CommunityVisuals.safari,      "default", "n64memory",      "n64memory")
+add(CommunityVisuals.kantoLife,   "off", "natural", "natural")
 
 -- Tower atmosphere. Both Legendary presets show the intended fog; AUTO keeps
 -- the restrained detail pass while FULL restores the richer living-light tier.

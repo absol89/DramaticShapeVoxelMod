@@ -436,8 +436,15 @@ end
 -- exactly one thing reaches a canopy map: the hour's tint.
 DayNight.CANOPY = { VIRIDIAN_FOREST = true }
 
+function DayNight.isOpenForest(map)
+  local id = map and (map.id or (map.def and map.def.id))
+  return (id == "VIRIDIAN_FOREST" and V.require("CommunityVisuals").customForest())
+    or V.require("SafariReserve").enabled(map) or false
+end
+
 function DayNight.isCanopy(map)
-  return (map and map.id and DayNight.CANOPY[map.id]) and true or false
+  return (map and map.id and DayNight.CANOPY[map.id]
+    and not DayNight.isOpenForest(map)) and true or false
 end
 
 -- How lit the WINDOWS are, 0..1 -- the lamps behind the glass, not the sky.

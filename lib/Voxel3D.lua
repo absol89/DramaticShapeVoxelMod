@@ -74,10 +74,15 @@ Voxel3D.FACE_SHADE = {
 local SHADER = [[
   varying float weatherDistance;
   varying float vShade;
+  varying float vReferenceMaterial;
+  varying float vDockWarm;
+  varying float vMasonry;
+  varying float vLantern; // TEST21: explicit pane tag, no atlas-wide glow
   varying float vFacadeBack;
   varying vec3 vSun;          // this fragment's place in the sun's view
   varying vec3 vModelSun;     // optional Stadium model-shadow view
   varying LOVE_HIGHP_OR_MEDIUMP vec3 vFoliageRay;
+  uniform vec2 reflectionClip; // enabled, uncurved water plane relative to eye
   varying float vFog;         // distance/height haze from Viridian Forest
 #ifdef VOXEL_GRID
   // model space, one unit per voxel -- see VoxelGrid. Precision matters
@@ -93,13 +98,24 @@ local SHADER = [[
   uniform mat4 sunVP;         // world -> the shadow map's unit cube
   uniform mat4 modelSunVP;    // Stadium-local world -> its shadow unit cube
   uniform vec3 modelSunOrigin;// map-world origin of Stadium's local arena
-  uniform vec3 eye;
+  uniform LOVE_HIGHP_OR_MEDIUMP vec3 eye;
   uniform float pull;
   uniform vec3 curve;         // xy = the focus in world XZ, z = k; 0 = off
   uniform vec4 fogInfo;       // density, start, heightK; density 0 = clear
   attribute float VertexShade;
   vec4 position(mat4 transform_projection, vec4 vertex_position) {
-    vShade = abs(VertexShade);
+    // Existing six-float layout: only dock pane shades carry a +64 tag.
+    // Decode before ordinary daylight shading; negative facade tags stay intact.
+    float referenceTag=step(4096.0,VertexShade);
+    float referenceIndex=floor(max(0.0,VertexShade-4096.0)/128.0);
+    vReferenceMaterial=referenceTag*(referenceIndex+1.0);
+    float materialShade=VertexShade-referenceTag*(4096.0+referenceIndex*128.0);
+    vMasonry=step(256.0,materialShade);
+    float dock=step(128.0,materialShade)*(1.0-vMasonry);
+    float level=floor(max(0.0,materialShade-128.0)/4.0)*dock;
+    vDockWarm=level/15.0;
+    vLantern=step(64.0,materialShade)*(1.0-step(128.0,materialShade));
+    vShade=abs(materialShade)-256.0*vMasonry-(128.0+level*4.0)*dock-64.0*vLantern;
 #ifdef VOXEL_GRID
     // MODEL space, deliberately: every mesh here is built a unit per
     // voxel in its own frame, so the seams ride the model however it is
@@ -278,6 +294,9 @@ local SHADER = [[
     float f=max(0.0,1.0-length(delta)/max(radius,0.001));
     return f*f*fireLightPower;
   }
+  uniform LOVE_HIGHP_OR_MEDIUMP vec3 eye; // pixel-stage world material coordinates
+  uniform float battleWaterOn; // TEST24: scoped to staged water meshes only
+  uniform float battleWaterPhase;
   uniform float streetLampOn;
   uniform vec3 streetLampA;
   uniform vec3 streetLampB;
@@ -285,9 +304,11 @@ local SHADER = [[
   uniform vec3 streetLampD;
   float streetPool(vec3 center) {
     vec3 d=vFoliageRay-center;
-    float falloff=max(0.0,1.0-length(d.xz)/19.0);
-    return falloff*falloff*(1.0-smoothstep(0.5,5.0,abs(d.y)));
+    // TEST20: broader soft pools, still only the existing four Lavender lamps.
+    float falloff=1.0-smoothstep(0.0,30.0,length(d.xz));
+    return falloff*falloff*(1.0-smoothstep(1.0,9.0,abs(d.y)));
   }
+  uniform float casinoPhase; // smooth marquee chase; only new neon material IDs
   uniform float glassNight;   // 0 = daylight .. 1 = the lamps are on
   uniform float glassPhase;   // the glint's phase: advances with TRAVEL
   uniform float glassGlint;   // and its strength: 0 while standing still
@@ -295,6 +316,7 @@ local SHADER = [[
 
   // BATTLE-FOLIAGE1: used only for explicitly scoped tree mesh draws.
   uniform float foliageCutOn;
+  uniform float foliageNativeOnly; // TEST95: native trees within mixed terrain
   uniform vec3 foliageTargetA; // camera-relative, matching vFoliageRay
   uniform vec3 foliageTargetB;
   uniform float foliageRadius;
@@ -320,10 +342,177 @@ local SHADER = [[
     float b = 2.0 * hi.x + 3.0 * hi.y - 4.0 * hi.x * hi.y;
     return (4.0 * a + b + 0.5) / 16.0;
   }
+  // TEST93: moss, humus and sparse settled leaves in world coordinates.
+  // The existing floor stays flat. Small detail fades before it can shimmer
+  // in the distance; no animated input, screen noise, atlas or extra pass.
+  // Smooth, non-periodic value noise; the grid is only an interpolation
+  // domain. Warped coordinates and mixed scales avoid a woven/tiled surface.
+  // TEST94: bounded arithmetic retains variation without the large
+  // sine-hash multiplier that loses fractional bits on lower precision GPUs.
+  float forestSoilHash(vec2 p) {
+    vec2 k=mod(p,61.0);
+    k=mod(k*k+vec2(17.0,29.0),61.0);
+    float n=mod(k.x*13.0+k.y*7.0,61.0);
+    return mod(n*n+19.0,61.0)/61.0;
+  }
+  float forestSoilNoise(vec2 p) {
+    vec2 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
+    vec4 n=vec4(forestSoilHash(i),forestSoilHash(i+vec2(1,0)),
+      forestSoilHash(i+vec2(0,1)),forestSoilHash(i+vec2(1,1)));
+    return mix(mix(n.x,n.y,f.x),mix(n.z,n.w,f.x),f.y);
+  }
+  vec3 forestFloorSurface(vec3 pos) {
+    vec2 p=pos.xz;
+    vec2 warped=p+vec2(sin(p.y*.17+p.x*.07),sin(p.x*.13-p.y*.09))*2.7;
+    float broad=forestSoilNoise(warped*.047);
+    float middle=forestSoilNoise(warped*.31);
+    float moss=smoothstep(.10,.62,broad+(middle-.5)*.22);
+    vec3 earth=vec3(.350,.370,.200);
+    vec3 green=vec3(.420,.580,.260);
+    vec3 base=mix(earth,green,moss);
+    float closeDetail=1.0-smoothstep(64.0,220.0,length(pos-eye));
+    base+=vec3((middle-.5)*.052);
+    if(closeDetail<.001) return clamp(base,0.0,1.0);
+    float fine=forestSoilNoise(warped*3.7)-.5;
+    float fibre=forestSoilNoise(warped*vec2(2.6,1.3))-.5;
+    base+=vec3((fine*.090+fibre*.065*moss)*closeDetail);
+    // Each sparse leaf fits inside its jittered cell, so floor() introduces
+    // neither a visible grid nor a discontinuity at cell boundaries.
+    vec2 cell=floor(p/4.8);
+    float h=forestSoilHash(cell);
+    float j=fract(h*17.13+.37);
+    vec2 q=p-cell*4.8-vec2(2.4+(h-.5)*1.1,2.4+(j-.5)*1.1);
+    float angle=h*6.2831853;
+    q=mat2(cos(angle),-sin(angle),sin(angle),cos(angle))*q;
+    float shape=abs(q.x)/.78+q.y*q.y/.085;
+    float leaf=(1.0-smoothstep(.70,1.0,shape))*step(.86,h)*closeDetail;
+    float rib=(1.0-smoothstep(.012,.045,abs(q.y)))*.030;
+    vec3 litter=vec3(.365,.291,.168)+vec3((j-.5)*.025-rib);
+    return clamp(mix(base,litter,leaf*.82),0.0,1.0);
+  }
+  // Forest-floor diffuse fill follows the current day/night tint. Keep
+  // 48% of the original shadow/AO response; daylight maximum stays unchanged.
+  vec3 forestFloorLighting(vec3 surface,vec3 shaded,vec3 tint) {
+    return surface*tint*.52+shaded*.48;
+  }
+  // TEST124: submerged Cinnabar silt, sampled across world coordinates.
+  // Low contrast mineral patches and fine grains have no repeating tile edge.
+  vec3 waterBedSurface(vec3 pos) {
+    vec2 p=pos.xz;
+    vec2 warped=p+vec2(sin(p.y*.061),sin(p.x*.049))*3.1;
+    float sediment=forestSoilNoise(warped*.057);
+    float gravel=forestSoilNoise(warped*.39);
+    float detail=1.0-smoothstep(.30,1.2,length(fwidth(p)));
+    float grain=forestSoilNoise(warped*2.3)-.5;
+    vec3 silt=mix(vec3(.255,.28,.255),vec3(.345,.355,.29),sediment);
+    return silt+vec3((gravel-.5)*.035+grain*.026*detail);
+  }
+  vec3 referenceSurface(float mat,vec3 pos,vec2 leafUV) {
+    if(mat>27.5 && mat<28.5) return waterBedSurface(pos);
+    // TEST122 appends IDs; every pre-existing material retains its index.
+    if (mat>23.5 && mat<27.5) {
+      if(mat<24.5) return vec3(1.0,.095,.32);
+      if(mat<25.5) return vec3(.075,.79,1.0);
+      if(mat<26.5) return vec3(1.0,.56,.10);
+      return vec3(1.0,.69,.24);
+    }
+    if (mat>22.5) return forestFloorSurface(pos);
+    // TEST92: forest-only materials use continuous world-space grain. The
+    // previous 19 material IDs and their shading are unchanged.
+    if (mat > 19.5) {
+      if (mat < 20.5) {
+        float ridge=sin((pos.x+pos.z)*5.1+sin(pos.y*.61)*.7);
+        float groove=smoothstep(.61,.97,ridge)*.10;
+        float grain=sin(pos.y*2.1+pos.x*1.7)*sin(pos.z*3.3+pos.y*.3)*.018;
+        return clamp(vec3(.33,.255,.17)+grain-groove,0.0,1.0);
+      }
+      vec3 leaf=mat < 21.5 ? vec3(.255,.445,.175) : vec3(.21,.385,.135);
+      if (mat < 21.5) {
+        float edge=abs(leafUV.x-.5)*2.0;
+        float midrib=1.0-smoothstep(.018,.047,abs(leafUV.x-.5));
+        float veins=pow(max(0.0,sin(leafUV.y*43.0-edge*13.0)),10.0)*.018;
+        leaf+=vec3(.022,.03,.010)*(1.0-edge)-vec3(midrib*.035+veins);
+      }
+      float patches=sin(pos.x*.79+sin(pos.z*.53))*sin(pos.y*.67+pos.z*.41)*.022;
+      float fine=sin(pos.x*4.3+pos.y*2.2)*sin(pos.z*3.7-pos.y*1.9)*.007;
+      return clamp(leaf+vec3(patches+fine),0.0,1.0);
+    }
+    vec3 base=vec3(.5);
+    if (mat < 1.5) base=vec3(0.230,0.390,0.570);
+    else if (mat < 2.5) base=vec3(0.910,0.840,0.620);
+    else if (mat < 3.5) base=vec3(0.140,0.140,0.170);
+    else if (mat < 4.5) base=vec3(0.840,0.360,0.430);
+    else if (mat < 5.5) base=vec3(0.270,0.420,0.580);
+    else if (mat < 6.5) base=vec3(0.970,0.830,0.470);
+    else if (mat < 7.5) base=vec3(0.180,0.340,0.210);
+    else if (mat < 8.5) base=vec3(0.360,0.520,0.270);
+    else if (mat < 9.5) base=vec3(0.640,0.660,0.630);
+    else if (mat < 10.5) base=vec3(0.130,0.240,0.390);
+    else if (mat < 11.5) base=vec3(0.590,0.430,0.280);
+    else if (mat < 12.5) base=vec3(0.640,0.200,0.180);
+    else if (mat < 13.5) base=vec3(0.550,0.610,0.480);
+    else if (mat < 14.5) base=vec3(0.270,0.320,0.350);
+    else if (mat < 15.5) base=vec3(0.470,0.500,0.490);
+    else if (mat < 16.5) base=vec3(0.490,0.240,0.190);
+    else if (mat < 17.5) base=vec3(0.560,0.290,0.220);
+    else if (mat < 18.5) base=vec3(0.880,0.860,0.760);
+    else if (mat < 19.5) base=vec3(0.350,0.250,0.180);
+    // Broad world-space variation: no screen-space noise or moving grain.
+    float grain=sin(pos.x*.27+pos.z*.19+sin(pos.y*.22))*0.014;
+    float wear=sin(pos.x*.071+pos.z*.083)*sin(pos.y*.15)*0.012;
+    if (mat<2.5 || abs(mat-11.0)<.4 || mat>17.5) base+=vec3(grain+wear);
+    if (abs(mat-9.0)<.4 || abs(mat-15.0)<.4) {
+      float course=floor(pos.y/3.0);
+      float joint=step(.94,fract((pos.x+pos.z+mod(course,2.0)*3.5)/7.0));
+      base*=1.0-joint*.08;
+      base+=vec3(wear);
+    }
+    if (mat>15.5 && mat<17.5) base+=vec3(wear*.7);
+    return clamp(base,0.0,1.0);
+  }
+// TEST125: uneven flow bends and breaks the crests across the water.
+// Smooth, band-limited detail; all time rates repeat at the existing 40pi wrap.
+float gardenHash(vec2 p) {
+  vec3 h=fract(vec3(p.xyx)*vec3(.1031,.1030,.0973));
+  h+=dot(h,h.yzx+33.33);
+  return fract((h.x+h.y)*h.z);
+}
+float gardenNoise(vec2 p) {
+  vec2 i=floor(p),f=fract(p);f=f*f*f*(f*(f*6.0-15.0)+10.0);
+  return mix(mix(gardenHash(i),gardenHash(i+vec2(1,0)),f.x),
+             mix(gardenHash(i+vec2(0,1)),gardenHash(i+vec2(1,1)),f.x),f.y);
+}
+float gardenRipple(vec2 q, float t) {
+  vec2 drift=vec2(cos(t*.10),sin(t*.10))*3.0;
+  float flow=gardenNoise(q*.034+drift);
+  float crossFlow=gardenNoise(q*.049+vec2(-drift.y,drift.x)+vec2(13.4,7.8));
+  vec2 bent=q+(vec2(flow,crossFlow)-.5)*26.0;
+  vec2 span=fwidth(bent);
+  vec3 fade=1.0-smoothstep(vec3(.65),vec3(2.2),vec3(
+    dot(span,vec2(.24,.07)),dot(span,vec2(.08,.37)),length(span)*.32));
+  float fine=gardenNoise(bent*.19+drift*1.5)*2.0-1.0;
+  return .50*fade.x*(.4+.6*crossFlow)*sin(dot(bent,vec2(.24,.07))+t*.85)
+       + .30*fade.y*sin(dot(bent,vec2(-.08,.37))-t*1.25+flow*5.0)
+       + .20*fade.z*fine;
+}
+
   vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
-    if (foliageCutOn > 0.5) {
+    if (reflectionClip.x > 0.5 && vFoliageRay.y > reflectionClip.y) discard;
+    if (foliageCutOn > 0.5 && (foliageNativeOnly < 0.5
+        || (vReferenceMaterial > 19.5 && vReferenceMaterial < 22.5))) {
       float opening = max(foliageOpening(vFoliageRay, foliageTargetA),
                           foliageOpening(vFoliageRay, foliageTargetB));
+      // A camera inside a native crown needs a broad near-field opening,
+      // not just two peepholes. Limit it to geometry ahead of the eye and
+      // nearer than both subjects; retain the forest behind the Pokemon.
+      if (foliageNativeOnly > 0.5
+          && dot(vFoliageRay,foliageTargetA+foliageTargetB)>0.0) {
+        float distance=length(vFoliageRay);
+        float subjectDistance=max(1.0,min(length(foliageTargetA),length(foliageTargetB)));
+        float nearOpening=(1.0-smoothstep(32.0,40.0,distance))
+          *(1.0-smoothstep(.75,.95,distance/subjectDistance));
+        opening=max(opening,nearOpening);
+      }
       if (opening > foliageThreshold(sc)) discard;
     }
 
@@ -333,7 +522,8 @@ local SHADER = [[
     // lens with mirrored facade/door art. Genuine rear and side walls keep
     // ordinary positive shade values and remain double-sided.
     if (vFacadeBack > 0.5) discard;
-    vec4 p = Texel(tex, tc);
+    // Native forest UVs describe veins; ROM atlas alpha must not cut holes.
+    vec4 p = vReferenceMaterial>19.5 ? vec4(1.0) : Texel(tex, tc);
     // Effects carry continuous coverage, independently of their emissive RGB.
     // Keep this ahead of the world sprite cutout and all scene illumination.
     if (effectSurface > 0.5) return p * color;
@@ -341,6 +531,7 @@ local SHADER = [[
     // blending keeps those texels out of the depth buffer, so a model never
     // carves a transparent hole out of whatever stands behind it
     if (p.a < 0.5) discard;
+    if (vReferenceMaterial>0.5) p.rgb=referenceSurface(vReferenceMaterial,vFoliageRay+eye,tc);
     // UNLIT is an exact texture pass, not merely a zero-weight blend with
     // the lit result. Some GLSL drivers still evaluate both sides of mix(),
     // including the shadow lookup, and have shown pieces of that result on
@@ -356,23 +547,46 @@ local SHADER = [[
     // a driver to evaluate or fold incorrectly. Ghost remains for hit flashes.
     return vec4(mix(p.rgb, ghostColor, ghost), 1.0) * color;
 #endif
+    // Low-cost battle fallback when reflective water is OFF or unavailable.
+    // World coordinates keep the material continuous across tile/neighbor seams.
+    if (battleWaterOn > 0.5) {
+      vec2 waterPos = (vFoliageRay + eye).xz;
+      float broad = .5 + .25*sin(waterPos.x*.027 + waterPos.y*.013)
+                       + .25*cos(waterPos.y*.033 - waterPos.x*.009);
+      float ripple = gardenRipple(waterPos,battleWaterPhase);
+      p.rgb = mix(vec3(.13,.25,.34), vec3(.22,.37,.45), broad)
+            + vec3(.040,.075,.100)*ripple
+            + vec3(.030,.058,.076)*smoothstep(.36,.88,ripple);
+    }
     // the hour's tint multiplies like the sun terms do: it is LIGHT, the
     // same warm or moonlit cast on every surface, not a palette swap
     vec3 litRgb = p.rgb * vShade * sunlight(vSun)
                 * modelSunlight(vModelSun) * dayTint;
+    if(vReferenceMaterial>22.5 && vReferenceMaterial<23.5)
+      litRgb=forestFloorLighting(p.rgb,litRgb,dayTint);
     vec3 rgb = litRgb;
+    if(vMasonry>0.5){
+      vec3 world=vFoliageRay+eye;
+      float grain=fract(sin(dot(floor(world*5.0),vec3(12.9898,78.233,37.719)))*43758.5453);
+      float stain=sin(world.x*.13+world.z*.11)*sin(world.y*.17+world.z*.07);
+      rgb*=.89+grain*.20+stain*.10;
+    }
+    rgb+=p.rgb*vec3(.95,.53,.18)*vDockWarm*glassNight;
     if (fireLightPower > 0.001) {
       rgb += p.rgb * vec3(1.65,0.90,0.23) * breathLight();
     }
     if (streetLampOn > 0.001) {
+      rgb *= mix(vec3(1.0),vec3(0.88,0.91,0.97),streetLampOn);
       float pool=min(1.0,streetPool(streetLampA)+streetPool(streetLampB)
         +streetPool(streetLampC)+streetPool(streetLampD));
-      rgb += p.rgb * vec3(0.65,0.42,0.17) * pool * streetLampOn;
+      rgb += p.rgb * vec3(0.88,0.55,0.24) * pool * streetLampOn;
     }
 #ifdef VOXEL_GRID
     // darken what is there rather than painting a colour, so a seam across
     // dark grass and one across a white roof each stay in their own palette
-    rgb *= 1.0 - gridDark * voxelSeam(vGrid);
+    // Submerged mineral surfaces have no voxel wireframe; other settings stay.
+    float bed=step(27.5,vReferenceMaterial)*(1.0-step(28.5,vReferenceMaterial));
+    rgb *= 1.0 - gridDark * (1.0-battleWaterOn) * (1.0-bed) * voxelSeam(vGrid);
 #endif
     // WINDOW GLASS, marked per atlas texel by the mask (see GlassMask).
     // By day a thin diagonal glint crosses the panes WHILE THE VIEW MOVES
@@ -389,7 +603,7 @@ local SHADER = [[
     // it -- a character samples its own sprite sheet, whose coordinates
     // land on the mask's pane rectangles by accident and would stripe the
     // cast with lamplight at night.
-    float glass = Texel(glassMask, tc).a * glassOn;
+    float glass = max(Texel(glassMask, tc).a, vLantern) * glassOn * (1.0-battleWaterOn);
     if (glass > 0.0) {
       // the sweep lives in the PANE's own space (atlas texels), not the
       // screen's: a pattern anchored to the screen has the world sliding
@@ -403,6 +617,18 @@ local SHADER = [[
       float shine = dot(p.rgb, vec3(0.299, 0.587, 0.114));
       vec3 lamp = vec3(1.0, 0.84, 0.5) * (0.5 + 0.55 * shine);
       rgb = mix(pane, lamp, glassNight * glass);
+    }
+    // Physical tubes stay luminous without the warm window-glass recolor.
+    // Their steady colored casing and pale core retain legible lettering.
+    if(vReferenceMaterial>23.5 && vReferenceMaterial<27.5) {
+      float core=clamp((vShade-1.0)*1.54,0.0,1.0);
+      vec3 tube=mix(p.rgb,vec3(1.0,.96,.86),core*.76);
+      float chase=1.0;
+      if(vReferenceMaterial>26.5) {
+        vec3 world=vFoliageRay+eye;
+        chase=.64+.36*smoothstep(-.25,.80,sin(world.x*.32+world.z*.13-casinoPhase));
+      }
+      rgb=mix(litRgb,tube*chase,.50+.50*clamp(glassNight,0.0,1.0));
     }
     // Haze is air between the camera and the finished surface, so it lands
     // after lighting, shadows, seams and glass but before the ghost overlay.
@@ -420,6 +646,29 @@ local SHADER = [[
   }
 #endif
 ]]
+
+-- TEST105: retain the complete known-working source as the fallback.
+-- Only the small bark formula differs; no derivatives, new uniforms or passes.
+local BARK_OLD = [[
+        float ridge=sin((pos.x+pos.z)*5.1+sin(pos.y*.61)*.7);
+        float groove=smoothstep(.61,.97,ridge)*.10;
+        float grain=sin(pos.y*2.1+pos.x*1.7)*sin(pos.z*3.3+pos.y*.3)*.018;
+        return clamp(vec3(.33,.255,.17)+grain-groove,0.0,1.0);
+]]
+local BARK_NEW = [[
+        float along=pos.x*.83+pos.z*.71;
+        float ridge=sin(along*3.7+sin(pos.y*.075)*.22);
+        float groove=smoothstep(.72,.98,ridge)*.042;
+        float grain=sin(along*13.1+pos.y*.04)*.012;
+        return clamp(vec3(.33,.255,.17)+grain-groove,0.0,1.0);
+]]
+local barkStart,barkEnd=SHADER:find(BARK_OLD,1,true)
+local DETAIL_SHADER=barkStart and (SHADER:sub(1,barkStart-1)..BARK_NEW..SHADER:sub(barkEnd+1))or SHADER
+local function compileSceneShader(prefix)
+ local ok,sh=pcall(love.graphics.newShader,prefix..DETAIL_SHADER)
+ if not ok and DETAIL_SHADER~=SHADER then ok,sh=pcall(love.graphics.newShader,prefix..SHADER)end
+ return ok and sh or false
+end
 
 -- Three compilations of SHADER: the plain scene, the same thing with the
 -- voxel wireframe compiled in, and a card-only true-colour variant. The
@@ -499,7 +748,7 @@ end
 -- water pass reads (see beginWater); it is only ever made if something asks
 -- for one, so a session that never sees a lake never pays for it.
 local function releaseSlot(slotHeld)
-  for _, key in ipairs({ "canvas", "depth", "mirror", "cast" }) do
+  for _, key in ipairs({ "canvas", "depth", "mirror", "cast", "castDepth", "underColor", "underDepth" }) do
     local obj = slotHeld[key]
     if obj and obj.release then pcall(obj.release, obj) end
     slotHeld[key] = nil
@@ -527,9 +776,7 @@ function Voxel3D.shader(grid)
     if grid and not derivativesOK() then
       shaders[grid] = false
     else
-      local src = grid and ("#define VOXEL_GRID 1\n" .. SHADER) or SHADER
-      local ok, sh = pcall(love.graphics.newShader, src)
-      shaders[grid] = ok and sh or false
+      shaders[grid] = compileSceneShader(grid and "#define VOXEL_GRID 1\n" or "")
     end
   end
   return shaders[grid] or nil
@@ -540,9 +787,7 @@ end
 -- only their pixel colour is an exact copy of the authored texture.
 function Voxel3D.unlitShader()
   if unlitShader == nil then
-    local ok, sh = pcall(love.graphics.newShader,
-                         "#define UNLIT_ONLY 1\n" .. SHADER)
-    unlitShader = ok and sh or false
+    unlitShader = compileSceneShader("#define UNLIT_ONLY 1\n")
   end
   return unlitShader or nil
 end
@@ -1063,6 +1308,8 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow, borrow
   love.graphics.setShader(sh)
   love.graphics.setColor(1, 1, 1, 1)
   pcall(sh.send, sh, "vp", "row", Voxel3D.vp)
+  Voxel3D.reflectionPlane = nil
+  pcall(sh.send, sh, "reflectionClip", {0,0})
   pcall(sh.send, sh, "eye", Voxel3D.eye)
   -- the sun's frame, filled by ShadowMap just before this pass opened.
   -- Sent unconditionally: the sampler is declared either way, and leaving
@@ -1131,6 +1378,8 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow, borrow
     pcall(sh.send, sh, "glassSize", { ok and mw or 1, ok and mh or 1 })
   end
   pcall(sh.send, sh, "glassNight", Voxel3D.glassNight or 0)
+  local neonTime=love.timer and love.timer.getTime and love.timer.getTime() or 0
+  pcall(sh.send,sh,"casinoPhase",(neonTime*1.25)%(2*math.pi))
   local fire=slot=="battle" and Voxel3D.battleFireLight or nil
   local fireEye=Voxel3D.eye or {0,0,0}
   pcall(sh.send,sh,"fireLightPower",fire and fire.strength or 0)
@@ -1149,6 +1398,7 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow, borrow
   pcall(sh.send, sh, "glassPhase", Voxel3D.glassPhase or 0)
   pcall(sh.send, sh, "glassGlint", Voxel3D.glassGlint or 0)
   -- on until a sprite pass says otherwise, reset per frame like `ghost`
+  pcall(sh.send, sh, "battleWaterOn", 0)
   pcall(sh.send, sh, "glassOn", 1)
   -- the curved world bends about the camera's focus, so the horizon keeps
   -- a fixed distance ahead of the player rather than sitting on the map.
@@ -1164,6 +1414,7 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow, borrow
   sceneShader = sh
   activeShader = sh
   pcall(sh.send, sh, "foliageCutOn", 0)
+  pcall(sh.send, sh, "foliageNativeOnly", 0)
   active = true
   return true
 end
@@ -1289,6 +1540,14 @@ end
 -- did.
 --
 -- MUST be paired with endWater, which puts the frame back together.
+-- TEST7 capture must precede curved water's depth prepass and all cast copies.
+function Voxel3D.captureUnderwater()
+  if not (active and canvas and held and held.depth) then return nil end
+  -- The caller selects planted water (town or Safari atlas). Safari's native
+  -- ponds own this independently of the unrelated road option.
+  return V.require('WaterBackdrop').capture(held,canvas,depthTarget())
+end
+
 function Voxel3D.beginWater(paint)
   if not (active and canvas and held and held.depth) then return nil end
   if not held.mirror then
@@ -1368,15 +1627,13 @@ end
 -- which matters, because DEPTH_FORMATS prefers a depth buffer with no
 -- stencil in it and most drivers hand one over.
 --
--- COLOUR ONLY, and no depth attachment: what would be tested against is the
--- world's depth, and this canvas holds a mirrored world that shares none of
--- it. The water shader's own depth test has already decided which water
--- fragments survive, and a reflection only ever lands on those.
---
--- Returns the canvas, or nil where one could not be made -- in which case
--- the water draws exactly as it did before this existed.
-function Voxel3D.beginCast()
+-- TEST129: mirrored 3D parts need their OWN depth buffer. Scene depth is
+-- neither cleared nor reused. A water-plane near clip excludes submerged
+-- original geometry instead of reflecting it upward through the real body.
+function Voxel3D.beginCast(plane)
   if not (active and canvas and held) then return nil end
+  local clipped = V.require("WaterReflection").projection(Voxel3D.vp, plane)
+  if not clipped then return nil end
   if not held.cast then
     local ok, c = PixelCanvas.new(held.w, held.h)
     if not (ok and c) then return nil end
@@ -1384,24 +1641,38 @@ function Voxel3D.beginCast()
     pcall(c.setWrap, c, "clamp", "clamp")
     held.cast = c
   end
-  if not pcall(love.graphics.setCanvas, held.cast) then
+  if held.castDepth == nil then held.castDepth = newDepth(held.w, held.h) or false end
+  if not held.castDepth then return nil end
+  if not pcall(love.graphics.setCanvas, {held.cast, depthstencil=held.castDepth}) then
+    pcall(held.castDepth.release, held.castDepth)
+    held.castDepth = false
     pcall(love.graphics.setCanvas, depthTarget())
     return nil
   end
-  -- transparent, because the ALPHA is what tells the water shader where the
-  -- reflection actually is; everywhere else it must leave the water alone
-  love.graphics.clear(0, 0, 0, 0)
-  -- nothing to test against on a canvas with no depth
-  love.graphics.setDepthMode("always", false)
+  held.castVP = Voxel3D.vp
+  Voxel3D.vp, Voxel3D.reflectionPlane = clipped, plane
+  for _,sh in ipairs({activeShader,sceneShader}) do
+    pcall(sh.send, sh, "vp", "row", clipped)
+    pcall(sh.send, sh, "reflectionClip", {1,plane-(Voxel3D.eye and Voxel3D.eye[2] or 0)})
+  end
+  love.graphics.clear(0, 0, 0, 0, true, true)
+  love.graphics.setDepthMode("lequal", true)
   return held.cast
 end
 
--- Put the frame back. Safe after a beginCast that failed.
+-- Always restore projection and scene depth, including callback failure.
 function Voxel3D.endCast()
   if not active then return end
+  if held and held.castVP then Voxel3D.vp=held.castVP;held.castVP=nil end
+  Voxel3D.reflectionPlane = nil
+  for _,sh in ipairs({activeShader,sceneShader}) do
+    pcall(sh.send, sh, "vp", "row", Voxel3D.vp)
+    pcall(sh.send, sh, "reflectionClip", {0,0})
+  end
   pcall(love.graphics.setCanvas, depthTarget())
   pcall(love.graphics.setDepthMode, "lequal", true)
   love.graphics.setColor(1, 1, 1, 1)
+  if activeShader then love.graphics.setShader(activeShader) end
 end
 
 -- Put the frame back: depth reattached, depth test and the scene shader as
@@ -1509,6 +1780,22 @@ function Voxel3D.glassMaskNow(mask)
   if not (active and activeShader) then return end
   local m=mask or GlassMask.blank()
   if m then pcall(activeShader.send,activeShader,"glassMask",m); local ok,w,h=pcall(m.getDimensions,m); pcall(activeShader.send,activeShader,"glassSize",{ok and w or 1,ok and h or 1}) end
+end
+
+-- Shared water-only fallback for roaming and battles; ordinary terrain is untouched.
+function Voxel3D.drawBattleWater(mesh, texture, model)
+  if not mesh then return end
+  if not (active and activeShader) or not V.require("CommunityVisuals").customRoads() then
+    return Voxel3D.draw(mesh, texture, model)
+  end
+  local sh = activeShader
+  local now = love.timer and love.timer.getTime and love.timer.getTime() or 0
+  pcall(sh.send, sh, "battleWaterPhase", now % (40 * math.pi))
+  pcall(sh.send, sh, "battleWaterOn", 1)
+  local ok, err = pcall(Voxel3D.draw, mesh, texture, model)
+  -- Restore even if a draw fails: the following Pokemon must keep their colors.
+  pcall(sh.send, sh, "battleWaterOn", 0)
+  if not ok then error(err, 0) end
 end
 
 function Voxel3D.glass(on)
@@ -1638,7 +1925,7 @@ end
 
 -- Trees only: stones, terrain, characters, balls and shadows use draw().
 -- Reset even when a draw fails so the cutaway cannot leak to later passes.
-function Voxel3D.drawFoliage(mesh, texture, model, pull, sunModel)
+function Voxel3D.drawFoliage(mesh, texture, model, pull, sunModel, nativeOnly)
   local targets, sh = battleFoliageTargets, activeShader
   if not (targets and active and sh and mesh) then
     return Voxel3D.draw(mesh, texture, model, pull, sunModel)
@@ -1646,9 +1933,22 @@ function Voxel3D.drawFoliage(mesh, texture, model, pull, sunModel)
   pcall(sh.send, sh, "foliageTargetA", targets[1])
   pcall(sh.send, sh, "foliageTargetB", targets[2])
   pcall(sh.send, sh, "foliageRadius", 26)
+  pcall(sh.send, sh, "foliageNativeOnly", nativeOnly and 1 or 0)
   pcall(sh.send, sh, "foliageCutOn", 1)
   local ok, err = pcall(Voxel3D.draw, mesh, texture, model, pull, sunModel)
   pcall(sh.send, sh, "foliageCutOn", 0)
+  pcall(sh.send, sh, "foliageNativeOnly", 0)
+  if not ok then error(err, 0) end
+end
+
+-- TEST95: native forest crowns/trunks share the terrain mesh. Restrict the
+-- existing sightline cutaway by material; floor, rocks and actors stay solid.
+-- Keep targets and uniforms local to this draw, including the error path.
+function Voxel3D.drawForestBattleTerrain(mesh, texture, model, arena, groundY)
+  local previous = battleFoliageTargets
+  Voxel3D.battleFoliage(arena, groundY)
+  local ok, err = pcall(Voxel3D.drawFoliage, mesh, texture, model, nil, nil, true)
+  battleFoliageTargets = previous
   if not ok then error(err, 0) end
 end
 
@@ -1672,6 +1972,9 @@ function Voxel3D.lighting(on)
       -- Only the vertex uniforms the flat program still consumes. Per-draw
       -- model/pull values are sent by Voxel3D.draw immediately afterward.
       pcall(flat.send, flat, "vp", "row", Voxel3D.vp)
+      pcall(flat.send, flat, "reflectionClip",
+        {Voxel3D.reflectionPlane and 1 or 0,
+         (Voxel3D.reflectionPlane or 0)-(Voxel3D.eye and Voxel3D.eye[2] or 0)})
       pcall(flat.send, flat, "eye", Voxel3D.eye)
       pcall(flat.send, flat, "curve",
             { Voxel3D.curveX or 0, Voxel3D.curveZ or 0,

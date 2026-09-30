@@ -296,6 +296,7 @@ local function modelMatrix(arena, groundY, battle, side, actor, metrics)
   metrics = metrics or drawableMetrics(actor, side)
   if not metrics then return nil end
 
+  groundY=V.require("SafariFooting").ground(battle,arena,side,groundY)
   local worldHeight = math.max(5, math.min(18,
     14 * math.sqrt(metrics.height / 52.25)))
   local battler = battle and battle[side]
@@ -310,6 +311,11 @@ local function modelMatrix(arena, groundY, battle, side, actor, metrics)
   local k = worldHeight / metrics.height * math.max(0, math.min(1, grow))
   local floor = tonumber(metrics.floor) or 0
   local hover = math.min(math.max(floor, 0), metrics.height * 0.5)
+  -- TEST26: idle support follows the model's standing/swimming presentation.
+  local raft = V.require("BattleRaft")
+  local supportY
+  supportY, hover = raft.support(arena, battle, side, groundY, worldHeight, hover)
+  if V.require("SafariFooting").standing(battle,arena,side) then hover=0 end
   local yaw = atan2(target[1] - point[1], target[2] - point[2])
   if plasma then
     plasma.source={point[1],groundY+worldHeight*0.5,point[2]}
@@ -319,11 +325,11 @@ local function modelMatrix(arena, groundY, battle, side, actor, metrics)
     plasma.fx=math.sin(yaw);plasma.fz=math.cos(yaw)
   end
   local flight = FlyMotion.pose(battle, side)
-  local fx,fy,fz=point[1],groundY,point[2]
+  local fx,fy,fz=point[1],supportY,point[2]
   if flight then
     fx=fx+(target[1]-point[1])*flight.advance
     fz=fz+(target[2]-point[2])*flight.advance
-    fy=fy+flight.height
+    fy=groundY+flight.height
   end
   local model = Mat4.mul(Mat4.translate(fx, fy, fz),
     Mat4.mul(Mat4.rotateY(yaw),
@@ -349,6 +355,9 @@ local function modelMatrix(arena, groundY, battle, side, actor, metrics)
                                     (by - ay) * pull,
                                     (bz - az) * pull),
                      Mat4.mul(shrink, model))
+  end
+  if battle and battle.safari then
+    model = V.require("SafariBattleFX").model(battle,side,model,metrics,arena)
   end
   return model
 end

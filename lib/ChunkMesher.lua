@@ -604,6 +604,16 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     and tileset.id == "FOREST"
     and tostring(map.id or "") == "VIRIDIAN_FOREST"
   LG.mapId = tostring(map.id or ""):upper()
+  LG.safari = V.require("SafariReserve").enabled(map)
+  LG.coast = V.require('CinnabarCoast')
+  LG.cinnabarCoast = LG.coast.enabled(LG.mapId,CommunityVisuals.customRoads(),tileset.id)
+  LG.harbor = V.require('VermilionHarbor')
+  LG.vermilionHarbor = LG.harbor.enabled(LG.mapId,CommunityVisuals.customRoads(),tileset.id)
+  LG.park=V.require('CeladonPark')
+  LG.celadonPark=LG.park.enabled(LG.mapId,CommunityVisuals.customRoads(),tileset.id,CommunityVisuals.referenceBuildings())
+  LG.cityStreets=V.require('CityStreets')
+  LG.cityStreetEnabled=LG.cityStreets.enabled(LG.mapId,CommunityVisuals.customRoads(),tileset.id)
+  LG.routeTrail = tileset.id=='OVERWORLD' and LG.mapId=='ROUTE_11' and CommunityVisuals.customRoads()
   LG.cityGroundMap = CommunityVisuals.isCityGroundMap(map)
   -- CITY GROUND owns Lavender/Fuchsia independently of the broad GRASS row.
   LG.legendaryCityGround = LG.cityGroundMap and CommunityVisuals.customCityGround()
@@ -908,6 +918,20 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     else                                                 -- west, at x0
       c = { { x0, y0, z0 }, { x0, y0, z1 }, { x0, y1, z1 }, { x0, y1, z0 } }
     end
+    -- TEST85: Celadon's path donor includes brick panels and prop colors.
+    -- Exposed pond banks must use only its neutral stone panel, just like
+    -- authored masonry faces, rather than wrapping the entire donor tile.
+    if (LG.mapId=='CELADON_CITY' or LG.cityStreetEnabled) and tileset.id=='OVERWORLD'
+        and tile==KANTO_PATH_SWATCH_TILE and CommunityVisuals.customRoads() then
+      return LG.materialFace(c,tile,shade,1,x0,z0)
+    end
+    -- TEST22: the first wood-donor row contains decorative swatches.
+    -- Vertical deck bands must sample grain, never that palette strip.
+    if tileset.id=='OVERWORLD' and tile==KANTO_WOOD_TILE
+        and CommunityVisuals.customRoads() then
+      vTop=1.2+math.max(0,math.min(8,vTop))*.825
+      vBot=1.2+math.max(0,math.min(8,vBot))*.825
+    end
     local u0, u1, v0, v1 = uvRect(tile, vTop, vBot)
     push(c, { { u0, v1 }, { u1, v1 }, { u1, v0 }, { u0, v0 } }, shade)
   end
@@ -1104,39 +1128,11 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     return n / 104729
   end
 
-  local function forestNoise(a, b, salt)
-    local n = (a * 73856093 + b * 19349663 + salt * 83492791) % 104729
-    if n < 0 then n = n + 104729 end
-    n = (n * n * 37 + n * 17 + salt * 101) % 104729
-    return n / 104729
-  end
-
-  -- Rotate and crop the four related forest-floor donors by stable world
-  -- position, then apply a subtle continuous broad tone. This removes the
-  -- repeated 8px dot grid without introducing a second floor pass.
+  -- TEST93: one quad per existing forest floor tile, with a continuous
+  -- world-space material. No enlarged ROM pixels or extra ground geometry.
   local function forestGroundTop(tx, ty, x0, z0, h, tile, shade)
-    local u0, u1, v0, v1 = uvRect(tile, 0, 8)
-    local turn = math.floor(forestNoise(tx, ty, 397) * 8)
-    local sample = math.floor(forestNoise(tx, ty, 409) * 5)
-    local span = sample == 0 and 1 or 0.62
-    local offU = (sample == 2 or sample == 4) and 0.38 or 0
-    local offV = (sample == 3 or sample == 4) and 0.38 or 0
-    local mirror, rot = turn >= 4, turn % 4
-    local uv = {}
-    for i = 1, 4 do
-      local du = (i == 2 or i == 3) and 1 or 0
-      local dv = (i >= 3) and 1 or 0
-      if mirror then du = 1 - du end
-      if rot == 1 then
-        du, dv = 1 - dv, du
-      elseif rot == 2 then
-        du, dv = 1 - du, 1 - dv
-      elseif rot == 3 then
-        du, dv = dv, 1 - du
-      end
-      du, dv = offU + du * span, offV + dv * span
-      uv[i] = { u0 + (u1 - u0) * du, v0 + (v1 - v0) * dv }
-    end
+    local u0,u1,v0,v1=uvRect(tile,0,8)
+    local u,v=(u0+u1)*.5,(v0+v1)*.5
     local c = { { x0, h, z0 }, { x0 + 8, h, z0 },
                 { x0 + 8, h, z0 + 8 }, { x0, h, z0 + 8 } }
     local lit = aoShades(tx, ty, h, shade)
@@ -1147,7 +1143,12 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                          + math.sin(gx * 0.09 - gz * 0.21) * 0.025
       varied[i] = (perCorner and lit[i] or lit) * tone
     end
-    push(c, uv, varied)
+    local material=LG.safari and V.require('SafariReserve').groundMaterial(tile) or 'forestFloor'
+    if material=='safariStone' then
+      push(c,V.require('SafariMaterials').uv(u0,u1,v0,v1,tx,ty),varied)
+    else
+      push(c,{{u,v},{u,v},{u,v},{u,v}},V.require('ReferenceMaterials').encode(material,varied))
+    end
   end
 
   -- TEST36 warm cave materials. Ordinary top surfaces use solid atlas donors;
@@ -1570,6 +1571,8 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   end
 
   local function ledgeRockTop(tx, ty, x0, z0, h, tile, shade)
+    local previousPush=push
+    if tileset.id=='OVERWORLD' and CommunityVisuals.customWalls() then push=V.require('DockGlow').masonry(push)end
     local x1, z1 = x0 + 8, z0 + 8
     local uvDark = rockUV(tile, ROCK_TEXEL.dark)
     local uvShadow = rockUV(tile, ROCK_TEXEL.shadow)
@@ -1604,7 +1607,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
               local variation = rockNoise(col, row, 3)
               local uv = variation > 0.82 and uvLight
                          or variation < 0.16 and uvShadow or uvBody
-              local tone = 0.91 + rockNoise(col, row, 4) * 0.13
+              local tone = 0.82 + rockNoise(col, row, 4) * 0.29
               topSolid({ { sx, h + 0.12, sz }, { ex, h + 0.12, sz },
                           { ex, h + 0.12, ez }, { sx, h + 0.12, ez } },
                         uv, shade, tone, x0, z0)
@@ -1613,6 +1616,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
         end
       end
     end
+    push=previousPush
   end
 
   local function pathExtent(tx, ty, dx, dy)
@@ -1693,7 +1697,333 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   -- TEST422 ordinary roads are exactly one flat quad. Fine atlas grain and
   -- continuous world-space corner shading provide depth without seams,
   -- bricks, cracks, floating marks, or additional collision geometry.
+  -- Selective TEST16 decorations; road and brick builders stay at the working baseline.
+  LG.gardens = V.require("WorldGardens")
+  LG.surface = V.require("SurfaceCraft")
+  LG.bridgeCraft = V.require("BridgeCraft")
+  LG.waterGarden = V.require("WaterGarden")
+  -- The sidecar is drawn with terrain for shadows/reflections, then replayed
+  -- after water using the scene depth buffer. Never replay the whole terrain.
+  LG.lilies = V.require('CinnabarLilies')
+  LG.lilyChecked = {}
+  function LG.lilyClass(tx,tz)
+    if isKantoWoodAt(tx,tz) then return 'dock' end
+    local shape=S.shapeAt[keyOf(tx,tz)]
+    return shape and shape.class
+  end
+  function LG.lilyFace(c,swatch,tone,x0,z0)
+    local original=push
+    if visualSinks then
+      local id=LG.lilies.VISUAL_ID
+      visualSinks[id]=visualSinks[id] or newSink()
+      push=visualSinks[id].push
+    end
+    LG.pathFace(c,KANTO_PATH_SWATCH_TILE,swatch,1,tone,x0,z0)
+    push=original
+  end
+  function LG.celadonPavingFace(c,swatch,shade,tone,x0,z0)
+    if swatch=='pavingBand' then return topSolid(c,rockUV(KANTO_PATH_SWATCH_TILE,{0,0}),shade,tone,x0,z0)end
+    if swatch=='limestone' then return topSolid(c,rockUV(KANTO_PATH_SWATCH_TILE,{4,0}),shade,tone,x0,z0)end
+    local band=swatch=='roseBrick' and 1 or swatch=='clayBrick' and 2 or swatch=='wineBrick' and 3 or 0
+    local ax,ay=(KANTO_PATH_SWATCH_TILE%perRow)*8,math.floor(KANTO_PATH_SWATCH_TILE/perRow)*8
+    local uv={}
+    for i,v in ipairs(c)do
+      uv[i]={(ax+(band%2)*4+.015+(v[1]-x0)*3.97/8)/atlasW,(ay+1+math.floor(band/2)*3+.015+(v[3]-z0)*2.97/8)/atlasH}
+    end
+    push(c,uv,shadeRect(c,shade,1,x0,x0+8,3,z0,z0+8,tone))
+  end
+  function LG.pathFace(c,tile,swatch,shade,tone,x0,z0)
+    if (LG.cinnabarCoast or LG.vermilionHarbor) and tile==KANTO_PATH_SWATCH_TILE and (swatch=='body' or swatch=='cinder' or swatch=='sand') then
+      local band=swatch=='cinder' and 1 or swatch=='sand' and 2 or 0
+      local ax,ay=(tile%perRow)*8,math.floor(tile/perRow)*8
+      local uv={}
+      for i,v in ipairs(c)do uv[i]={(ax+band*8/3+.10+(v[1]-x0)*.305)/atlasW,(ay+1.2+(v[3]-z0)*.825)/atlasH} end
+      return push(c,uv,shadeRect(c,shade,1,x0,x0+8,3,z0,z0+8,tone))
+    end
+    if LG.mapId=='CELADON_CITY' and tile==KANTO_PATH_SWATCH_TILE and swatch=='body' then return LG.celadonPavingFace(c,'stonePaving',shade,tone,x0,z0)end
+    if LG.cityStreetEnabled and tile==KANTO_PATH_SWATCH_TILE and swatch=='body' then return LG.citySurfaceFace(c,'stonePaving',shade,tone,x0,z0)end
+    local turf=swatch=='turf'
+    if turf then tile=KANTO_GRASS_TILE;swatch='body' end
+    -- Decoration colors occupy only the approved deck donor, never path/brick texels.
+    if swatch=='moss' or swatch=='petal' or swatch=='leaf' or swatch=='glass' then tile=KANTO_WOOD_TILE end
+    if swatch~="body" then return topSolid(c,rockUV(tile,(swatch=="moss" and {4,0} or swatch=="petal" and {5,0} or swatch=="leaf" and {6,0} or swatch=="glass" and {7,0} or ROCK_TEXEL[swatch])),shade,tone,x0,z0) end
+    local ax,ay=(tile%perRow)*8,math.floor(tile/perRow)*8
+    local uv={}
+    for i,v in ipairs(c)do
+      if turf then
+        local u,w=(v[1]-x0)/8,(v[3]-z0)/8
+        local rot=math.floor(LG.surface.hash(x0,z0,281)*4)
+        if rot==1 then u,w=w,1-u elseif rot==2 then u,w=1-u,1-w elseif rot==3 then u,w=1-w,u end
+        uv[i]={(ax+.02+u*7.96)/atlasW,(ay+.02+w*7.96)/atlasH}
+      else uv[i]={(ax+.20+(v[1]-x0)*.95)/atlasW,(ay+1.2+(v[3]-z0)*.825)/atlasH}end
+    end
+    push(c,uv,shadeRect(c,shade,1,x0,x0+8,3,z0,z0+8,tone))
+  end
+  function LG.materialFace(c,tile,shade,tone,x0,z0,endgrain)
+    local lo,hi={math.huge,math.huge,math.huge},{-math.huge,-math.huge,-math.huge}
+    for _,v in ipairs(c)do for j=1,3 do lo[j]=math.min(lo[j],v[j]);hi[j]=math.max(hi[j],v[j])end end
+    local order={1,2,3};table.sort(order,function(a,b)return hi[a]-lo[a]>hi[b]-lo[b]end)
+    local uaxis,vaxis=order[2],order[1];local ax,ay=(tile%perRow)*8,math.floor(tile/perRow)*8
+    local uv={}
+    for i,v in ipairs(c)do
+      local u=(v[uaxis]-lo[uaxis])/math.max(.001,hi[uaxis]-lo[uaxis])
+      local w=(v[vaxis]-lo[vaxis])/math.max(.001,hi[vaxis]-lo[vaxis])
+      local uu,vv
+      if endgrain then uu=6.1+u*1.75;vv=6.1+w*1.75
+      else uu=.2+u*5.5;vv=1.2+w*4.5 end
+      if (LG.cinnabarCoast or LG.vermilionHarbor) and tile==KANTO_PATH_SWATCH_TILE then uu=.1+u*2.43 end
+      if (LG.mapId=='CELADON_CITY' or LG.cityStreetEnabled) and tile==KANTO_PATH_SWATCH_TILE then uu=.02+u*3.96;vv=1.02+w*2.96 end
+      uv[i]={(ax+uu)/atlasW,(ay+vv)/atlasH}
+    end
+    push(c,uv,shadeRect(c,shade,1,x0,x0+8,3,z0,z0+8,tone))
+  end
+  function LG.cityPlan()
+    if not LG.cityStreetPlan then
+      local variant=tostring(LG.grassReplacement)..tostring(CommunityVisuals.customCourtyards())
+      S.cityStreetPlans91=S.cityStreetPlans91 or {}
+      if not S.cityStreetPlans91[variant] then S.cityStreetPlans91[variant]=LG.cityStreets.plan(map,S,keyOf,{grassEnabled=LG.grassReplacement,courtyard=isKantoCourtyardAt})end
+      LG.cityStreetPlan=S.cityStreetPlans91[variant]
+    end
+    return LG.cityStreetPlan
+  end
+  function LG.citySurfaceFace(c,mat,shade,tone,x0,z0)
+    if mat=='basinWater' then
+      local ax,ay=(KANTO_PATH_SWATCH_TILE%perRow)*8,math.floor(KANTO_PATH_SWATCH_TILE/perRow)*8
+      local uv={}
+      for i,p in ipairs(c)do uv[i]={(ax+.08+((p[1]-x0)/8)*7.84)/atlasW,(ay+7.08+((p[3]-z0)/8)*.84)/atlasH}end
+      return push(c,uv,shadeRect(c,shade,1,x0,x0+8,3,z0,z0+8,tone))
+    end
+    if mat=='canopy' then return LG.materialFace(c,KANTO_GRASS_TILE,shade,tone,x0,z0)end
+    if mat=='stone' then mat='cityBorder' end
+    if mat=='cityAccent' then mat='wineBrick' end
+    if mat=='flowerWhite' then return LG.pathFace(c,KANTO_PATH_SWATCH_TILE,'light',shade,tone,x0,z0)end
+    if mat=='flowerViolet' then mat='cityFlower' end
+    if mat=='glass' then
+      local glow=shadeRect(c,shade,1,x0,x0+8,3,z0,z0+8,tone)
+      if type(glow)=='table' then for i=1,4 do glow[i]=glow[i]+64 end else glow=glow+64 end
+      return pushSolid(c,rockUV(KANTO_WOOD_TILE,{7,0}),glow)
+    end
+    if mat=='wood' then return LG.materialFace(c,KANTO_WOOD_TILE,shade,tone,x0,z0)end
+    if mat=='cityFlower' then
+      -- Each region uses one existing flower swatch; no atlas growth.
+      return LG.pathFace(c,KANTO_PATH_SWATCH_TILE,'petal',shade,tone,x0,z0)
+    end
+    if mat=='soil' then return topSolid(c,rockUV(KANTO_WOOD_TILE,{1,0}),shade,.65*tone,x0,z0)end
+    if mat=='shadow' or mat=='dark' or mat=='leaf' or mat=='petal' or mat=='light' then
+      return LG.pathFace(c,KANTO_PATH_SWATCH_TILE,mat,shade,tone,x0,z0)
+    end
+    local band=mat=='cityBorder' and 1 or mat=='wineBrick' and 2 or mat=='pavingBand' and 3 or 0
+    local ax,ay=(KANTO_PATH_SWATCH_TILE%perRow)*8,math.floor(KANTO_PATH_SWATCH_TILE/perRow)*8
+    local uv={};local lo,hi={math.huge,math.huge,math.huge},{-math.huge,-math.huge,-math.huge}
+    for _,v in ipairs(c)do for i=1,3 do lo[i]=math.min(lo[i],v[i]);hi[i]=math.max(hi[i],v[i])end end
+    local vertical=hi[2]-lo[2]>.3
+    for i,v in ipairs(c)do
+      local u,w=(v[1]-x0)/8,(v[3]-z0)/8
+      if vertical then
+        u=(hi[1]-lo[1]>hi[3]-lo[3] and v[1]-lo[1] or v[3]-lo[3])/8
+        w=(v[2]-lo[2])/math.max(.01,hi[2]-lo[2])
+      end
+      uv[i]={(ax+band%2*4+.03+math.max(0,math.min(1,u))*3.94)/atlasW,
+             (ay+1+math.floor(band/2)*3+.03+math.max(0,math.min(1,w))*2.94)/atlasH}
+    end
+    push(c,uv,shadeRect(c,shade,1,x0,x0+8,3,z0,z0+8,tone))
+  end
+  function LG.cityFixtures(tx,ty,x,z,h,shade)
+    local plan=LG.cityPlan()
+    for _,q in ipairs(plan.approachCells[keyOf(tx,ty)] or {})do
+      LG.cityStreets.approach(x,z,h,q,function(c,mat,tone)
+        LG.citySurfaceFace(c,mat,shade,tone,x,z)
+      end,LG.mapId)
+    end
+    for _,f in ipairs(plan.cells[keyOf(tx,ty)] or {})do
+      LG.cityStreets.fixture(x,z,h,f,function(q,mat,tone)
+        LG.citySurfaceFace(q,mat,shade,tone,x,z)
+      end,LG.mapId)
+    end
+  end
+  function LG.coastFixtures(tx,ty,x,z,h,shade)
+    if not S.cinnabarFurniture90 then S.cinnabarFurniture90=V.require('CinnabarPromenade').plan(map,S,keyOf)end
+    for _,f in ipairs(S.cinnabarFurniture90.cells[keyOf(tx,ty)]or {})do
+      V.require('CinnabarPromenade').build(x,z,h,f,function(q,mat,tone)
+        if mat=='wood'then return LG.materialFace(q,KANTO_WOOD_TILE,shade,tone,x,z)end
+        local swatches={cityBorder='sand',stonePaving='body',pavingBand='dark',canopy='leaf',flowerWhite='light',flowerViolet='petal',soil='shadow',cityAccent='cinder'}
+        LG.pathFace(q,KANTO_PATH_SWATCH_TILE,swatches[mat]or mat,shade,tone,x,z)
+      end)
+    end
+  end
+  function LG.coastEdges(tx,ty)
+      local here=S.shapeAt[keyOf(tx,ty)]
+      if not here or here.class~='ground' then return {} end
+      local edges={plant=not S.skip[keyOf(tx,ty)]}
+      for _,d in ipairs({{'w',-1,0},{'e',1,0},{'n',0,-1},{'s',0,1}})do
+        local near=S.shapeAt[keyOf(tx+d[2],ty+d[3])]
+        edges[d[1]]=near and (near.class=='water' or near.class=='building')
+        edges['water_'..d[1]]=near and near.class=='water'
+      end
+      for _,warp in ipairs(map.def.warps or {})do
+        if math.abs(tx-(warp.x*2+.5))<=2 and math.abs(ty-(warp.y*2+.5))<=2 then edges={} end
+      end
+      for dz=-1,1 do for dx=-1,1 do
+        local near=S.shapeAt[keyOf(tx+dx,ty+dz)]
+        if near and near.class=='signpost' then edges.plant=false end
+        if isKantoWoodAt(tx+dx,ty+dz) then edges={} end
+      end end
+      return edges
+  end
+  function LG.harborCourtAt(tx,ty)
+    if not LG.vermilionHarbor then return false end
+    if not LG.harborPlan then LG.harborPlan=V.require('VermilionLayout').plan(map,S,keyOf,isKantoPathAt,isKantoWoodAt) end
+    local c=LG.harborPlan.cells[keyOf(tx,ty)]
+    return c and c.inCourt
+  end
+  function LG.parkCell(tx,ty)
+    if not LG.celadonPark then return nil end
+    if not LG.parkPlan then LG.parkPlan=LG.park.plan(map,S,keyOf,function(x,z)
+      return LG.park.paved(S.tileAt[keyOf(x,z)],isKantoCourtyardAt(x,z))
+    end) end
+    return LG.parkPlan.cells[keyOf(tx,ty)]
+  end
+  function LG.trailFace(c,swatch,tone,x0,z0,shade)
+    if swatch=='earth' or swatch=='body' then
+      local tile=KANTO_PATH_SWATCH_TILE
+      local ax,ay=(tile%perRow)*8,math.floor(tile/perRow)*8
+      local uv={};local band=swatch=='earth' and 4 or 0
+      for i,v in ipairs(c)do uv[i]={(ax+band+.12+(v[1]-x0)*.45)/atlasW,(ay+1.2+(v[3]-z0)*.825)/atlasH}end
+      push(c,uv,shadeRect(c,shade,1,x0,x0+8,3,z0,z0+8,tone))
+    else LG.pathFace(c,KANTO_PATH_SWATCH_TILE,swatch,shade,tone,x0,z0) end
+  end
   local function kantoPavedTop(tx, ty, x0, z0, h, shade)
+    local parkCell=LG.parkCell(tx,ty)
+    if parkCell then
+      local oldPush=push
+      push=LG.coast.lightPush(push,LG.parkPlan.lamps,h)
+      LG.park.build(x0,z0,h,parkCell,function(c,swatch,tone)
+        if swatch=='pavingBand' or swatch=='roseBrick' or swatch=='clayBrick' or swatch=='wineBrick' or swatch=='limestone' or swatch=='stonePaving' then LG.celadonPavingFace(c,swatch,shade,tone,x0,z0)
+        elseif swatch=='glass' then
+          local glow=shadeRect(c,shade,1,x0,x0+8,3,z0,z0+8,tone)
+          if type(glow)=='table' then for i=1,4 do glow[i]=glow[i]+64 end else glow=glow+64 end
+          pushSolid(c,rockUV(KANTO_WOOD_TILE,{7,0}),glow)
+        elseif swatch=='body' then LG.pathFace(c,KANTO_PATH_SWATCH_TILE,'body',shade,tone,x0,z0)
+        elseif swatch=='stone' then LG.materialFace(c,KANTO_PATH_SWATCH_TILE,shade,tone,x0,z0)
+        elseif swatch=='canopy' then LG.materialFace(c,KANTO_GRASS_TILE,shade,tone,x0,z0)
+        elseif swatch=='flowerWhite' or swatch=='flowerViolet' or swatch=='soil' then
+          local col=swatch=='flowerWhite' and 4 or swatch=='flowerViolet' and 5 or 6
+          topSolid(c,rockUV(KANTO_PATH_SWATCH_TILE,{col,0}),shade,tone,x0,z0)
+        elseif swatch=='wood' then LG.materialFace(c,KANTO_WOOD_TILE,shade,tone,x0,z0)
+        else LG.pathFace(c,KANTO_PATH_SWATCH_TILE,swatch,shade,tone,x0,z0) end
+      end)
+      push=oldPush
+      return
+    end
+    if LG.mapId=='CELADON_CITY' and tileset.id=='OVERWORLD' and CommunityVisuals.customRoads() then
+      if not LG.celadonStreetLayout then LG.celadonStreetLayout=V.require('CeladonStreetLayout').new(map,S,keyOf)end
+      local style,edges=LG.celadonStreetLayout.cell(tx,ty)
+      V.require('CeladonPaving').build(x0,z0,h,function(c,swatch,tone)
+        LG.celadonPavingFace(c,swatch,shade,tone,x0,z0)
+      end,style,edges)
+      return
+    end
+    if LG.cityStreetEnabled then
+      local plan=LG.cityPlan();local style,edges=plan.cell(tx,ty)
+      local previous=push;push=LG.coast.lightPush(push,plan.lamps,h)
+      local function cityEmit(q,mat,tone)
+        LG.citySurfaceFace(q,mat=='stonePaving' and edges.frontage and 'cityBorder' or mat,shade,tone,x0,z0)
+      end
+      if LG.mapId=='ROUTE_17' then V.require('CyclingRoad').build(x0,z0,h,plan,cityEmit)
+      else V.require('CeladonPaving').build(x0,z0,h,cityEmit,style,edges)end
+      if not groundOnly then LG.cityFixtures(tx,ty,x0,z0,h,shade)end
+      push=previous
+      return
+    end
+    if LG.routeTrail then
+      local edges={}
+      for _,d in ipairs({{'w',-1,0},{'e',1,0},{'n',0,-1},{'s',0,1}})do
+        local k=keyOf(tx+d[2],ty+d[3]);local near=S.shapeAt[k]
+        edges[d[1]]=near and not S.skip[k] and near.class=='ground'
+          and (S.tileAt[k]==KANTO_GRASS_TILE or near.art=='grass')
+          and not (S.routeBorderTiles and S.routeBorderTiles[S.tileAt[k]])
+      end
+      V.require('RouteTrail').build(x0,z0,h,edges,map.def.warps,function(c,m,t)
+        LG.trailFace(c,m,t,x0,z0,shade)
+      end)
+      return
+    end
+    if LG.vermilionHarbor then
+      if not LG.harborPlan then
+        LG.harborPlan=V.require('VermilionLayout').plan(map,S,keyOf,isKantoPathAt,isKantoWoodAt)
+      end
+      local oldPush=push
+      local lights={}
+      for _,l in ipairs(LG.harborPlan.lamps or {})do
+        if math.abs(l[1]-(x0+4))<26 and math.abs(l[2]-(z0+4))<26 then lights[#lights+1]=l end
+      end
+      if #lights>0 then push=LG.coast.lightPush(push,lights,h) end
+      LG.harbor.build(x0,z0,h,LG.coastEdges(tx,ty),function(c,swatch,tone)
+        if swatch=='glass' then
+          local glow=shadeRect(c,shade,1,x0,x0+8,3,z0,z0+8,tone)
+          if type(glow)=='table' then for i=1,4 do glow[i]=glow[i]+64 end else glow=glow+64 end
+          pushSolid(c,rockUV(KANTO_WOOD_TILE,{7,0}),glow)
+        elseif swatch=='wood' then LG.materialFace(c,KANTO_WOOD_TILE,shade,tone,x0,z0)
+        else LG.pathFace(c,KANTO_PATH_SWATCH_TILE,swatch,shade,tone,x0,z0) end
+      end,LG.harborPlan.cells[keyOf(tx,ty)],LG.harborPlan.plaza)
+      push=oldPush
+      return
+    end
+    if LG.cinnabarCoast then
+      local edges=LG.coastEdges(tx,ty)
+      local lamps={}
+      for dz=-2,2 do for dx=-2,2 do
+        local nx,nz=tx+dx,ty+dz
+        local near=S.shapeAt[keyOf(nx,nz)]
+        if near and near.class=='ground' and not isKantoWoodAt(nx,nz) then
+          for _,lamp in ipairs(LG.coast.lamps(nx*8,nz*8,LG.coastEdges(nx,nz)))do lamps[#lamps+1]=lamp end
+        end
+      end end
+      local previousPush=push
+      push=LG.coast.lightPush(push,lamps,h)
+      LG.coast.paving(x0,z0,h,function(c,swatch,tone)
+        LG.pathFace(c,KANTO_PATH_SWATCH_TILE,swatch,shade,tone,x0,z0)
+      end,edges)
+      for _,edge in ipairs(LG.coast.frontage(x0,z0,edges))do
+        local ax,az=edge.dx~=0 and 0 or 1,edge.dx~=0 and 1 or 0
+        local function continues(nx,nz)
+          for _,other in ipairs(LG.coast.frontage(nx*8,nz*8,LG.coastEdges(nx,nz)))do if other.edge==edge.edge then return true end end
+          return false
+        end
+        edge.first=not edge.cornerStart and not continues(tx-ax,ty-az)
+        edge.last=not edge.cornerEnd and not continues(tx+ax,ty+az)
+        V.require('CinnabarRail').build(x0,z0,h,edge.dx,edge.dz,edge.post,function(c,mat,tone)
+          if mat=='wood' or mat=='woodEnd' then
+            LG.materialFace(c,KANTO_WOOD_TILE,shade,tone*1.12,x0,z0,mat=='woodEnd')
+          elseif mat=='stone' then
+            LG.materialFace(c,KANTO_PATH_SWATCH_TILE,shade,tone*1.18,x0,z0)
+          elseif mat=='glass' then
+            local paneShade=shadeRect(c,shade,1,x0,x0+8,3,z0,z0+8,tone*1.40)
+            if type(paneShade)=='table' then for i=1,4 do paneShade[i]=paneShade[i]+64 end
+            else paneShade=paneShade+64 end
+            pushSolid(c,rockUV(KANTO_WOOD_TILE,{7,0}),paneShade)
+          else topSolid(c,rockUV(KANTO_WOOD_TILE,ROCK_TEXEL.dark),shade,tone,x0,z0) end
+        end,edge.lamp,edge)
+      end
+      LG.coastFixtures(tx,ty,x0,z0,h,shade)
+      push=previousPush
+      return
+    end
+    if tileset.id=='OVERWORLD' and CommunityVisuals.customRoads() then
+      local function border(dx,dz)
+        local k=keyOf(tx+dx,ty+dz);local near=S.shapeAt[k]
+        return near and not S.skip[k] and (near.class=='water'
+          or (near.class=='ground' and S.tileAt[k]==KANTO_GRASS_TILE))
+      end
+      V.require('WalkPath').build(x0,z0,h,
+        {w=border(-1,0),e=border(1,0),n=border(0,-1),s=border(0,1)},
+        function(c,swatch,tone)
+          if swatch=='body' or swatch=='moss' then LG.pathFace(c,KANTO_PATH_SWATCH_TILE,swatch,shade,tone,x0,z0)
+          else topSolid(c,rockUV(KANTO_PATH_SWATCH_TILE,ROCK_TEXEL[swatch]),shade,tone,x0,z0)end
+        end)
+      return
+    end
+
     local x1, z1 = x0 + 8, z0 + 8
     local variant = math.floor(rockNoise(tx, ty, 422) * 4)
     push({ { x0, h, z0 }, { x1, h, z0 },
@@ -1717,6 +2047,10 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   end
 
   local function kantoCourtyardTop(tx, ty, x0, z0, h, shade)
+    -- Match adjoining walking surfaces instead of retaining the old broad slabs.
+    if tileset.id=='OVERWORLD' and CommunityVisuals.customRoads() then
+      return kantoPavedTop(tx,ty,x0,z0,h,shade)
+    end
     local x1, z1 = x0 + 8, z0 + 8
     local uvJoint = rockUV(KANTO_PATH_SWATCH_TILE, ROCK_TEXEL.dark)
     local uvShadow = rockUV(KANTO_PATH_SWATCH_TILE, ROCK_TEXEL.shadow)
@@ -1773,7 +2107,37 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   -- TEST425 plain turf remains one flat cached terrain quad. Deterministic
   -- UV rotation breaks the old maze repeat; slow world-coordinate shading
   -- supplies broad natural variation without touching tall grass or flora.
-  local function kantoGrassTop(tx, ty, x0, z0, h, shade)
+  local function kantoGrassTop(tx, ty, x0, z0, h, shade, groundOnly)
+    if LG.cinnabarCoast and not groundOnly then
+      return kantoPavedTop(tx,ty,x0,z0,h,shade)
+    end
+    if tileset.id=='OVERWORLD' and CommunityVisuals.customRoads() then
+      local function foundation(dx,dz)
+        local near=S.shapeAt[keyOf(tx+dx,ty+dz)]
+        return near and near.class=='building'
+      end
+      local safe=S.tileAt[keyOf(tx,ty)]==KANTO_GRASS_TILE and not S.skip[keyOf(tx,ty)]
+      -- Keep a generous clear neighborhood around every authored warp.
+      for _,warp in ipairs(map.def.warps or {})do
+        if math.abs(tx-(warp.x*2+.5))<=4 and math.abs(ty-(warp.y*2+.5))<=4 then safe=false end
+      end
+      local verge=safe
+      -- Road edges get short groundcover; taller plants stay off circulation.
+      for dz=-1,1 do for dx=-1,1 do if isKantoPathAt(tx+dx,ty+dz) then safe=false end end end
+      local previous=push
+      if LG.cityStreetEnabled and not groundOnly then
+        local plan=LG.cityPlan();push=LG.coast.lightPush(push,plan.lamps,h)
+        if plan.cells[keyOf(tx,ty)] or plan.approachCells[keyOf(tx,ty)] then safe=false;verge=false end
+      end
+      LG.gardens.build('lawn',LG.mapId,x0,z0,h,{
+        bed=safe and not groundOnly,verge=verge and not groundOnly,w=foundation(-1,0),e=foundation(1,0),
+        n=foundation(0,-1),s=foundation(0,1)},function(c,swatch,tone)
+          LG.pathFace(c,KANTO_PATH_SWATCH_TILE,swatch,shade,tone,x0,z0)
+        end)
+      if LG.cityStreetEnabled and not groundOnly then LG.cityFixtures(tx,ty,x0,z0,h,shade)end
+      push=previous
+      return
+    end
     local x1, z1 = x0 + 8, z0 + 8
     local variant = math.floor(rockNoise(tx, ty, 425) * 4)
     push({ { x0, h, z0 }, { x1, h, z0 },
@@ -1826,6 +2190,40 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   end
 
   function LG.lavenderPlazaTop(tx, ty, x0, z0, h, shade)
+    -- Only the existing Lavender square mask receives this one-feature trial.
+    local source=S.tileAt[keyOf(tx,ty)]
+    if LG.lavenderLegendaryGround and LG.mapId=='LAVENDER_TOWN'
+        and (((source==48 or source==57) and not S.skip[keyOf(tx,ty)])
+          or (S.skip[keyOf(tx,ty)] and S.shapeAt[keyOf(tx,ty)]
+            and S.shapeAt[keyOf(tx,ty)].class=='signpost' and LG.lavenderPlazaAt(tx,ty))) then
+      local garden=not S.skip[keyOf(tx,ty)]
+      for _,w in ipairs(map.def.warps or {})do
+        if math.abs(tx-(w.x*2+.5))<=4 and math.abs(ty-(w.y*2+.5))<=4 then garden=false end
+      end
+      for dz=-1,1 do for dx=-1,1 do
+        local near=S.shapeAt[keyOf(tx+dx,ty+dz)]
+        if S.tileAt[keyOf(tx+dx,ty+dz)]==35 or (near and near.class=='signpost')then garden=false end
+      end end
+      local function emit(c,swatch,tone)
+        if swatch=='body' then LG.pathFace(c,48,swatch,shade,tone,x0,z0)
+        else
+          local sample=swatch=='moss' and {4,0} or swatch=='petal' and {5,0}
+            or swatch=='leaf' and {6,0} or swatch=='glass' and {7,0} or ROCK_TEXEL[swatch]
+          topSolid(c,rockUV(48,sample),shade,tone,x0,z0)
+        end
+      end
+      V.require('LavenderCourtyard').build(LG.mapId,x0,z0,h,emit,
+        {garden=garden,w=not LG.lavenderPlazaAt(tx-1,ty),e=not LG.lavenderPlazaAt(tx+1,ty),
+          n=not LG.lavenderPlazaAt(tx,ty-1),s=not LG.lavenderPlazaAt(tx,ty+1)})
+      local function side(dx,dz)
+        local near=S.shapeAt[keyOf(tx+dx,ty+dz)]
+        return near and near.class=='building'
+      end
+      if garden then LG.gardens.build('bed',LG.mapId,x0,z0,h+.48,
+        {bed=true,w=side(-1,0),e=side(1,0),n=side(0,-1),s=false},emit)end
+      return
+    end
+
     local uvJoint = rockUV(48, ROCK_TEXEL.dark)
     local uvBody = rockUV(48, ROCK_TEXEL.body)
     local uvTrim = rockUV(48, ROCK_TEXEL.shadow)
@@ -1861,6 +2259,26 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
              h+0.025,uvBody,tone)
       end
     end
+    -- Retain Lavender's foundation planting, with baseline paving below it.
+    if CommunityVisuals.customRoads() then
+      local source=S.tileAt[keyOf(tx,ty)]
+      local garden=(source==48 or source==57) and not S.skip[keyOf(tx,ty)]
+      for _,w in ipairs(map.def.warps or {})do
+        if math.abs(tx-(w.x*2+.5))<=4 and math.abs(ty-(w.y*2+.5))<=4 then garden=false end
+      end
+      for dz=-1,1 do for dx=-1,1 do
+        local near=S.shapeAt[keyOf(tx+dx,ty+dz)]
+        if S.tileAt[keyOf(tx+dx,ty+dz)]==35 or (near and near.class=='signpost')then garden=false end
+      end end
+      local function side(dx,dz)
+        local near=S.shapeAt[keyOf(tx+dx,ty+dz)]
+        return near and near.class=='building'
+      end
+      if garden then LG.gardens.build('bed',LG.mapId,x0,z0,h+.04,
+        {bed=true,w=side(-1,0),e=side(1,0),n=side(0,-1),s=false},function(c,swatch,tone)
+          LG.pathFace(c,35,swatch,shade,tone,x0,z0)
+        end)end
+    end
   end
 
   function LG.legendaryLavenderTop(tx, ty, x0, z0, h, shade, tile)
@@ -1889,6 +2307,12 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   -- world-space end joints and sparse grain strokes remove the old orange
   -- eight-pixel repeat without turning the bridge into a high-frequency mat.
   local function kantoWoodTop(tx, ty, x0, z0, h, shade, axisOverride)
+    local previousPush=push
+    if tileset.id=='OVERWORLD' and CommunityVisuals.customRoads() then
+      push=V.require('DockGlow').wrap(push,tx,ty,h,isKantoWoodAt,function(x,z)
+        local near=S.shapeAt[keyOf(x,z)];return near and near.class=='water'
+      end)
+    end
     local axis = axisOverride
                  or ChunkMesher.kantoWoodAxis(isKantoWoodAt, tx, ty)
     local across0, across1 = x0, x0 + 8
@@ -1905,6 +2329,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
               uvDark, shade, 0.92, x0, z0)
 
     local boardDepth, boardLength, gap, salt = 3.2, 13.0, 0.11, 220
+    if LG.mapId=='ROUTE_24' then boardDepth,boardLength,gap=4.8,24,.09 end
     local firstRow = math.floor((along0 - boardDepth) / boardDepth) - 1
     local lastRow = math.ceil((along1 + boardDepth) / boardDepth) + 1
     for row = firstRow, lastRow do
@@ -1932,9 +2357,22 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
               local variation = rockNoise(col, row, salt + 2)
               local uv = variation > 0.88 and uvLight
                          or variation < 0.12 and uvShadow or uvBody
-              local tone = 0.94 + rockNoise(col, row, salt + 3) * 0.11
-              topSolid(woodRect(axis, sc, ec, sa, ea, h + 0.06),
-                        uv, shade, tone, x0, z0)
+              local tone = 1.04 + rockNoise(col, row, salt + 3) * 0.11
+              LG.pathFace(woodRect(axis, sc, ec, sa, ea, h + 0.22),
+                        KANTO_WOOD_TILE, "body", shade, tone, x0, z0)
+              -- Recessed seams, raised worn board lips, and paired iron pins.
+              topSolid(woodRect(axis,sc,ec,sa,math.min(ea,sa+.10),h+.23),
+                       uvLight,shade,tone*.85,x0,z0)
+              topSolid(woodRect(axis,sc,ec,math.max(sa,ea-.10),ea,h+.23),
+                       uvShadow,shade,tone,x0,z0)
+              for _,pinC in ipairs({c0+.55,c1-.55})do
+                for _,pinA in ipairs({a0+.5,a1-.5})do
+                  if pinC-.09>=sc and pinC+.09<=ec and pinA-.09>=sa and pinA+.09<=ea then
+                    topSolid(woodRect(axis,pinC-.09,pinC+.09,pinA-.09,pinA+.09,h+.235),
+                             uvDark,shade,.65,x0,z0)
+                  end
+                end
+              end
 
               if ec - sc > 2.6 and rockNoise(col, row, salt + 4) > 0.48 then
                 local grainA = sa + (ea - sa) * 0.68
@@ -1942,7 +2380,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                 if grainC1 > grainC0 then
                   topSolid(woodRect(axis, grainC0, grainC1,
                                      grainA, math.min(ea, grainA + 0.055),
-                                     h + 0.065),
+                                     h + 0.225),
                             uvShadow, shade, tone * 0.94, x0, z0)
                 end
               end
@@ -1951,6 +2389,35 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
         end
       end
     end
+    for _,edge in ipairs({{-1,0},{1,0},{0,-1},{0,1}})do
+      local near=S.shapeAt[keyOf(tx+edge[1],ty+edge[2])]
+      if near and near.class=='water' then
+        local along=edge[1]~=0 and ty or tx
+        local ending=edge[1]~=0 and (not isKantoWoodAt(tx,ty-1) or not isKantoWoodAt(tx,ty+1))
+          or edge[1]==0 and (not isKantoWoodAt(tx-1,ty) or not isKantoWoodAt(tx+1,ty))
+        if LG.cinnabarCoast and (ending or along%4==0) then
+          LG.coast.dock(x0,z0,h,edge[1],edge[2],function(c,swatch,tone)
+            LG.pathFace(c,KANTO_WOOD_TILE,swatch,shade,tone,x0,z0)
+          end)
+        end
+        LG.bridgeCraft.build(x0,z0,h,edge[1],edge[2],ending or along%(LG.mapId=='ROUTE_24' and 6 or 2)==0,function(c,mat,tone)
+          if mat=='wood' or mat=='woodEnd' then
+            LG.materialFace(c,KANTO_WOOD_TILE,shade,tone*(.99+rockNoise(tx,ty,247)*.23),x0,z0,mat=='woodEnd')
+          elseif mat=='stone' then
+            LG.materialFace(c,KANTO_PATH_SWATCH_TILE,shade,tone*1.23,x0,z0)
+          elseif mat=='glass' then
+            -- Explicit pane tag avoids lighting wood, flowers or lily centres
+            -- that share this atlas. Stored in the existing float shade channel.
+            local paneShade=shadeRect(c,shade,1,x0,x0+8,3,z0,z0+8,tone*1.40)
+            if type(paneShade)=='table' then
+              for i=1,4 do paneShade[i]=paneShade[i]+64 end
+            else paneShade=paneShade+64 end
+            pushSolid(c,rockUV(KANTO_WOOD_TILE,{7,0}),paneShade)
+          else topSolid(c,rockUV(KANTO_WOOD_TILE,ROCK_TEXEL.dark),shade,tone,x0,z0)end
+        end, ending or along%(LG.mapId=='ROUTE_24' and 12 or 4)==0)
+      end
+    end
+    push=previousPush
   end
 
   local function faceAxisPoint(d, x0, z0, axis, y, out)
@@ -1962,6 +2429,8 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
 
   local function ledgeRockSide(d, tx, ty, x0, z0, y0, y1,
                                tile, shade)
+    local previousPush=push
+    if tileset.id=='OVERWORLD' and CommunityVisuals.customWalls() then push=V.require('DockGlow').masonry(push)end
     tile = RETAINING_SWATCH_TILE
     local uvDark = rockUV(tile, ROCK_TEXEL.dark)
     local uvShadow = rockUV(tile, ROCK_TEXEL.shadow)
@@ -2010,7 +2479,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
             local variation = rockNoise(col, row, 20 + d)
             local uv = variation > 0.82 and uvLight
                        or variation < 0.16 and uvShadow or uvBody
-            local tone = 0.91 + rockNoise(col, row, 30 + d) * 0.12
+            local tone = 0.82 + rockNoise(col, row, 30 + d) * 0.29
 
             sideSolid({ fbl, fbr, ftr, ftl }, uv,
                       shade, tone, d, x0, z0, y0, y1)
@@ -2033,6 +2502,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
         end
       end
     end
+    push=previousPush
   end
 
   -- A taller companion to TEST402's six-pixel ledge face.  Courses are
@@ -2041,6 +2511,8 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   -- Horizontal joints use the same six-pixel rhythm as the accepted ledges,
   -- but a different stable noise salt keeps the wall from looking stamped.
   local function retainingRockSide(d, x0, z0, y0, y1, shade, tileOverride)
+    local previousPush=push
+    if tileset.id=='OVERWORLD' and CommunityVisuals.customWalls() and not tileOverride then push=V.require('DockGlow').masonry(push)end
     local tile = tileOverride or RETAINING_SWATCH_TILE
     local uvDark = rockUV(tile, ROCK_TEXEL.dark)
     local uvShadow = rockUV(tile, ROCK_TEXEL.shadow)
@@ -2089,7 +2561,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
             local sxBottom, sxTop, exBottom, exTop = sx, sx, ex, ex
             local syLeft, syRight, eyLeft, eyRight = sy, sy, ey, ey
             local leftEdge, rightEdge = true, true
-            if tileOverride then
+            if tileOverride or (tileset.id=='OVERWORLD' and CommunityVisuals.customWalls()) then
               local spanX = ex - sx
               local spanY = ey - sy
               local xInset = math.min(0.30, spanX * 0.30)
@@ -2140,6 +2612,10 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                 brickTilt = (rockNoise(col, row, 67 + d) - 0.5) * 0.10
               end
             end
+            if not tileOverride and tileset.id=='OVERWORLD' and CommunityVisuals.customWalls() then
+              brickDepth=.18+rockNoise(col,row,606+d)*.20
+              if leftEdge and rightEdge then brickTilt=(rockNoise(col,row,607+d)-.5)*.06 end
+            end
             local function batteredDepth(salt, sideTilt)
               local cornerWear = tileOverride and leftEdge and rightEdge
                 and (rockNoise(col, row, salt + d) - 0.5) * 0.14 or 0
@@ -2181,6 +2657,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
         end
       end
     end
+    push=previousPush
   end
 
   -- TEST124 Pokemon Tower. The wall is continuous reference-matched granite,
@@ -2662,6 +3139,9 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
         -- an object stands here; paint its synthesized ground and let the
         -- prebuilt prism quads (appended below) carry the art
         local g = S.ground[k]
+        -- Synthesized building floors can retain striped facade source art.
+        -- Use neutral floor donors beneath buildings, fences and other claims.
+        if LG.cityStreetEnabled then g=LG.cityStreets.claimedGround(g)end
         if LG.lavenderLegendaryGround and LG.lavenderPlazaAt(tx,ty) then g=57 end
         if LG.route10TowerLandscapeAt(tx, ty) or LG.route10LavenderExitLawnAt(tx, ty) then
           -- These Lavender-edge floors are deliberately independent of the
@@ -2674,16 +3154,15 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           local caveKind = caveSurfaceKind({ class="ground" }, g)
           local edgeFinish=LG.cliffGroundFinishAt(tx,ty)
           if V.require("TowerGarden").contains(S,tx,ty) then edgeFinish="towerGarden" end
-          if edgeFinish=="towerGarden" then
-            local x,z=tx*8,ty*8
-            push({{x,0,z},{x+8,0,z},{x+8,0,z+8},{x,0,z+8}},
-              pavedUV(48,math.floor(rockNoise(tx,ty,1193)*4)),
-              grassShades(x,z,aoShades(tx,ty,0,1)))
+          if LG.cinnabarCoast and g==KANTO_GRASS_TILE then
+            kantoPavedTop(tx,ty,tx*8,ty*8,0,aoShades(tx,ty,0,1))
+          elseif edgeFinish=="towerGarden" then
+            kantoGrassTop(tx,ty,tx*8,ty*8,0,aoShades(tx,ty,0,1))
           elseif edgeFinish=="grass" then
             kantoGrassTop(tx,ty,tx*8,ty*8,0,aoShades(tx,ty,0,1))
           elseif edgeFinish=="path" then
             kantoPavedTop(tx,ty,tx*8,ty*8,0,aoShades(tx,ty,0,1))
-          elseif viridianForest then
+          elseif viridianForest or LG.safari then
             forestGroundTop(tx, ty, tx * 8, ty * 8, 0, 0, 1)
           elseif towerInterior then
             towerGraniteTop(tx, ty, tx * 8, ty * 8, 0,
@@ -2834,7 +3313,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
             ledgeRockTop(tx, ty, x0, z0, h, RETAINING_SWATCH_TILE,
                          aoShades(tx, ty, h, VOLUME_TOP_SHADE))
           else
-            topQuad(x0, z0, h, topTile, VOLUME_TOP_SHADE)
+            topQuad(x0, z0, h, LG.safari and s.class=="water" and 20 or topTile, VOLUME_TOP_SHADE)
           end
         else
           local topTile = s.topTile or tile
@@ -2884,7 +3363,22 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           local paved = kantoSurfaceKind(s, tile)
           local caveKind = caveSurfaceKind(s, tile)
           local edgeFinish=s.class=="ground" and LG.cliffGroundFinishAt(tx,ty)
-          if edgeFinish=="grass" then
+          if LG.cityStreetEnabled and S.cityLawnCells and S.cityLawnCells[k] then
+            kantoGrassTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1))
+          elseif tileset.id=='OVERWORLD' and (LG.customGrass or LG.legendaryCityGround)
+              and s.art=='grass' and map:isGrassCell(math.floor(tx/2),math.floor(ty/2)) then
+            -- Same turf material and shading as short grass; no new plants
+            -- underneath encounter blades. Collision and blade meshes untouched.
+            kantoGrassTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1),true)
+          elseif LG.cityStreetEnabled and s.class=='ground' and s.flat and s.art~='grass' and tile~=44 and tile~=48 and tile~=60 then
+            -- Source blank road and decorative curb tiles are also paving.
+            kantoPavedTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1))
+          elseif (LG.routeTrail or LG.cityStreetEnabled) and s.class=='ground' and s.flat and S.routeBorderTiles and S.routeBorderTiles[tile] then
+            kantoPavedTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1))
+          elseif LG.cinnabarCoast and s.class=='ground' and tile==KANTO_GRASS_TILE
+              and not map:isGrassCell(math.floor(tx/2),math.floor(ty/2)) then
+            kantoPavedTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1))
+          elseif edgeFinish=="grass" then
             kantoGrassTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1))
           elseif edgeFinish=="path" then
             kantoPavedTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1))
@@ -2900,7 +3394,8 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
             caveNaturalTop(tx, ty, x0, z0, h,
                            s.art == "upright" and VOLUME_TOP_SHADE or 1,
                            caveKind)
-          elseif viridianForest and s.class == "ground" then
+          elseif (viridianForest and (s.class == "ground" or s.art == "grass"))
+              or (LG.safari and (s.class == "ground" or s.art == "grass" or s.class == "ledge")) then
             forestGroundTop(tx, ty, x0, z0, h, topTile,
                             s.art == "upright" and VOLUME_TOP_SHADE or 1)
           elseif LG.lavenderLegendaryGround and s.class == "ground" then
@@ -2918,6 +3413,10 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
               kantoGrassTop(tx, ty, x0, z0, h,
                             aoShades(tx, ty, h, 1))
             end
+          elseif LG.vermilionHarbor and s.class=='ground' and s.flat and LG.harborCourtAt(tx,ty) then
+            kantoPavedTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1))
+          elseif LG.celadonPark and s.class=='ground' and s.flat and LG.parkCell(tx,ty) then
+            kantoPavedTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1))
           elseif isKantoCourtyardAt(tx, ty) and s.flat then
             kantoCourtyardTop(tx, ty, x0, z0, h,
                              aoShades(tx, ty, h, 1))
@@ -2949,6 +3448,10 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           -- that floor through the outdoor rock builder turned Diglett's
           -- Cave into a purple masonry walkway. Preserve the cave profile's
           -- authored top art and six-pixel elevation instead.
+          elseif LG.routeTrail and s.class=='ledge' then
+            V.require('RouteTrail').build(x0,z0,h,{},nil,function(c,m,t)
+              LG.trailFace(c,m,t,x0,z0,aoShades(tx,ty,h,1))
+            end,true)
           elseif CommunityVisuals.customWalls() and tileset.id == "OVERWORLD"
                  and s.class == "ledge" then
             ledgeRockTop(tx, ty, x0, z0, h, topTile,
@@ -2957,9 +3460,68 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
             ledgeRockTop(tx, ty, x0, z0, h, RETAINING_SWATCH_TILE,
                          aoShades(tx, ty, h, VOLUME_TOP_SHADE))
           else
-            topQuad(x0, z0, h, topTile,
+            topQuad(x0, z0, h, LG.safari and s.class=="water" and 20 or topTile,
                     s.art == "upright" and VOLUME_TOP_SHADE or 1,
                     (s.class == "water") and waterPush or nil)
+            if s.class=='water' and tileset.id=='OVERWORLD' and CommunityVisuals.customRoads() then
+              local function bank(dx,dz)
+                local near=S.shapeAt[keyOf(tx+dx,ty+dz)]
+                return near and (near.class=='ledge' or near.class=='wall' or isKantoWoodAt(tx+dx,ty+dz)
+                  or near.class=='ground')
+              end
+              local nearBank=bank(-1,0) or bank(1,0) or bank(0,-1) or bank(0,1)
+              if LG.cinnabarCoast then
+                local edges={w=bank(-1,0),e=bank(1,0),n=bank(0,-1),s=bank(0,1),plant=true}
+                for dz=-1,1 do for dx=-1,1 do
+                  if isKantoWoodAt(tx+dx,ty+dz) then edges.dock=true end
+                end end
+                for _,warp in ipairs(map.def.warps or {})do
+                  if math.abs(tx-(warp.x*2+.5))<=4 and math.abs(ty-(warp.y*2+.5))<=4 then edges.plant=false end
+                end
+                LG.coast.water(x0,z0,h,edges,function(c,swatch,tone)
+                  -- The submerged bed must not borrow the pavement donor.
+                  -- Keep every vertex/rock and its light, but give fully
+                  -- submerged stone a continuous, grid-free silt material.
+                  if swatch=='body' and c[1][2]<h-.1 and c[2][2]<h-.1
+                      and c[3][2]<h-.1 and c[4][2]<h-.1 then
+                    local shade=shadeRect(c,1,1,x0,x0+8,3,z0,z0+8,tone)
+                    pushSolid(c,rockUV(KANTO_PATH_SWATCH_TILE,{2,0}),
+                      V.require('ReferenceMaterials').encode('waterBed',shade))
+                    return
+                  end
+                  LG.pathFace(c,KANTO_PATH_SWATCH_TILE,swatch,1,tone,x0,z0)
+                end)
+                edges.lilySites=LG.lilies.sites(x0,z0,LG.lilyClass,map.def.warps,LG.lilyChecked)
+                if #edges.lilySites>0 then
+                  LG.gardens.build('shore',LG.mapId,x0,z0,h,edges,function(c,swatch,tone)
+                    LG.lilyFace(c,swatch,tone,x0,z0)
+                  end)
+                end
+              elseif LG.vermilionHarbor then
+                local D=V.require('HarborDetails')
+                local edges={w=bank(-1,0),e=bank(1,0),n=bank(0,-1),s=bank(0,1)}
+                for dz=-1,1 do for dx=-1,1 do if isKantoWoodAt(tx+dx,ty+dz) then edges.dock=true end end end
+                local function detailFace(c,swatch,tone) LG.pathFace(c,KANTO_PATH_SWATCH_TILE,swatch,1,tone,x0,z0) end
+                LG.waterGarden.build(x0,z0,h,nearBank,detailFace)
+                D.shore(x0,z0,h,edges,detailFace)
+                if D.keepLilies(x0,z0,nearBank,edges.dock) then LG.gardens.build('shore',LG.mapId,x0,z0,h,edges,detailFace) end
+              elseif LG.mapId=='ROUTE_17' and LG.cityStreetEnabled then
+                if nearBank and V.require('CyclingRoad').keepWaterPlants(x0,z0) then
+                  LG.gardens.build('shore',LG.mapId,x0,z0,h,{w=bank(-1,0),e=bank(1,0),n=bank(0,-1),s=bank(0,1)},function(c,swatch,tone)
+                    LG.pathFace(c,KANTO_PATH_SWATCH_TILE,swatch,1,tone,x0,z0)
+                  end)
+                end
+              else
+              LG.waterGarden.build(x0,z0,h,nearBank,function(c,swatch,tone)
+                LG.pathFace(c,KANTO_PATH_SWATCH_TILE,swatch,1,tone,x0,z0)
+              end)
+              if not(LG.mapId=='ROUTE_20' or LG.mapId=='ROUTE_21') or nearBank then
+              LG.gardens.build('shore',LG.mapId,x0,z0,h,{w=bank(-1,0),e=bank(1,0),n=bank(0,-1),s=bank(0,1)},function(c,swatch,tone)
+                LG.pathFace(c,KANTO_PATH_SWATCH_TILE,swatch,1,tone,x0,z0)
+              end)
+              end
+              end
+            end
           end
         end
 
@@ -3042,6 +3604,16 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                   caveNaturalSide(d, x0, z0, y0, y1, faceShade)
                 -- Match the top-face scope above: indoor CAVERN ledges keep
                 -- their own folded riser art rather than outdoor masonry.
+                elseif LG.safari and s.class=='ledge' then
+                  local u0,u1,v0,v1=uvRect(47,0,8)
+                  V.require('SafariLandscape').riser(d,x0,z0,y0,y1,faceAxisPoint,push,{u0,u1,v0,v1},faceShade)
+                elseif LG.routeTrail and s.class=='ledge' then
+                  -- Re-skin the authored riser; preserve its exact extent/height.
+                  local a=(d==5 or d==6) and x0 or z0
+                  local q={faceAxisPoint(d,x0,z0,a,y0,0),faceAxisPoint(d,x0,z0,a+8,y0,0),
+                    faceAxisPoint(d,x0,z0,a+8,y1,0),faceAxisPoint(d,x0,z0,a,y1,0)}
+                  if d==6 or d==1 then q={q[4],q[3],q[2],q[1]} end
+                  LG.materialFace(q,KANTO_PATH_SWATCH_TILE,faceShade,.72,x0,z0)
                 elseif CommunityVisuals.customWalls() and tileset.id == "OVERWORLD"
                    and s.class == "ledge" then
                   ledgeRockSide(d, tx, ty, x0, z0, y0, y1,
@@ -3116,6 +3688,19 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
 
   local scUV = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } }
   local function quadUV(q)
+    -- Native forest leaves use local 0..1 vein coordinates, not atlas UVs.
+    if q.referenceMaterial=='forestLeaf' and q.uv then return q.uv end
+    if q.harborMaterial then
+      local mat=q.harborMaterial
+      local tile=(mat=='wood' or mat=='metal' or mat=='glass') and 60 or 57
+      local ax,ay=(tile%perRow)*8,math.floor(tile/perRow)*8
+      local u=mat=='roof' and 4 or mat=='metal' and .5 or mat=='glass' and 7.5 or mat=='wood' and 2.5 or 3.5
+      -- Thin clapboards must not minify an entire high-frequency stone/wood
+      -- patch per face. Stable palette samples retain geometric relief.
+      if mat=='stone' then u=2.5 end
+      for i=1,4 do scUV[i][1]=(ax+u)/atlasW;scUV[i][2]=(ay+(mat=='roof' and 4 or .5))/atlasH end
+      return scUV
+    end
     for i = 1, 4 do
       local uv = q.uv and q.uv[i] or nil
       -- Structures builds authored props against the source tileset atlas.
@@ -3211,8 +3796,9 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
         target = visualSink.push
       end
       if target == push then ownCell(x0, z0, x1, z1) end
-      target({ q[1], q[2], q[3], q[4] }, quadUV(q),
-        groundShades(q, q.shade))
+      local shade=q.referenceMaterial and V.require('ReferenceMaterials').encode(q.referenceMaterial,q.shade)
+        or (q.referenceGlass or q.harborMaterial=='glass') and q.shade or groundShades(q, q.shade)
+      target({ q[1], q[2], q[3], q[4] }, quadUV(q),shade)
     end
   end
 
@@ -3253,7 +3839,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     -- Legendary Visuals crowns extend beyond the authored 16px owner. Resolve seam
     -- ownership at the original tree center so the complete tree is kept or
     -- dropped atomically instead of clipping individual canopy quads.
-    if st.keepTree and not keepAll and not skipAll then
+    if (st.keepTree or st.forestTree) and not keepAll and not skipAll then
       local e = .25
       keepAll = keepQuad(mx - e, mz - e, mx + e, mz + e)
       skipAll = not keepAll
@@ -3302,6 +3888,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           end
           s2[3] = c[3] + mz
         end
+        if st.forestTree then V.require('ForestTrees').expand(q,st,sc)end
         local ok = keepAll
         if not ok then
           local x0 = math.min(sc[1][1], sc[2][1], sc[3][1], sc[4][1])
@@ -3311,7 +3898,9 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           ok = keepQuad(x0, z0, x1, z1)
         end
         if ok and not st.hideCrown then
-          push(sc, quadUV(q), groundShades(sc, q.shade))
+          local shade=q.referenceMaterial and V.require('ReferenceMaterials').encode(q.referenceMaterial,q.shade)
+            or groundShades(sc,q.shade)
+          push(sc,quadUV(q),shade)
         end
       end
     end
@@ -3677,6 +4266,7 @@ local function restoreRegistrySnapshot(map, payload)
 end
 
 local function mapHasVisualObjects(map)
+  if V.require('CinnabarCoast').enabled(map.id,CommunityVisuals.customRoads(),map.tileset.id) then return true end
   -- Revision-36 caches one canonical split regardless of which companion
   -- extensions happened to be active while PRECACHE ran. Without this, a
   -- cache generated before an overworld-model provider loaded would bake the

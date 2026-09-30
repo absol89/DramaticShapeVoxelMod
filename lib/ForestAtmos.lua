@@ -74,8 +74,8 @@ end
 -- Battle Art targets the Android handheld path, so this integration locks the
 -- donor atmosphere to LOW.  That keeps the approved scene-shader haze and the
 -- guarded depth-aware beams, while omitting the donor's separate FULL particle
--- shader API that Battle Art does not own.  Falling leaves remain supplied by
--- CommunityFlora's crossed-card pass.
+-- shader API that Battle Art does not own. TEST91 suppresses drifting leaves
+-- and opens Legendary Viridian Forest to the outdoor sky.
 ForestAtmos.setting = ModSetting.new(
   "atmos", "FOREST FX", { "low", "off" }, { "LOW", "OFF" }
 )
@@ -208,7 +208,12 @@ function ForestAtmos.frame(map, t)
   fb = fb + (rb - fb) * LEAN
   local base = cfg.fog or {}
   local rays = cfg.rays or {}
+  local roam = cfg.roamFog
   return {
+    -- Free-roam override; original fog still supplies battles and rays.
+    roamFog = roam and { color = { fr, fg, fb },
+      density = (roam.density or 0) * dens,
+      start = roam.start or 0, heightK = roam.heightK or 0 } or nil,
     -- in exactly the shape Voxel3D.fog takes, so callers assign it whole
     fog = { color = { fr, fg, fb },
             density = (base.density or 0) * dens,
@@ -795,7 +800,7 @@ function ForestAtmos.draw(map)
       local _, depth = Voxel3D.beginWater(nil)
       if depth then
         say("on", "volumetric beams running")
-        local kx, kz = DayNight.shearAt(DayNight.T.day)
+        local kx, kz = DayNight.shearAt(DayNight.isOpenForest(map) and DayNight.time() or DayNight.T.day)
         local kl = sqrt(kx * kx + kz * kz + 1)
         love.graphics.setBlendMode("add", "alphamultiply")
         love.graphics.setShader(sh)
