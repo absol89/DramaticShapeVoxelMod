@@ -281,6 +281,7 @@ local function normalBallTick(arena, groundY)
   if not n.started and not n.captureOpened then
     EmberAudio.capture("throw");EmberAudio.capture("trail")
   end
+  local enemyGround=V.require("SafariFooting").ground(n.owner,arena,"enemy",groundY)
   n.started=n.started or now
   n.t = math.max(0,now-n.started)
 
@@ -420,7 +421,7 @@ local function normalBallTick(arena, groundY)
   -- read naturally with Ash standing far in the background.
   local throwT = Ballistics.THROW_SECONDS
   if not n.flight then
-    n.flight=Ballistics.launch({startX,startY,startZ},{e[1],groundY+R+6.5,e[2]},throwT)
+    n.flight=Ballistics.launch({startX,startY,startZ},{e[1],enemyGround+R+6.5,e[2]},throwT)
     -- Sample once: the button faces the thrower after the airborne tumble.
     n.flightYaw=math.atan2(startX-e[1],startZ-e[2])
   end
@@ -487,7 +488,7 @@ local function normalBallTick(arena, groundY)
     n.ball.rollAngle = 0
   end
   n.ball.pos[1], n.ball.pos[3] = cx, cz
-  n.ball.pos[2] = groundY + R + reboundY
+  n.ball.pos[2] = enemyGround + R + reboundY
   -- Face the Pokémon for intake; turn toward the trainer by first landing.
   local landingTime=math.sqrt(2*REBOUND_DROP/REBOUND_G)
   local turn=math.max(0,math.min(1,(now-(n.reboundStart or now))/landingTime))
@@ -706,7 +707,7 @@ local function monMatrix(tex, x, groundY, z, mirror)
 end
 
 -- Every mon that has something to show this frame, as (texture, matrix).
-local function monCards(arena, groundY, textures)
+local function monCards(arena, groundY, textures, battle)
   local out = {}
   if not textures then return out end
   for _, side in ipairs({ "enemy", "player" }) do
@@ -719,7 +720,8 @@ local function monCards(arena, groundY, textures)
     if tex and tex.canvas and cell then
       local mirror = (side == "player") and not tex.trainer
                      and not tex.noMirror
-      local model = monMatrix(tex, cell[1], groundY, cell[2], mirror)
+      local sideGround=V.require("SafariFooting").ground(battle,arena,side,groundY)
+      local model = monMatrix(tex, cell[1], sideGround, cell[2], mirror)
       -- Shrink the opponent about its chest and pull it into the actual 3D
       -- ball mouth during the intake window. This affects only the rendered
       -- card; the battle's authoritative Pokemon object is untouched.
@@ -734,7 +736,7 @@ local function monCards(arena, groundY, textures)
       local motion = math.max(0, math.min(1, (raw - 0.18) / 0.82))
       local q = motion * motion * (3 - 2 * motion)
         local k = math.max(0.06, 1 - 0.94 * q)
-        local ax, ay, az = cell[1], groundY + 8, cell[2]
+        local ax, ay, az = cell[1], sideGround + 8, cell[2]
         local bx = normalBall.ball.pos[1]
         local by = normalBall.ball.pos[2]
           + (Pokeball.R or 2.2) * 0.18 * (normalBall.ball.scale or 1)
@@ -747,8 +749,11 @@ local function monCards(arena, groundY, textures)
                                        (bz - az) * pullQ),
                          Mat4.mul(shrink, model))
       end
+      if battle and battle.safari and side == "enemy" then
+        model = V.require("SafariBattleFX").model(battle,side,model,nil,arena)
+      end
       out[#out + 1] = { tex = tex.canvas,
-                        side = side,
+                        side = side, trainer = tex.trainer,
                         noDayTint = tex.noDayTint,
                         model = model }
     end
@@ -972,11 +977,14 @@ local function updateSendout(battle)
   end
 end
 -- Shared by voxel arenas and the Stadium flat-scene overlay.
-function BattleScene.drawTrainerAndBall(state, battle, arena, groundY)
+function BattleScene.drawTrainerAndBall(state, battle, arena, groundY, safariTrainer)
   local q57Drawn=Q57.draw(battle)
   -- Entrance uses q57 release energy only; no legacy smoke fallback.
   local providerTrainer = false
-  if CharacterRenderers.battleActive() then
+  if battle and battle.safari then
+    if safariTrainer==nil then safariTrainer=V.require('SafariBattleFX').drawTrainer(state,battle,arena,groundY)end
+    providerTrainer=safariTrainer==true
+  elseif CharacterRenderers.battleActive() then
     providerTrainer = CharacterRenderers.first("drawBattleTrainer", {
       state = state, battle = battle, arena = arena, groundY = groundY,
       host = { Voxel3D = Voxel3D, Mat4 = Mat4,
@@ -1031,7 +1039,7 @@ function BattleScene.drawTrainerAndBall(state, battle, arena, groundY)
       -- Brief full-size color charge, then the existing intake within the same duration.
       local motion = math.max(0, math.min(1, (raw - 0.18) / 0.82))
       local q = motion * motion * (3 - 2 * motion)
-      local ax, ay, az = arena.enemy[1], groundY + 8, arena.enemy[2]
+      local ax, ay, az = arena.enemy[1], V.require("SafariFooting").ground(battle,arena,"enemy",groundY) + 8, arena.enemy[2]
       local bx = normalBall.ball.pos[1]
       local by = normalBall.ball.pos[2]
         + (Pokeball.R or 2.2) * 0.18 * (normalBall.ball.scale or 1)
@@ -1045,6 +1053,7 @@ function BattleScene.drawTrainerAndBall(state, battle, arena, groundY)
         BattleBillboard.PULL)
     end
   end
+  if battle and battle.safari then V.require('SafariBattleFX').draw(battle,arena,groundY)end
   return providerTrainer
 end
 
@@ -1054,7 +1063,7 @@ function BattleScene.renderHostedExtras(state, arena, battle, ctx)
   local groundY = BattleScene.groundY(arena.map or state.map, arena)
   normalBallTick(arena, groundY)
   updateSendout(battle)
-  Q57.prepare(battle,arena,groundY,normalBall,sendoutSides)
+  Q57.prepare(battle,arena,V.require("SafariFooting").ground(battle,arena,"enemy",groundY),normalBall,sendoutSides)
   local origin = {arena.mid[1], groundY, arena.mid[2]}
   local oldVP = Voxel3D.vp
   local oldEye, oldFocus, oldCamera = Voxel3D.eye, Voxel3D.focus, Voxel3D.camera
@@ -1155,7 +1164,7 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
   -- shared rig follows the clock on an outdoor floor and stays at noon on an
   -- indoor one, and the same tint multiplies the staged shot -- with the
   -- same window glass on whatever buildings stand in the background
-  local outdoor = host.def and Map.isOutdoor(host.def) or false
+  local outdoor = (host.def and Map.isOutdoor(host.def)) or V.require("SafariReserve").enabled(host) or false
   DayNight.applyRig(outdoor)
   -- a canopy floor (Viridian Forest) fights under the hour's tint too,
   -- with the rig and the void exactly as they were
@@ -1258,11 +1267,11 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
   local hostedCards = type(drawActors) == "table"
                       and type(drawActors.cards) == "table"
   updateSendout(battle)
-  Q57.prepare(battle,arena,groundY,normalBall,sendoutSides)
+  Q57.prepare(battle,arena,V.require("SafariFooting").ground(battle,arena,"enemy",groundY),normalBall,sendoutSides)
   local cards = (not hostedActors or hostedCards)
-                and monCards(arena, groundY, textures) or {}
+                and monCards(arena, groundY, textures, battle) or {}
   local stadium = hostedActors and {}
-    or StadiumModels.placements(arena, groundY, textures, battle)
+    or V.require("SafariFooting").placements(StadiumModels,arena,groundY,textures,battle)
   -- Prepare before terrain/model draws; a per-scene value never persists into overworld.
   Voxel3D.battleFireLight=nil
   for _,side in ipairs({"player","enemy"}) do
@@ -1290,6 +1299,10 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
   -- geometry stops.
   local sky = VoxelScene.skyColor(host, 1)
              or VoxelScene.skyShade(INDOOR_SHADE, 1)
+
+  -- Keep this flag on the existing per-frame descriptor. Capturing more
+  -- locals in the large render closure would exceed LuaJIT's upvalue limit.
+  sky.reflectWater = not flatFill and (outdoor or DayNight.isOpenForest(host))
 
   Voxel3D.camera = cam
   -- the sun is turned up for the arena and put back afterwards, so the
@@ -1339,18 +1352,39 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
         modelShadow) then
       return
     end
+    -- TEST126: outdoor arenas keep their established flat sky fill, but the
+    -- water still reflects the live sky and celestial body. beginScene only
+    -- derives skyEdge for band-painted skies; without this, FULL disables
+    -- sky reflection and the SKY fallback cannot start in an outdoor battle.
+    -- This is per-scene metadata: beginScene resets it on the next scene.
+    if sky.reflectWater then
+      Voxel3D.skyEdge = V.require("Sky").region(rh, Voxel3D.horizonY(rh))
+    end
     if artImage then
       Voxel3D.backdrop(artImage, UiBackplates.backdropOffsetPixels())
     end
     if not flatFill then
       Voxel3D.glass(false)
+      -- TEST133: mountains cover stars; nearby sky life stays in front.
+      pcall(SkyLayer.drawStars, state)
       pcall(Backdrop.draw, state)
-      pcall(SkyLayer.draw, state)
+      pcall(SkyLayer.drawForeground, state)
       Voxel3D.glass(true)
       if battleUnderlay then
         WorldUnderlay.draw({ map = host }, cx, cy, battleUnderlay)
       end
-      Voxel3D.draw(terrain, atlasFor(host), nil)
+      -- TEST95: only native Legendary forest terrain needs tree-material
+      -- filtering. The current scene eye also follows external model cameras.
+      local nativeForestBattle = V.require("ForestTrees").enabled(host,
+        CommunityVisuals.customForest()) or V.require("SafariReserve").enabled(host)
+      local function drawBattleTerrain(mesh, texture, model)
+        if nativeForestBattle then
+          Voxel3D.drawForestBattleTerrain(mesh, texture, model, arena, groundY)
+        else
+          Voxel3D.draw(mesh, texture, model)
+        end
+      end
+      drawBattleTerrain(terrain, atlasFor(host), nil)
       V.require("GameCorner").draw(host)
       LegendaryTowerExterior.drawMap(host)
       for _,nb in ipairs(neighbors)do V.require("LegendaryGarden").draw(nb.map,nil,Mat4.translate(nb.ox,0,nb.oy))end
@@ -1361,7 +1395,7 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
       -- battle void can peek through as a bright line at the edge.
       pcall(CavePerimeter.draw, host, atlasFor(host))
     for i, nb in ipairs(neighbors) do
-      Voxel3D.draw(nbMesh[i], atlasFor(nb.map),
+      drawBattleTerrain(nbMesh[i], atlasFor(nb.map),
                    Mat4.translate(nb.ox, 0, nb.oy))
     end
     for _, visual in ipairs(visuals or {}) do
@@ -1373,21 +1407,27 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
                      Mat4.translate(nb.ox, 0, nb.oy))
       end
     end
-    -- and the water over it -- PLAIN, always: the flat animated tiles, never
-    -- the reflective pass, whatever the WATER row says. The reflection is
-    -- tuned for the overworld's ladder of cameras; this shot's is PLACED --
-    -- low, tilted and framed like a picture -- and under it the pass reads
-    -- wrong: Fresnel opens all the way up, the leaned sky lands on bands the
-    -- framing never shows, and a lake-sized arena comes out as murk wearing
-    -- the tile art. The battle is a stage set, and stage water is painted.
-    -- (No mirror also means the mons need no second draw into one -- they
-    -- just composite over the water below, like everything else on the set.)
-    if water then Voxel3D.draw(water, atlasFor(host)) end
+    -- TEST119: share roaming's live ripple/reflection pass. The tile clock
+    -- above continues during native and hosted battles. Keep the same cached
+    -- terrain/pad geometry and neighbor transforms; do not mirror actors twice.
+    local waterDraws = BattleScene._waterDraws or {}
+    BattleScene._waterDraws = waterDraws
+    local waterCount = 0
+    local function addWater(mesh, texture, model, plants)
+      if not mesh then return end
+      waterCount = waterCount + 1
+      local d = waterDraws[waterCount] or {}
+      d[1], d[2], d[3], d[4] = mesh, texture, model, plants
+      waterDraws[waterCount] = d
+    end
+    addWater(water, atlasFor(host), nil, visuals)
     for i, nb in ipairs(neighbors) do
-      if nbWater and nbWater[i] then
-        Voxel3D.draw(nbWater[i], atlasFor(nb.map),
-                     Mat4.translate(nb.ox, 0, nb.oy))
-      end
+      addWater(nbWater and nbWater[i], atlasFor(nb.map),
+               Mat4.translate(nb.ox, 0, nb.oy), nbVisuals and nbVisuals[i])
+    end
+    for i = #waterDraws, waterCount + 1, -1 do waterDraws[i] = nil end
+    if waterCount > 0 then
+      VoxelScene.drawWater(waterDraws, nil, Voxel3D.drawBattleWater)
     end
     Voxel3D.glass(false)
     -- The cave fixtures are generated meshes, not atlas cards. Draw the
@@ -1404,6 +1444,10 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     if CommunityVisuals.customForest() or CommunityVisuals.customTrees() then
       pcall(CommunityFlora.battleLeaves, state, host, arena)
     end
+    end
+    -- TEST25: water-only support props, before the actors and after surface/decor.
+    if not flatFill then
+      V.require("BattleRaft").draw(host, arena, groundY, battle)
     end
     -- The mons, standing on their tiles. Depth-tested like everything else,
     -- so a ledge or a tree between the camera and a Pokemon really is in
@@ -1471,8 +1515,14 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
 
     -- Trainers, disabled integration and unavailable sides retain the exact
     -- established card path. Each available model replaces only its own side.
+    -- Safari keeps its fallback card until an actual 3D draw succeeds.
+    local safariTrainer=false
+    if battle and battle.safari then
+      safariTrainer=V.require('SafariBattleFX').drawTrainer(state,battle,arena,groundY)
+    end
     for _, card in ipairs(cards) do
-      if not StadiumModels.uses(stadium, card.side) then drawCard(card) end
+      local trainerReplaced=safariTrainer and card.side=='player' and card.trainer
+      if not trainerReplaced and not StadiumModels.uses(stadium, card.side) then drawCard(card) end
     end
 
     local failedModels = {}
@@ -1507,7 +1557,7 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     end
     -- A provider failure cannot strand a missing battler for the frame.
     for _, card in ipairs(cards) do
-      if failedModels[card.side] then drawCard(card) end
+      if failedModels[card.side] and not(safariTrainer and card.side=='player' and card.trainer) then drawCard(card) end
     end
 
     -- Legendary standing-trainer bridge. The companion 3D-player mod exports
@@ -1515,7 +1565,7 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     -- publishes the normal-battle lifetime above. Calling it here keeps the
     -- selected character depth-tested in the arena without changing Pokemon
     -- placement, combat state, the camera, or Legendary Pokeball ownership.
-    local providerTrainer = BattleScene.drawTrainerAndBall(state, battle, arena, groundY)
+    local providerTrainer = BattleScene.drawTrainerAndBall(state, battle, arena, groundY, safariTrainer)
     -- Match free roam: composite Tower fog after the opaque battlers so its
     -- world depth can veil only the portions genuinely inside a foreground bank.
     pcall(TowerGraveMist.drawBattle, host)
@@ -1568,7 +1618,8 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     local vp = Voxel3D.vp
     local pmx, pmy = BattleScene.toGB(vp, arena.player[1], groundY,
                                       arena.player[2], lx, ly, s, pw, ph)
-    local emx, emy = BattleScene.toGB(vp, arena.enemy[1], groundY,
+    local enemyGround=V.require("SafariFooting").ground(battle,arena,"enemy",groundY,host)
+    local emx, emy = BattleScene.toGB(vp, arena.enemy[1], enemyGround,
                                       arena.enemy[2], lx, ly, s, pw, ph)
     if not (pmx and emx) then return end
     -- How wide one overworld square is on screen where each mon stands, in
@@ -1579,9 +1630,9 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
                                 arena.player[2], lx, ly, s, pw, ph)
     local pr = BattleScene.toGB(vp, arena.player[1] + half, groundY,
                                 arena.player[2], lx, ly, s, pw, ph)
-    local el = BattleScene.toGB(vp, arena.enemy[1] - half, groundY,
+    local el = BattleScene.toGB(vp, arena.enemy[1] - half, enemyGround,
                                 arena.enemy[2], lx, ly, s, pw, ph)
-    local er = BattleScene.toGB(vp, arena.enemy[1] + half, groundY,
+    local er = BattleScene.toGB(vp, arena.enemy[1] + half, enemyGround,
                                 arena.enemy[2], lx, ly, s, pw, ph)
     if not (pl and pr and el and er) then return end
     out = {

@@ -84,6 +84,8 @@ ThirdPerson.ZOOM_STEP = 1.18          -- one wheel notch / key press
 ThirdPerson.ZOOM_TIME = 0.18          -- how fast the eye eases to a new one
 
 ThirdPerson.zoom = 1                  -- eased, what place() actually uses
+ThirdPerson.surfZoom = 1
+ThirdPerson.surfZoomGoal = 1
 ThirdPerson.zoomGoal = 1              -- what the input asked for
 
 -- The last-known free-roam zoom, captured while the 3RD rung is engaged (see
@@ -97,6 +99,12 @@ ThirdPerson.lastZoom = nil
 -- when the goal actually moved, so a caller can tell "zoomed" from "already
 -- at the stop" and let the input fall through.
 function ThirdPerson.stepZoom(notches)
+  if ThirdPerson.surfActive then
+    local was = ThirdPerson.surfZoomGoal
+    ThirdPerson.surfZoomGoal = math.max(0.4, math.min(2.4,
+      was * (ThirdPerson.ZOOM_STEP ^ (notches or 0))))
+    return ThirdPerson.surfZoomGoal ~= was
+  end
   local was = ThirdPerson.zoomGoal
   local goal = was * (ThirdPerson.ZOOM_STEP ^ (notches or 0))
   ThirdPerson.zoomGoal = math.max(ThirdPerson.ZOOM_MIN,
@@ -179,7 +187,7 @@ end
 
 -- The eased extension, 0 at the head and 1 at the full boom.
 function ThirdPerson.extension()
-  return ease(ThirdPerson.out)
+  return ThirdPerson.surfActive and 1 or ease(ThirdPerson.out)
 end
 
 -- Whether the boom is out far enough to be a third-person camera at all --
@@ -322,6 +330,12 @@ end
 -- target rather than easing, so picking 3RD from an orbit rung is one
 -- motion (the dive) rather than two (a dive, then a slide backwards).
 function ThirdPerson.update(dt, blend)
+  ThirdPerson.surfZoom = ThirdPerson.surfZoom + (ThirdPerson.surfZoomGoal - ThirdPerson.surfZoom)
+    * (1 - math.exp(-math.max(0,dt) / ThirdPerson.ZOOM_TIME))
+  if not ThirdPerson.selected() and not ThirdPerson.surfActive then ThirdPerson.surfLiftGoal = 0 end
+  ThirdPerson.surfDistance = (ThirdPerson.surfDistance or 0)*math.exp(-math.max(0,dt)*8)
+  local goal = ThirdPerson.surfLiftGoal or 0
+  ThirdPerson.surfLift = goal + ((ThirdPerson.surfLift or 0)-goal)*math.exp(-math.max(0,dt)*8)
   -- the player's own zoom FIRST, so everything below measures itself
   -- against the boom length this frame actually wants. A step is a request
   -- rather than a jump: three notches of wheel should read as one glide.
@@ -332,7 +346,7 @@ function ThirdPerson.update(dt, blend)
     ThirdPerson.zoom = (math.abs(zg - z) < 1e-4) and zg or z
   end
 
-  local target = ThirdPerson.selected() and 1 or 0
+  local target = (ThirdPerson.selected() or ThirdPerson.surfActive) and 1 or 0
   if target > 0 then ThirdPerson.lastZoom = ThirdPerson.zoom end
   if (blend or 0) <= 0 then
     ThirdPerson.out = target
@@ -377,8 +391,8 @@ end
 -- With the boom fully in this is exactly the first-person answer, to the
 -- pixel -- which is what makes 1ST and 3RD one rig with a number between
 -- them rather than two cameras to keep in sync.
-function ThirdPerson.place(pivot, lx, ly, lz, focus)
-  local e = ThirdPerson.extension()
+function ThirdPerson.place(pivot, lx, ly, lz, focus, surf)
+  local e = surf and 1 or ThirdPerson.extension()
   if e <= 0 then
     ThirdPerson.want, ThirdPerson.len = 0, 0
     return pivot, focus
@@ -387,12 +401,16 @@ function ThirdPerson.place(pivot, lx, ly, lz, focus)
   local up = ThirdPerson.PIVOT_LIFT * e
   local orbit = { pivot[1], pivot[2] + up, pivot[3] }
 
-  local want = ThirdPerson.reachFor() * e
+  if surf then
+    ThirdPerson.surfDistance = math.max(surf.minDistance or 90, surf.distance * ThirdPerson.surfZoom)
+  end
+  local want = surf and ThirdPerson.surfDistance
+    or math.max(ThirdPerson.reachFor() * e, (ThirdPerson.surfDistance or 0) * e)
   ThirdPerson.want = want
   local world = overworld()
   local room = ThirdPerson.reach(world, orbit, -lx, -ly, -lz, want)
   -- in instantly, out only as fast as update() allows
-  ThirdPerson.len = math.min(ThirdPerson.len, room)
+  ThirdPerson.len = surf and room or math.min(ThirdPerson.len, room)
   local len = ThirdPerson.len
 
   -- the rail offset, faded with how much boom actually survived: a camera
@@ -425,8 +443,26 @@ function ThirdPerson.place(pivot, lx, ly, lz, focus)
   local eye = { orbit[1] - lx * len + sx,
                 orbit[2] - ly * len,
                 orbit[3] - lz * len + sz }
+  if surf then
+    local radius=(surf.radius or 66)+8
+    local dx,dz=eye[1]-pivot[1],eye[3]-pivot[3]
+    if dx*dx+dz*dz < radius*radius and eye[2] < surf.top+8 then
+      -- A wall can collapse the low boom into the mount. Rebuild from an
+      -- elevated pivot so the fallback still goes through world collision.
+      orbit[2]=math.max(orbit[2],surf.top+8)
+      room=ThirdPerson.reach(world,orbit,-lx,-ly,-lz,want)
+      ThirdPerson.len=room
+      eye={orbit[1]-lx*room,orbit[2]-ly*room,orbit[3]-lz*room}
+    end
+  end
   local aim = focus and { focus[1] + sx, focus[2] + up, focus[3] + sz }
               or nil
+  if surf and aim then
+    local wide=surf.wide or 1
+    aim={pivot[1]+(aim[1]-pivot[1])*wide,
+         surf.seat+9+(aim[2]-(surf.seat+9))*wide,
+         pivot[3]+(aim[3]-pivot[3])*wide}
+  end
   return eye, aim
 end
 

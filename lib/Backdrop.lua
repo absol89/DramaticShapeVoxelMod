@@ -26,20 +26,20 @@ local okDN, DayNight = pcall(V.require, "DayNight")
 local CommunityVisuals = V.require("CommunityVisuals")
 
 local Backdrop = {}
+local Scenic = V.require("ScenicLandscape")
+local imagePath
+local lastReport
 
 local function backdropPath()
   return rawget(_G, "__ds_backdrop_path")
          or ((V.path or "mods/BATTLE_ART_VOXEL_FORK") .. "/assets/legendary/backdrop.png")
 end
 
--- TEST113: N64 DISTANT TERRAIN PROTOTYPE
--- Bring the painted horizon inward just enough to give the mountains stronger
--- silhouette/presence, and deliberately reduce the cylinder tessellation.
--- The lower segment count creates broad, almost imperceptible planar turns in
--- the far scenery -- the sort of low-poly economy an N64 background used --
--- without touching the real ChunkMesher world at all.
-local RADIUS = 760        -- slightly stronger parallax/presence than TEST112
-local SEGMENTS = 32       -- broad low-poly horizon facets; still smooth at distance
+-- TEST130: detailed painted mountains/woodland and a continuous meadow.
+-- Same world radius and regional yaw; twice the cylinder segments smooths
+-- camera turns while the real maps keep complete depth/collision ownership.
+local RADIUS = 760
+local SEGMENTS = 64
 local Y_BOTTOM = -1       -- the illustration's foot meets the world's
                           -- ground plane (community request): painted
                           -- ranges stand ON the ground instead of
@@ -50,7 +50,7 @@ local Y_BOTTOM = -1       -- the illustration's foot meets the world's
 -- plane recedes toward the painted hills instead of standing upright beneath
 -- them, while the real map (drawn later) still owns every playable surface.
 local GROUND_TEXTURE_SIZE = 96
-local GROUND_TEXTURE_SPAN = 256
+local GROUND_TEXTURE_SPAN = 128
 local Y_TOP = 230         -- tighter distant band; sky remains dominant
 local DRIFT = 1 / 24000   -- texture drift per world pixel walked
 
@@ -93,6 +93,7 @@ local function regionYaw(map)
 end
 
 local mesh, image, failed = nil, nil, false
+local meshPacked
 local underMesh, whiteImg, groundImg = nil, nil, nil
 local groundColor = { 0.62, 0.60, 0.48 }   -- until the art is read
 
@@ -116,6 +117,8 @@ end
 -- Staggered parcels, occasional broken side boundaries and very sparse dither
 -- keep the land readable without creating bands or competing with HD grass.
 local function groundTexture()
+  local detailed=Scenic.meadow()
+  if detailed then return detailed end
   if groundImg ~= nil then return groundImg or nil end
   local ok, img = pcall(function()
     local n = GROUND_TEXTURE_SIZE
@@ -171,8 +174,9 @@ local function guarded(fn)
   local g = love and love.graphics
   if not (g and g.push and g.pop) then return pcall(fn) end
   local pushed = pcall(g.push, "all")
-  pcall(fn)
+  local ok,err=pcall(fn)
   if pushed then pcall(g.pop) end
+  return ok,err
 end
 
 local OPEN_AIR_TILESETS = {
@@ -199,7 +203,7 @@ end
 
 -- the cylinder, built once: a ring of quads facing inward, uv running
 -- once around the circumference
-local function build()
+local function build(packed)
   local verts, indexMap, quads = {}, {}, 0
   for i = 0, SEGMENTS - 1 do
     local a0 = (i / SEGMENTS) * math.pi * 2
@@ -207,11 +211,22 @@ local function build()
     local x0, z0 = math.cos(a0) * RADIUS, math.sin(a0) * RADIUS
     local x1, z1 = math.cos(a1) * RADIUS, math.sin(a1) * RADIUS
     local u0, u1 = i / SEGMENTS, (i + 1) / SEGMENTS
+    -- TEST132: four atlas sectors preserve the same world cylinder/triangles.
+    -- External panorama overrides and the legacy fallback retain original UVs.
+    local a,b,c,d,e,f,g,h=u1,0,u0,0,u0,1,u1,1
+    if packed then
+      local perSector=SEGMENTS/4
+      local sector=math.floor(i/perSector)
+      local left=(i%perSector)/perSector
+      local right=((i%perSector)+1)/perSector
+      a,b=Scenic.uv(sector,right,0);c,d=Scenic.uv(sector,left,0)
+      e,f=Scenic.uv(sector,left,1);g,h=Scenic.uv(sector,right,1)
+    end
     -- wound so the painted face looks INWARD at the player
-    verts[#verts + 1] = { x1, Y_TOP, z1, u1, 0, 1 }
-    verts[#verts + 1] = { x0, Y_TOP, z0, u0, 0, 1 }
-    verts[#verts + 1] = { x0, Y_BOTTOM, z0, u0, 1, 1 }
-    verts[#verts + 1] = { x1, Y_BOTTOM, z1, u1, 1, 1 }
+    verts[#verts + 1] = { x1, Y_TOP, z1, a, b, 1 }
+    verts[#verts + 1] = { x0, Y_TOP, z0, c, d, 1 }
+    verts[#verts + 1] = { x0, Y_BOTTOM, z0, e, f, 1 }
+    verts[#verts + 1] = { x1, Y_BOTTOM, z1, g, h, 1 }
     Voxel3D.pushQuad(indexMap, quads)
     quads = quads + 1
   end
@@ -223,21 +238,24 @@ end
 -- are proportional to local XZ, so the generated field texture lies across
 -- the surface instead of stretching down it.
 local function buildUnder()
-  local verts = {}
-  for i = 0, SEGMENTS - 1 do
-    local a0 = (i / SEGMENTS) * math.pi * 2
-    local a1 = ((i + 1) / SEGMENTS) * math.pi * 2
-    local x0, z0 = math.cos(a0) * RADIUS, math.sin(a0) * RADIUS
-    local x1, z1 = math.cos(a1) * RADIUS, math.sin(a1) * RADIUS
-    verts[#verts + 1] = { 0, Y_BOTTOM, 0, 0, 0, 1 }
-    verts[#verts + 1] = { x0, Y_BOTTOM, z0,
-                          x0 / GROUND_TEXTURE_SPAN,
-                          z0 / GROUND_TEXTURE_SPAN, 1 }
-    verts[#verts + 1] = { x1, Y_BOTTOM, z1,
-                          x1 / GROUND_TEXTURE_SPAN,
-                          z1 / GROUND_TEXTURE_SPAN, 1 }
+  local verts,indices={},{}
+  local radii={0,64,128,224,320,432,544,656,RADIUS}
+  for _,radius in ipairs(radii)do
+    for i=0,SEGMENTS do
+      local angle=i/SEGMENTS*math.pi*2
+      local x,z=math.cos(angle)*radius,math.sin(angle)*radius
+      local strength=math.min(1,radius/320)*math.sin(math.pi*radius/RADIUS)
+      local height=Y_BOTTOM-strength*(1.5+1.5*math.sin(x/92)*math.cos(z/117))
+      verts[#verts+1]={x,height,z,x/GROUND_TEXTURE_SPAN,z/GROUND_TEXTURE_SPAN,1}
+    end
   end
-  return Voxel3D.newMesh(verts)
+  local stride=SEGMENTS+1
+  for row=0,#radii-2 do for col=0,SEGMENTS-1 do
+    local a=row*stride+col+1
+    local tri=row==0 and{a+1,a+stride,a+stride+1}or{a,a+stride,a+1,a+1,a+stride,a+stride+1}
+    for _,index in ipairs(tri)do indices[#indices+1]=index end
+  end end
+  return Voxel3D.newMesh(verts,indices)
 end
 
 -- the panorama itself, written next to this module by the companion mod
@@ -267,6 +285,16 @@ local function restorePaintedAlpha(x, y, r, g, b, a)
 end
 
 local function texture()
+  local wanted=backdropPath()
+  if imagePath~=wanted then
+    if image and image.release then image:release()end
+    image=nil;failed=false;imagePath=wanted
+  end
+  local builtin=(V.path or "mods/BATTLE_ART_VOXEL_FORK").."/assets/legendary/backdrop.png"
+  if backdropPath()==builtin then
+    local detailed=Scenic.panorama()
+    if detailed then return detailed,true end
+  end
   if image or failed then return image end
   local ok, img = pcall(function()
     local path = backdropPath()
@@ -329,15 +357,13 @@ function Backdrop.draw(state)
     return
   end
 
-  local tex = texture()
-  -- the chosen panorama can change while the game is running, so notice
-  -- when the published path is not the one we loaded
-  local want = backdropPath()
-  if tex and want and want ~= texPath then tex = nil end
-  if not tex then
-    texPath = want return end
-  if not mesh then
-    mesh = build()
+  local tex,packed = texture()
+  if not tex then return end
+  packed=not not packed
+  if not mesh or meshPacked~=packed then
+    if mesh and mesh.release then pcall(mesh.release,mesh)end
+    mesh = build(packed)
+    meshPacked=packed
     if not mesh then
       failed = true
       status("driver refused the backdrop mesh")
@@ -352,36 +378,58 @@ function Backdrop.draw(state)
   -- drift: the horizon slides slowly against the world, so walking a long
   -- way east moves the mountains, but never brings them closer
   local okShift = pcall(function()
-    tex:setWrap("repeat", "clamp")
+    tex:setWrap(packed and "clamp" or "repeat", "clamp")
   end)
 
-  local drew = true
-  guarded(function()
+  -- TEST20: cool distant scenery at night, smoothly following the clock.
+  -- Only the Legendary city-ground presentation; no clock/arena changes.
+  local nr,ng,nb=1,1,1
+  if CommunityVisuals.customCityGround() and okDN and DayNight then
+    local phase=DayNight.mix(DayNight.time())
+    local night=(phase.night or 0)+(phase.violet or 0)*.35
+    nr,ng,nb=1-.32*night,1-.27*night,1-.16*night
+  end
+  local drew = guarded(function()
     -- behind everything: test against depth but never write to it, so no
     -- real geometry can ever be occluded by the painting
     love.graphics.setDepthMode("lequal", false)
     -- the distant ground first, so the painted panorama draws over its rim
     underMesh = underMesh or buildUnder()
-    local ground = groundTexture()
+    local ground = V.require('SafariReserve').enabled(map)
+      and V.require('SafariMaterials').distantGround() or groundTexture()
     local fallback = ground == nil
     ground = ground or white()
     if underMesh and ground then
       if fallback then
-        love.graphics.setColor(groundColor[1], groundColor[2],
-                               groundColor[3], 1)
+        love.graphics.setColor(groundColor[1]*nr, groundColor[2]*ng,
+                               groundColor[3]*nb, 1)
       else
-        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.setColor(nr, ng, nb, 1)
       end
       Voxel3D.draw(underMesh, ground, Mat4.translate(px, 0, pz))
-      love.graphics.setColor(1, 1, 1, 1)
+      love.graphics.setColor(nr, ng, nb, 1)
     end
     local yaw, key = regionYaw(map)
     local model = Mat4.mul(Mat4.translate(px, 0, pz), Mat4.rotateY(yaw))
     Voxel3D.draw(mesh, tex, model)
   end)
   if drew then
+    -- Report once per selected material (also available in the existing status
+    -- bridge). This distinguishes an old active module, custom override, or a
+    -- failed atlas allocation without adding anything to the gameplay view.
+    local builtin=(V.path or "mods/BATTLE_ART_VOXEL_FORK").."/assets/legendary/backdrop.png"
+    local material=packed and (Scenic.panoramaStatus or "four-sector atlas")
+      or (imagePath~=builtin and ("external panorama: "..tostring(imagePath))
+          or ("legacy fallback; "..tostring(Scenic.panoramaStatus)))
+    local report="Legendary TEST134 backdrop: "..material
+    if report~=lastReport then
+      lastReport=report
+      if V.mod and V.mod.log and V.mod.log.info then
+        pcall(V.mod.log.info,V.mod.log,report)
+      end
+    end
     local yaw, key = regionYaw(map)
-    status(("drawn at r=%d, region=%s, yaw=%.1fdeg"):format(
+    status(report..("; drawn at r=%d, region=%s, yaw=%.1fdeg"):format(
       RADIUS, key ~= "" and key or "UNKNOWN", math.deg(yaw)))
   else
     status("draw failed")
@@ -389,8 +437,10 @@ function Backdrop.draw(state)
 end
 
 function Backdrop.invalidate()
+  Scenic.invalidate()
+  failed=false;lastReport=nil
   if mesh then pcall(mesh.release, mesh) end
-  mesh = nil
+  mesh = nil;meshPacked=nil
   if underMesh then pcall(underMesh.release, underMesh) end
   underMesh = nil
   if groundImg and groundImg.release then pcall(groundImg.release, groundImg) end

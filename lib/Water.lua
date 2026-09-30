@@ -78,6 +78,7 @@ local V = ...
 
 local ModSetting = V.require("ModSetting")
 local Sky = V.require("Sky")
+local Celestial = V.require("Celestial")
 local DayNight = V.require("DayNight")
 local ShadowMap = V.require("ShadowMap")
 local Mat4 = V.require("Mat4")
@@ -375,39 +376,22 @@ Water.CAST_ALPHA = 0.55
 -- than a few thousandths tears the figure apart rather than disturbing it.
 Water.CAST_WOBBLE = 0.006
 
--- How far the reflection is lifted from where a true mirror would put it,
--- in world pixels, toward the surface.
---
--- An honest mirror leaves a gap, and surfing is where it shows. Water is a
--- recessed class and groundAt does not lower what stands on a recessed one,
--- so a surfing player floats at ground level, two pixels over a surface
--- drawn at -2. Mirrored, the reflection sits two pixels under it, and the
--- four between them are open water: correct, and it reads as a reflection
--- floating loose rather than one belonging to anybody.
---
--- Worse than the four, and the reason this is a dial rather than a fix: a
--- sprite's art does not sit flush with the bottom of its card. Whatever
--- empty space it carries there appears ABOVE the card upright and BELOW the
--- anchor flipped, so the visible gap is the geometric one plus twice the
--- padding, and no amount of correct arithmetic closes it.
---
---   0   a true mirror
---   2   the reflection hangs from the waterline
---   4   joined at the character's own feet
-Water.CAST_RAISE = 6
+-- TEST129: true water-plane reflection. The old +6 sprite-padding shift
+-- lifts submerged 3D geometry through the real mount after swimming support
+-- is corrected. Actors are now depth-tested and clipped in their cast pass.
+Water.CAST_RAISE = 0
 
 -- THE MARCH. Steps are in world pixels and lengthen as they go: near the
 -- surface the reflection needs precision (a shoreline is a few pixels), far
 -- from it reach matters more than accuracy, and a geometric ramp gets both
 -- out of one loop. RAY_STEPS is compiled in -- GLSL wants a constant bound.
-Water.RAY_STEPS = 24
-Water.RAY_REFINE = 5           -- halvings once a crossing is found
+Water.RAY_STEPS = 16
+Water.RAY_REFINE = 4           -- halvings once a crossing is found
 Water.RAY_STEP = 3.0           -- world pixels in the first step
--- and the ratio each step after it. 3 x (1.18^24 - 1) / 0.18 is about 930
--- world pixels of reach -- three view-heights, past which a reflection is
--- faded out anyway (see the tail fade in march) and the sky is the honest
--- answer: distant water reflects haze, which is what the bands already are.
-Water.RAY_GROW = 1.18
+-- TEST10 uses fewer, wider steps for lower reflection cost.
+-- The geometric ramp preserves broad reach at reduced sampling precision;
+-- the existing tail fade still blends distant reflections into the sky.
+Water.RAY_GROW = 1.33
 -- How far behind the depth buffer a crossing may land and still count, as a
 -- multiple of the depth the step itself covered. A ray that dives far past
 -- what it crossed went BEHIND a thin thing rather than hitting it -- the
@@ -525,6 +509,10 @@ uniform vec3 dayTint;
 // nothing to land on. The frame copy is honest 8-bit colour and can stay.
 #ifndef SKY_ONLY
 uniform Image reflectTex;
+uniform Image underColor;
+uniform LOVE_HIGHP_OR_MEDIUMP Image underDepth;
+uniform mat4 inverseVP;
+uniform float underOn;
 uniform LOVE_HIGHP_OR_MEDIUMP Image depthTex;
 uniform float rays;          // 0 = sky only, 1 = march the screen too
 #endif
@@ -549,7 +537,11 @@ uniform float waveHeight;    // the tallest column, in whole world pixels
 uniform float waveSlope;     // how far a column's neighbours tilt its normal
 uniform float waveSlopeLean; // and how far the horizon lean may open that up
 uniform float waveT;
+uniform float rippleT; // continuous, independent of paused engine tile ticks
 uniform vec4 faceShade;      // the mesh's own direction shading: E, W, S, N
+uniform float gardenWater;
+uniform float reserveWater;
+uniform float atlasTileScale;
 uniform vec2 atlasSize;      // the tileset atlas, in texels
 uniform float fresnelFloor;
 uniform float fresnelCeil;
@@ -684,10 +676,17 @@ vec3 bandAt(float i) {
 // A direction whose w comes out negative is BEHIND the camera plane, which
 // for an upward reflection means near-vertical: the top band, overhead.
 float skyPos(vec3 d) {
+  // Custom water samples the existing palette by reflected elevation. A wave
+  // can point behind the camera; projecting that direction to screen space
+  // abruptly wrapped it to the darkest band, producing large oval patches.
+  if (gardenWater > .5) {
+    float elevation=asin(clamp(d.y,0.0,1.0));
+    return (1.0-elevation/1.570796327)*max(skyCount-1.0,0.0);
+  }
   vec4 c = vp * vec4(d, 0.0);
   if (c.w <= 1e-6) return 0.0;
   float py = (c.y / c.w * 0.5 + 0.5) * screen.y;
-  float row = floor(py / cell) * cell;
+  float row = mix(floor(py / cell) * cell, py, gardenWater);
   return clamp(row / max(skyEdge, 1.0), 0.0, 1.0) * skyCount;
 }
 
@@ -696,6 +695,11 @@ float skyPos(vec3 d) {
 // the same 8-bit way rather than being the one smooth thing in the frame.
 vec3 skyAt(vec3 d, float parity) {
   float pos = skyPos(d);
+  // Custom water interpolates the same sky palette; discrete sky bands must
+  // not become large, hard-edged blue patches sliding across small ripples.
+  if (gardenWater > .5) {
+    return mix(bandAt(floor(pos)), bandAt(floor(pos) + 1.0), fract(pos));
+  }
   float base = min(floor(pos), skyCount - 1.0);
   vec3 c = bandAt(base);
   if (base < skyCount - 1.0 && (pos - base) > skyStart && parity < 0.5) {
@@ -704,6 +708,7 @@ vec3 skyAt(vec3 d, float parity) {
   return c;
 }
 
+//@CELESTIAL
 float crater(vec2 p, vec2 c, float r) {
   vec2 dd = p - c;
   return step(dot(dd, dd), r * r);
@@ -724,21 +729,17 @@ vec3 bodyAt(vec3 d, vec3 c, float parity) {
     if (g * 4.0 - lvl > 0.5 && parity < 0.5) { lvl += 1.0; }
     c = mix(c, glowColor, min(lvl / 3.0, 1.0) * 0.65);
   }
-  if (ang > bodyAng) return c;
-  float t = ang / bodyAng;
-  // the dithered rim, exactly as the painted disc keeps one parity of its
-  // outer ring of cells
-  if (t > 0.86 && parity < 0.5) return c;
-  vec3 disc = (t <= 0.5) ? bodyCore : bodyMain;
-  if (bodyMoon > 0.5) {
-    // disc-local coordinates: a frame built off world up, so the craters
-    // sit on the moon the same way round every night
-    vec3 t1 = normalize(cross(vec3(0.0, 1.0, 0.0), bodyDir));
-    vec2 dc = vec2(dot(d, t1), dot(d, cross(bodyDir, t1))) / bodyAng;
-    float k = 0.0;
-//@CRATERS
-    if (k > 0.0) { disc = bodyDark; }
-  }
+  float t = ang / max(bodyAng,0.00001);
+  if (t > 1.3) return c;
+  vec3 right = cross(vec3(0.0, 1.0, 0.0), bodyDir);
+  if (dot(right,right)<0.0001) right=vec3(1.0,0.0,0.0);
+  right=normalize(right);
+  // Sky image Y points down. Keep crater orientation on the reflected body.
+  vec2 dc=vec2(dot(d,right),-dot(d,cross(bodyDir,right)))/max(bodyAng,0.00001);
+  vec3 disc=celestialSurface(dc,bodyMoon,bodyCore,bodyMain,bodyDark);
+  float edge=1.0-smoothstep(.985,1.015,t);
+  float halo=exp(-max(0.0,t-1.0)*18.0)*.10*(1.0-smoothstep(1.10,1.29,t));
+  disc=mix(c,mix(bodyCore,disc,edge),max(edge,halo));
   return disc;
 }
 
@@ -767,6 +768,13 @@ vec4 project(vec3 p) {
 // the colour found in .rgb and how much of it to believe in .a -- 0 for a
 // ray that left the frame, ran out of steps, or crossed something it went
 // straight through rather than landed on.
+float reflectedDepth(vec2 uv) {
+  if (reserveWater > .5 && underOn > .5) {
+    vec3 sceneDepthRGB = floor(Texel(underDepth,uv).rgb*255.0+.5);
+    return dot(sceneDepthRGB,vec3(65536.0,256.0,1.0))/16777215.0;
+  }
+  return Texel(depthTex,uv).r;
+}
 vec4 march(vec3 origin, vec3 dir) {
   vec4 miss = vec4(0.0, 0.0, 0.0, 0.0);
   vec3 a = origin;
@@ -778,7 +786,7 @@ vec4 march(vec3 origin, vec3 dir) {
     vec4 pb = project(b);
     if (pb.w < 0.5) return miss;
     if (pb.x < 0.0 || pb.x > 1.0 || pb.y < 0.0 || pb.y > 1.0) return miss;
-    float scene = Texel(depthTex, pb.xy).r;
+    float scene = reflectedDepth(pb.xy);
     if (pb.z > scene) {
       // how much depth this one step covered: the yardstick for whether
       // the crossing is a surface or a thin thing the ray shot past
@@ -790,7 +798,7 @@ vec4 march(vec3 origin, vec3 dir) {
       for (int k = 0; k < RAY_REFINE; k++) {
         vec3 m = (lo + hi) * 0.5;
         vec4 pm = project(m);
-        if (pm.z > Texel(depthTex, pm.xy).r) { hi = m; } else { lo = m; }
+        if (pm.z > reflectedDepth(pm.xy)) { hi = m; } else { lo = m; }
       }
       vec4 hit = project(hi);
       if (hit.w < 0.5) return miss;
@@ -832,7 +840,36 @@ vec4 march(vec3 origin, vec3 dir) {
 // and the reasoning behind their weights live; pasted in rather than sent,
 // so the speed derived from those same numbers cannot drift from the field
 // they describe.
+// TEST125: uneven flow bends and breaks the crests across the water.
+// Smooth, band-limited detail; all time rates repeat at the existing 40pi wrap.
+float gardenHash(vec2 p) {
+  vec3 h=fract(vec3(p.xyx)*vec3(.1031,.1030,.0973));
+  h+=dot(h,h.yzx+33.33);
+  return fract((h.x+h.y)*h.z);
+}
+float gardenNoise(vec2 p) {
+  vec2 i=floor(p),f=fract(p);f=f*f*f*(f*(f*6.0-15.0)+10.0);
+  return mix(mix(gardenHash(i),gardenHash(i+vec2(1,0)),f.x),
+             mix(gardenHash(i+vec2(0,1)),gardenHash(i+vec2(1,1)),f.x),f.y);
+}
+float gardenRipple(vec2 q, float t) {
+  vec2 drift=vec2(cos(t*.10),sin(t*.10))*3.0;
+  float flow=gardenNoise(q*.034+drift);
+  float crossFlow=gardenNoise(q*.049+vec2(-drift.y,drift.x)+vec2(13.4,7.8));
+  vec2 bent=q+(vec2(flow,crossFlow)-.5)*26.0;
+  vec2 span=fwidth(bent);
+  vec3 fade=1.0-smoothstep(vec3(.65),vec3(2.2),vec3(
+    dot(span,vec2(.24,.07)),dot(span,vec2(.08,.37)),length(span)*.32));
+  float fine=gardenNoise(bent*.19+drift*1.5)*2.0-1.0;
+  return .50*fade.x*(.4+.6*crossFlow)*sin(dot(bent,vec2(.24,.07))+t*.85)
+       + .30*fade.y*sin(dot(bent,vec2(-.08,.37))-t*1.25+flow*5.0)
+       + .20*fade.z*fine;
+}
+
 float waveRaw(vec2 q) {
+  if (gardenWater > .5) {
+    return .5 + .5*gardenRipple(q,rippleT);
+  }
   float h = 0.0;
 //@TRAINS
   return h * 0.5 + 0.5;
@@ -841,6 +878,7 @@ float waveRaw(vec2 q) {
 // and the voxel surface: that field, in whole world pixels.
 float waveAt(vec2 q) {
   if (waveHeight <= 0.0) return 0.0;
+  if (reserveWater > .5 || gardenWater > .5) return waveRaw(q) * waveHeight;
   return floor(waveRaw(q) * waveHeight + 0.5);
 }
 
@@ -901,6 +939,12 @@ void relief(vec3 base, vec3 dir, out vec3 hit, out vec2 col, out float face,
   hit = base;
   face = 1.0;
   axis = 0.0;
+  if (reserveWater > .5 || gardenWater > .5) {
+    // Shallow continuous ripples, not a quantized column staircase.
+    col = base.xz - vec2(.5);
+    hit.y = base.y + waveRaw(base.xz)*waveHeight;
+    return;
+  }
   float dy = -dir.y;
   // a ray running level along the surface has no slab to walk through, and
   // dividing by its descent would send the start point to infinity
@@ -982,7 +1026,7 @@ void relief(vec3 base, vec3 dir, out vec3 hit, out vec2 col, out float face,
 // The tile origin is the FRAGMENT's, so the lookup can never leave the tile
 // this quad was built to sample -- the same bleed the mesher's INSET stops.
 vec2 waveUV(vec2 tc, vec2 col) {
-  vec2 texel = 1.0 / atlasSize;
+  vec2 texel = atlasTileScale / atlasSize;
   vec2 tile = 8.0 * texel;
   vec2 org = floor(tc / tile) * tile;
   return org + (mod(col, 8.0) + 0.5) * texel;
@@ -1039,6 +1083,18 @@ vec4 effect(mediump vec4 color, Image tex, mediump vec2 tc, mediump vec2 sc) {
   vec2 uv = sc / love_ScreenSize.xy;
   vec4 selfC = vp * vec4(vBent, 1.0);
   float selfZ = selfC.z / selfC.w * 0.5 + 0.5;
+  // The pre-water snapshot contains opaque scenery only, so it needs no
+  // self-water tolerance. Prevent reflection fragments leaking over walls.
+  if (underOn > 0.5) {
+    vec3 opaquePacked = floor(Texel(underDepth,uv).rgb*255.0+.5);
+    float opaqueZ = dot(opaquePacked,vec3(65536.0,256.0,1.0))/16777215.0;
+    // Pads are only fractions of a world pixel above the sheet. A fixed
+    // 2e-6 slack erased their depth advantage at ordinary viewing distances.
+    // The opaque snapshot has no water self-comparison: one packed-depth LSB
+    // is enough for quantization, while keeping thin leaves in front.
+    float opaqueSlack = gardenWater > .5 ? (1.0 / 16777215.0) : 2e-6;
+    if (selfZ > opaqueZ + opaqueSlack) discard;
+  }
   if (selfZ > Texel(depthTex, uv).r + 2e-4) discard;
 #endif
 
@@ -1070,17 +1126,27 @@ vec4 effect(mediump vec4 color, Image tex, mediump vec2 tc, mediump vec2 sc) {
   // place rather than from wherever inside it the fragment happened to land
   vec3 surf = vec3(col.x + 0.5, hit.y, col.y + 0.5);
 
-  vec4 p = Texel(tex, waveUV(tc, col));
+  // Continuous custom ripples do not live on the source tile's pixel grid.
+  // waveUV's centre offset can cross an 8px tile edge at fractional columns.
+  // Use the mesher's inset UV only for coverage; its RGB is not water color.
+  vec4 p = gardenWater > .5 ? Texel(tex,tc) : Texel(tex,waveUV(tc,col));
   if (p.a < 0.5) discard;
   // `face` is the column's own side shading, which is what makes a crest
   // read as a solid thing with a lit flank rather than as a bright patch
-  vec3 base = p.rgb * vShade * face * sunlight(vSun) * dayTint;
+  // Continuous custom color belongs to the world, independent of source
+  // tile borders; preserve the native art when the custom profile is off.
+  float broad = .5 + .25*sin(surf.x*.027 + surf.z*.013)
+                   + .25*cos(surf.z*.033 - surf.x*.009);
+  vec3 calm = mix(vec3(.13,.25,.34),vec3(.22,.37,.45),broad);
+  vec3 material = mix(p.rgb,calm,gardenWater);
+  float reliefShade = mix(face,mix(1.0,face,.40),gardenWater);
+  vec3 base = material * vShade * reliefShade * sunlight(vSun) * dayTint;
 
   // the reflection follows the WAVES' own shape -- the tilt this column
   // takes from the neighbours it stands beside -- rather than an invented
   // wobble, so the sky and the sun break along the bars instead of across
   // them. Opened up by the lean, which is about to squash it (see below).
-  vec3 n = waveNormal(col, waveSlope * (1.0 + lean * waveSlopeLean));
+  vec3 n = waveNormal(col, waveSlope * (1.0 + lean * waveSlopeLean) * mix(1.0,.38,gardenWater));
   vec3 r = reflect(view, n);
   // the same reflection off a LEVEL surface, which is what the lean below
   // moves: the difference between the two is this column's own contribution
@@ -1135,7 +1201,35 @@ vec4 effect(mediump vec4 color, Image tex, mediump vec2 tc, mediump vec2 sc) {
   float ct = clamp(dot(-view, n), 0.0, 1.0);
   float f = fresnelFloor
             + (fresnelCeil - fresnelFloor) * pow(1.0 - ct, fresnelPower);
-  vec3 rgb = mix(base, refl, clamp(f, 0.0, 1.0));
+  // TEST7: reconstruct the opaque scene below this surface, before any
+  // water prepass or characters. Reject foreground/sky samples explicitly.
+#ifndef SKY_ONLY
+  if (underOn > .5 && gardenWater > .5) {
+    vec2 tuv = sc / love_ScreenSize.xy;
+    vec3 packedDepth = floor(Texel(underDepth,tuv).rgb*255.0+.5);
+    float bd=dot(packedDepth,vec3(65536.0,256.0,1.0))/16777215.0;
+    vec4 bw=inverseVP*vec4(tuv*2.0-1.0,bd*2.0-1.0,1.0);
+    if (abs(bw.w)>.000001 && bd<.999999) {
+      vec3 bentBed=bw.xyz/bw.w;
+      vec3 bed=vec3(bentBed.x,bentBed.y+bendDrop(bentBed.xz),bentBed.z);
+      float waterDepth=sheet.y-bed.y;
+      if (waterDepth>.10 && waterDepth<40.0) {
+        vec3 bedColor=Texel(underColor,tuv).rgb;
+        float transmission=exp(-waterDepth*.065);
+        vec3 tinted=bedColor*vec3(.78,.94,1.0);
+        base=mix(base,tinted,transmission*.58);
+        f=mix(.14,.78,pow(1.0-ct,3.0));
+      }
+    }
+  }
+#endif
+  vec3 rgb = mix(base, refl, clamp(f * mix(1.0,.78,gardenWater), 0.0, 1.0));
+  // Surface detail belongs above transmitted bed color. Small broken crests
+  // remain readable at night even when the reflected sky is nearly uniform.
+  float ripple=waveRaw(surf.xz);
+  float crest=smoothstep(.68,.94,ripple);
+  rgb += gardenWater * (vec3(.024,.046,.065)*(ripple-.5)
+         + vec3(.030,.058,.076)*crest) * max(dayTint,vec3(.38));
 
   // THE CAST, mirrored in this plane (see CAST_ALPHA). Read at this
   // fragment's own place on the screen, because that is where the mirrored
@@ -1157,7 +1251,7 @@ vec4 effect(mediump vec4 color, Image tex, mediump vec2 tc, mediump vec2 sc) {
   }
 
 #ifdef VOXEL_GRID
-  rgb *= 1.0 - gridDark * columnSeam(hit, sheet, axis);
+  rgb *= 1.0 - gridDark * (1.0-gardenWater) * (1.0-reserveWater) * columnSeam(hit, sheet, axis);
 #endif
   return vec4(rgb, 1.0) * color;
 }
@@ -1214,6 +1308,7 @@ Water._trainSource = trainSource       -- named for the suite
 
 local function source(grid, skyOnly)
   local src = SHADER_SRC:gsub("//@CRATERS", (craterSource():gsub("%%", "%%%%")))
+  src = src:gsub("//@CELESTIAL", function()return Celestial.surface end)
   src = src:gsub("//@TRAINS", (trainSource():gsub("%%", "%%%%")))
   local head = ("#define RAY_STEPS %d\n#define RAY_REFINE %d\n"
                 .. "#define WAVE_STEPS %d\n#define WAVE_STRIDE %.1f\n")
@@ -1277,6 +1372,11 @@ local function waveTime()
 end
 
 Water._waveTime = waveTime
+local function rippleTime()
+  if love.timer and love.timer.getTime then return love.timer.getTime() % (40 * math.pi) end
+  return waveTime()
+end
+Water._rippleTime = rippleTime
 
 -- Begin the reflective pass.
 --
@@ -1312,6 +1412,8 @@ function Water.begin(ctx, skyOnly)
     pcall(sh.send, sh, name, ...)
   end
 
+  send("gardenWater", 0)
+  send("reserveWater", 0)
   send("vp", "row", ctx.vp)
   send("eye", ctx.eye)
   send("curve", ctx.curve)
@@ -1323,6 +1425,11 @@ function Water.begin(ctx, skyOnly)
   if not skyOnly then
     send("reflectTex", ctx.reflect)
     send("depthTex", ctx.depth)
+    local inverse=ctx.underColor and ctx.underDepth and V.require('WaterBackdrop').inverse(ctx.vp)
+    send('underOn',inverse and 1 or 0)
+    send('underColor',ctx.underColor or ctx.reflect)
+    send('underDepth',ctx.underDepth or ctx.reflect)
+    send('inverseVP','row',inverse or Mat4.identity())
   end
 
   -- the sun's pass, sent the same way and for the same reason the scene
@@ -1365,6 +1472,7 @@ function Water.begin(ctx, skyOnly)
   send("waveSlope", Water.WAVE_SLOPE)
   send("waveSlopeLean", Water.WAVE_SLOPE_LEAN)
   send("waveT", waveTime())
+  send("rippleT", rippleTime())
   -- the columns' side faces wear the MESH's own direction shading, sent in
   -- rather than restated, so a wave crest is lit like every other voxel
   local fs = Voxel3D.FACE_SHADE
@@ -1460,6 +1568,16 @@ end
 function Water.draw(mesh, texture, model)
   if not (active and mesh) then return end
   if texture then mesh:setTexture(texture) end
+  local safariScale=V.require("SafariMaterials").texelScale(texture)
+  local atlasScale=safariScale or V.require("DecorAtlas").texelScale(texture)
+  local garden = atlasScale>1 and V.require("CommunityVisuals").customRoads()
+  pcall(active.send,active,"reserveWater",safariScale and 1 or 0)
+  -- Existing town pads start at +.14; keep the crest below them. Moving
+  -- normals/reflections remain full strength. Safari's taller plants retain
+  -- their accepted .22 profile; unmodified atlases retain the voxel waves.
+  pcall(active.send,active,"waveHeight",safariScale and .22 or garden and .12 or Water.WAVE_HEIGHT)
+  pcall(active.send,active,"atlasTileScale",atlasScale)
+  pcall(active.send,active,"gardenWater",(safariScale or garden) and 1 or 0)
   pcall(active.send, active, "model", "row", model or Mat4.identity())
   -- Per draw rather than per pass, and read off the TEXTURE rather than
   -- assumed: it is what converts a world pixel of the columns' parallax into

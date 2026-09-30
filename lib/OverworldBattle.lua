@@ -156,6 +156,12 @@ function OverworldBattle.backPinned()
   local placement = BattleArt.backPlacementSetting:get()
   if placement == "world" then return false end
   if placement == "ui" then return true end
+  -- Safari never leaves the trainer-back phase. LEGENDARY AUTO must keep
+  -- that trainer in the world (3D callback or card), not lock orbit forever.
+  -- An explicit OG UI choice above retains its original restriction.
+  if trainerBack and battle.safari and OverworldBattle.legendaryTrainerEnabled() then
+    return false
+  end
 
   local artMode = BattleArt.setting:get()
   if artMode == "static" then return false end
@@ -707,6 +713,19 @@ function OverworldBattle.stageShot()
   return session.apiHosted and session.providerShot or session.shot
 end
 
+-- Only ready Safari stages join the manual-camera input path. A placeholder
+-- containing trainerDrawn alone is not a renderable shot. Other hosted battles
+-- retain their established camera/input owner.
+function OverworldBattle.cameraShot()
+  local shot = OverworldBattle.shot()
+  if shot then return shot end
+  if session and not session.broken and session.battle and session.battle.safari
+      and OverworldBattle.legendaryTrainerEnabled() then
+    local staged = OverworldBattle.stageShot()
+    if staged and staged.player and staged.enemy then return staged end
+  end
+end
+
 function OverworldBattle.providerFinish()
   if not session then return end
   session.apiHosted = false
@@ -716,6 +735,7 @@ function OverworldBattle.providerFinish()
 end
 
 function OverworldBattle.finish()
+  V.require("SafariBattleFX").clear()
   -- The 3D player mod reads this small, presentation-only handoff. Clear it
   -- even if a battle was torn down before a staged session fully opened, so
   -- a later battle can never inherit the previous trainer or hand position.
@@ -888,6 +908,7 @@ function OverworldBattle.shot()
 end
 
 function OverworldBattle.invalidate()
+  V.require("SafariBattleFX").invalidate()
   BattleDOF.invalidate()
   BattleHud.invalidate()
   BattlePics.invalidate()
@@ -1132,7 +1153,7 @@ function OverworldBattle.sideTexture(battle, side)
   local legacyTrainer = rawget(_G, "RED3D_TRAINER_INTRO_ACTIVE") == true
     and type(rawget(_G, "RED3D_DIRECT_BATTLE_DRAW")) == "function"
   if side == "player" and battle.showPlayerBack and battle.playerBackPic
-      and (providerTrainer or legacyTrainer) then
+      and not battle.safari and (providerTrainer or legacyTrainer) then
     return nil
   end
   if not sideVisible(battle, side) then return nil end
@@ -1344,6 +1365,9 @@ function OverworldBattle.install()
   end
 
   local BattleState = require("src.battle.BattleState")
+  V.require("SafariBattleFX").install(BattleState,function(b)
+    return OverworldBattle.enabled() and OverworldBattle.providerAvailable(b)
+  end)
 
   -- BATTLE ART owns every selected species frame, ordinary and shiny. Install
   -- an initial guard now; mods.loaded refreshes it around providers loaded
@@ -1601,7 +1625,8 @@ function OverworldBattle.install()
     local legacyTrainer = rawget(_G, "RED3D_TRAINER_INTRO_ACTIVE") == true
       and type(rawget(_G, "RED3D_DIRECT_BATTLE_DRAW")) == "function"
     if self.showPlayerBack and self.playerBackPic
-        and (providerTrainer or legacyTrainer) then
+        and ((not self.safari and (providerTrainer or legacyTrainer))
+          or (self.safari and shot.trainerDrawn)) then
       return
     end
     if OverworldBattle.backPinned() and onlySide ~= "enemy" then

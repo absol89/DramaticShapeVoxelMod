@@ -136,6 +136,9 @@ V.companion = Companion
 -- to observe later map/revision changes. This must not depend on a render
 -- pipeline being active: KFP can attach while Battle Art's voxel mode is off.
 local uninstallCompanion = CompanionLifecycle.install(mod, Companion)
+V.require("CeladonParkAudio").install(mod)
+V.require("ForestLifeAudio").install(mod)
+V.require("KantoLifeAudio").install(mod)
 local uninstallOptionsMenu
 
 -- `core.quit_to_launcher` is the engine's native mod-unload boundary. Retain
@@ -143,6 +146,11 @@ local uninstallOptionsMenu
 -- so claims, adapter GPU resources, and the update hook cannot survive unload.
 mod.hooks:wrap("core.quit_to_launcher", function(next)
   if uninstallOptionsMenu then uninstallOptionsMenu() end
+  V.require("CeladonParkAudio").dispose()
+  V.require("ForestLifeAudio").dispose()
+  V.require("KantoLifeAudio").dispose()
+  V.require("KantoLife").invalidate()
+  V.require("ForestLife").invalidate()
   uninstallCompanion()
   return next()
 end)
@@ -738,7 +746,8 @@ local SETTINGS = {
   { CommunityVisuals.treeDetail,
     "FULL retains the approved foliage. BALANCED and HANDHELD remove decorative "
     .. "shells, keep near crossed-card silhouettes, and thin distant bunches. "
-    .. "Tree positions and sizes stay fixed; R.DIST bounds neighbor work.", full = true },
+    .. "The same detail setting thins the new Legendary forest leaves. "
+    .. "Tree positions stay fixed; R.DIST bounds neighbor work.", full = true },
   { CommunityVisuals.trees,
     "Choose Battle Art's authored round trees or the finalized Legendary Visuals "
     .. "small, medium, large and mature XL tree family. LEGENDARY FAST uses "
@@ -766,6 +775,11 @@ local SETTINGS = {
   { CommunityVisuals.grass,
     "Choose the original Overworld turf and encounter grass or TEST435's "
     .. "harmonized natural-green materials.", full = true },
+  { CommunityVisuals.buildings,
+    "Kanto architecture: LEGENDARY replaces complete buildings with "
+    .. "regional houses and purpose-built landmarks. INSTALLED restores the buildings "
+    .. "provided by your installed mods. Keep Better Buildings 1.19.0 for "
+    .. "the approved placements and Tower. Independent of the Legendary preset.", full = true },
   { CommunityVisuals.roads,
     "Choose original route surfaces or TEST435's quiet packed-earth roads "
     .. "and dark timber bridge deck.", full = true },
@@ -783,14 +797,25 @@ local SETTINGS = {
     full = true },
   { CommunityVisuals.forest,
     "Choose Battle Art's original Viridian presentation or the approved "
-    .. "Legendary Visuals authored taller tree layout, stitched canopy, layered "
-    .. "forest depth, map-authored haze, animated leaves, varied moss-and-litter "
+    .. "Legendary broadleaf trees with joined trunks and branches, open sky and mountain "
+    .. "views, layered forest depth, map-authored haze, varied moss-and-litter "
     .. "floor, camera-stable crossed grass and mossy fieldstone boulders. The "
-    .. "separate TREES row controls the swaying Legendary tree family.", full = true },
+    .. "TREE DETAIL row controls forest leaf density; TREES controls the town family.", full = true },
+  { CommunityVisuals.safari,
+    "Legendary Safari replaces the four reserve areas with tropical trees, layered "
+    .. "shrubs, natural rockwork, timber rest houses and source-aware ranger amenities. "
+    .. "Original encounters, signs, items and connections remain in place. "
+    .. "BATTLE ART restores the original reserve presentation.", full = true },
+  { CommunityVisuals.kantoLife,
+    "Regional outdoor ambience: natural crickets and lightning bugs near greenery at night, "
+    .. "daytime butterflies, woodland sounds and recorded water near rivers/coasts. "
+    .. "Rain reduces insect activity. LOW reduces density and volume; OFF restores prior ambience. "
+    .. "Sound follows SFX volume and existing ambience controls.", full = true },
   { ForestAtmos.setting,
     "LOW enables the approved Viridian Forest haze and guarded depth-aware "
-    .. "light shafts. OFF removes that atmosphere pass while leaving the "
-    .. "Legendary forest geometry and falling leaves untouched.",
+    .. "light shafts, falling leaves, evening fireflies and forest sounds. "
+    .. "Sound follows SFX volume. OFF removes these effects while leaving the "
+    .. "Legendary forest geometry and open skyline untouched.",
     full = true },
   { VoxelGrid.setting,
     "One-pixel wireframe along every voxel edge." },
@@ -1172,10 +1197,10 @@ local LEGENDARY_CATEGORIES = {
   { id = "legendary_nature", label = "GRASS & TREES", settings = {
     CommunityVisuals.grass,
     CommunityVisuals.trees, CommunityVisuals.treeDetail,
-    CommunityVisuals.forest, ForestAtmos.setting,
+    CommunityVisuals.forest, CommunityVisuals.safari, ForestAtmos.setting, CommunityVisuals.kantoLife,
   } },
   { id = "legendary_structures", label = "ROADS & STRUCTURES", settings = {
-    CommunityVisuals.roads, CommunityVisuals.walls,
+    CommunityVisuals.buildings, CommunityVisuals.roads, CommunityVisuals.walls,
     CommunityVisuals.courtyards,
   } },
   { id = "legendary_sky", label = "SKY & BACKGROUND", settings = {

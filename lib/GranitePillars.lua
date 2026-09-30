@@ -98,6 +98,28 @@ local function texture()
   return P.textures[color] or nil
 end
 
+-- Regional rails share one mesh and a tiny atlas, including timber grain.
+local function boundaryTexture(style)
+ local key='district90:'..style..':'..CommunityVisuals.pillarColor()
+ if P.textures[key]then return P.textures[key]end
+ local C=V.require('SurfaceCraft');local data=love.image.newImageData(128,128)
+ for y=0,127 do for x=0,127 do
+  local grain=(C.hash(x,y,9040)-.5)*.035
+  local r,g,b=.21+grain,.23+grain,.25+grain
+  if x<64 and y<64 then
+   local v=.48+math.sin(y*.63+math.sin(x*.12))*.05+(C.field(x/28,y/3,9041)-.5)*.15
+   if style=='picket' then r,g,b=v*.75+.38,v*.73+.35,v*.64+.28
+   else r,g,b=v*.90,v*.54,v*.28 end
+  elseif x>=64 and y<64 then
+   local v=.63+(C.field(x/7,y/7,9042)-.5)*.09+grain
+   r,g,b=v*.97,v*.98,v
+  elseif y>=84 and y<=92 and x>=40 and x<=88 then r,g,b=.96,.80,.44 end
+  data:setPixel(x,y,clamp(r),clamp(g),clamp(b),1)
+ end end
+ local img=love.graphics.newImage(data);img:setFilter('nearest','nearest');img:setWrap('repeat','repeat')
+ P.textures[key]=img;return img
+end
+
 local function mask()
   if P.mask ~= nil then return P.mask or nil end
   local ok, image = pcall(function()
@@ -175,7 +197,7 @@ local function pierRhythm(cells)
   return piers
 end
 
-local function build(cells)
+local function build(cells,id,boundary)
   local layout = CommunityVisuals.layout()
   if layout == "default" then return false end
   local vertices, indices = {}, {}
@@ -257,6 +279,25 @@ local function build(cells)
   end
 
   local piers = layout == "bottom" and pierRhythm(cells) or nil
+  if boundary then
+    for key,base in pairs(cells)do
+      local cx,cy=key:match('^(-?%d+)|(-?%d+)$');cx,cy=tonumber(cx),tonumber(cy)
+      if cx then
+        local _,pier,dirs=wallRole(cx,cy,cells,piers)
+        V.require('DistrictBoundary').build(id,cx*16+8,cy*16+8,base,dirs,pier,function(q,tone,material)
+          local u0,v0,u1,v1=.04,.55,.17,.85
+          if material=='wood'then u0,v0,u1,v1=.02,.02,.46,.46
+          elseif material=='stone'then u0,v0,u1,v1=.62,.05,.88,.35
+          elseif material=='reflector'then u0,v0,u1,v1=.34,.67,.67,.71 end
+          local first=#vertices+1
+          for i,p in ipairs(q)do vertices[#vertices+1]={p[1],p[2],p[3],(i==2 or i==3)and u1 or u0,i>=3 and v1 or v0,tone}end
+          quad(first)
+        end)
+      end
+    end
+    if #vertices==0 then return false end
+    return Voxel3D.newMesh(vertices,indices)
+  end
   local topScale = layout == "top" and 1.75 or 1.0
   for key in pairs(cells) do
     local cx, cy = key:match("^(-?%d+)|(-?%d+)$")
@@ -292,8 +333,8 @@ local function publishedBase(id, key, bases)
                       .. (tonumber(z) * 16 + 8)]
 end
 
-local function sameSource(record, id, owners, bases, layout, color)
-  if not record or record.layout ~= layout or record.color ~= color then
+local function sameSource(record, id, owners, bases, layout, color, boundary)
+  if not record or record.layout ~= layout or record.color ~= color or record.boundary ~= boundary then
     return false
   end
   local count = 0
@@ -319,8 +360,9 @@ function P.draw(map, ox, oz)
   local owners = (rawget(_G, "__bav_granite_pillars") or {})[id] or {}
   local bases = rawget(_G, "__bav_granite_pillar_base") or {}
   local layout, color = CommunityVisuals.layout(), CommunityVisuals.pillarColor()
+  local boundary=layout=='bottom' and V.require('DistrictBoundary').style(id,CommunityVisuals.customRoads()) or nil
   local record = P.cache[id]
-  if not sameSource(record, id, owners, bases, layout, color) then
+  if not sameSource(record, id, owners, bases, layout, color, boundary) then
     local cells, count = {}, 0
     for key in pairs(owners) do
       local base = publishedBase(id, key, bases)
@@ -328,14 +370,14 @@ function P.draw(map, ox, oz)
     end
     local mesh = false
     if count > 0 then
-      mesh = build(cells)
+      mesh = build(cells,id,boundary)
       -- A transient upload failure must remain retryable. Keep ownership of
       -- the old allocation until a replacement succeeds, but do not draw it
       -- at a position/height that no longer agrees with the scene.
       if not mesh then return end
     end
     release(record)
-    record = { cells = cells, count = count, layout = layout, color = color,
+    record = { cells = cells, count = count, layout = layout, color = color, boundary=boundary,
                mesh = mesh }
     P.cache[id] = record
   end
@@ -343,7 +385,7 @@ function P.draw(map, ox, oz)
   local oldMask = Voxel3D.glassMask
   Voxel3D.glassMaskNow(mask())
   Voxel3D.glass(true)
-  Voxel3D.draw(record.mesh, texture(),
+  Voxel3D.draw(record.mesh, boundary and boundaryTexture(boundary) or texture(),
     (ox ~= 0 or oz ~= 0) and Mat4.translate(ox, 0, oz) or nil)
   Voxel3D.glass(false)
   Voxel3D.glassMaskNow(oldMask)

@@ -168,17 +168,19 @@ function M.template(kind)
 end
 local function prepare(map)
  if not(map and map.tileset and configs[map.tileset.id]and configs[map.tileset.id].maps[map.id])then return end
- if cache[map.id]then return cache[map.id]end
+ local legendary=V.require('SafariReserve').enabled(map)
+ if cache[map.id]and cache[map.id].legendary==legendary then return cache[map.id]end
+ if cache[map.id]then cache[map.id].mesh:release();cache[map.id]=nil end
  local ps=M.placements(map);if #ps==0 then return end
  local ok,record=pcall(function()
   sourceData=assert(require("src.render.Assets").imageData(map.tileset.image))
   local verts,indices={},{}
-  for _,p in ipairs(ps)do for _,q in ipairs(M.template(p.kind))do local b=#verts
+  for _,p in ipairs(ps)do for _,q in ipairs((legendary and V.require("SafariSculpture").template()or M.template(p.kind)))do local b=#verts
    for _,v in ipairs(q)do verts[#verts+1]={(p.turn and 16-v[1]or v[1])+p.x,v[2]+p.height,(p.turn and 16-v[3]or v[3])+p.z,v[4],v[5],v[6]}end
    for _,i in ipairs({1,2,3,1,3,4})do indices[#indices+1]=b+i end
   end end
   local mesh=assert(V.require('Voxel3D').newMesh(verts,indices))
-  return {mesh=mesh,placements=ps,vertices=#verts}
+  return {mesh=mesh,placements=ps,vertices=#verts,legendary=legendary}
  end)
  if ok then cache[map.id]=record;return record end
  -- Leave the original tile art intact if this platform cannot create the mesh.

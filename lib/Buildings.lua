@@ -1509,6 +1509,8 @@ function Buildings.build(S, map, data, perRow)
             if S.outdoor and tileset.id == "OVERWORLD" then
               V.require("FacadeEntrances").stamp(S, map, data, perRow,
                                                 tx, ty, bw, bh, t)
+              local entry=S.cityBuildings and S.cityBuildings[#S.cityBuildings]
+              if entry then entry.last=#S.objectQuads end
             end
           end
         end
@@ -1613,6 +1615,7 @@ function Buildings.stamp(S, map, quads, tx, ty, bw, bh, t)
 
   local mx, mz = tx * 8, ty * 8
   local out = S.objectQuads
+  local harborStart = #out+1
   local legendaryTower = V.require("LegendaryTowerExterior").activeFor(map, t)
 
   -- Only an OUTDOOR placement containing an engine-authored door is an
@@ -1752,6 +1755,23 @@ function Buildings.stamp(S, map, quads, tx, ty, bw, bh, t)
         i = i + 1
       end
     end
+  end
+  if S.outdoor and t then
+    S.cityBuildings=S.cityBuildings or {}
+    S.cityBuildings[#S.cityBuildings+1]={first=harborStart,last=#out,
+      tileX=mx,tileZ=mz,tileW=bw*8,tileH=bh*8,id=t.id,
+      frontEave=t.frontEave or 0,claimOnly=t.claimOnly,
+      bbTower=t._betterBuildingsTower,legacyTower=legendaryTower,
+      towerDepth=t.depthPx or (t.depth or bh)*8,
+      sideDoors=t._betterBuildingsSideDoors,
+      authoredSides=t._betterBuildingsSides~=nil}
+  end
+  if map.id=='VERMILION_CITY' and #out>=harborStart then
+    S.harborBuildings=S.harborBuildings or {}
+    S.harborBuildings[#S.harborBuildings+1]={first=harborStart,last=#out,
+      tileZ=mz,tileH=bh*8,frontEave=(t and t.frontEave) or 0,
+      authoredSides=type(t)=='table' and t._betterBuildingsSides~=nil,
+      wallHeight=type(t)=='table' and ((#t.tiles+#(t.topRows or {}))*8-(t.roofRows or 0)) or nil}
   end
 end
 

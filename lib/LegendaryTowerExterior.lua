@@ -175,6 +175,17 @@ function M.geometry()
   for _, x in ipairs({5,17,69,81}) do windowFront(x,x+7,68,82,50.05) end
   roundWindow(48,128,56.08,7)
 
+  -- TEST61: dressed black masonry and stone window heads, same silhouette.
+  if CommunityVisuals.referenceBuildings() then
+  for _,x in ipairs({2,18,76,92})do
+    for y=4,80,6 do box(x-.25,y,65.8,x+3.25,y+.45,66.35,2)end
+  end
+  for _,x in ipairs({28,42,56,68})do
+    for _,y in ipairs({91,115})do box(x-.5,y,56.1,x+8.5,y+.7,56.9,2)end
+  end
+  for _,x in ipairs({40,55})do box(x-.6,0,64.1,x+.6,24,65,2)end
+  trim(24,8,72,56,137,1)
+  end
   return vertices, indices
 end
 

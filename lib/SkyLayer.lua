@@ -1036,27 +1036,21 @@ local function abandoned()
   return not CommunityVisuals.customSky()
 end
 
-function Sky.draw(state)
+-- TEST133: celestial light belongs behind the painted horizon. Keep the
+-- foreground birds/weather on their established side of the mountains.
+local starT, lastStarNote = nil, ""
+function Sky.drawStars(state)
   if abandoned() then return end
-  local cfg = config()
   local map = state and state.map
-  if not map then return end
-  if not isOutdoor(map) then
-    status("indoors -- no sky here")
-    return
-  end
-
+  if not map or not isOutdoor(map) then return end
+  local cfg = config()
   local p = state.player
-  local px = (p and p.px) or 0
-  local pz = (p and p.py) or 0
+  local px, pz = (p and p.px) or 0, (p and p.py) or 0
   local t = now()
-  local dt = lastT and math.min(0.1, t - lastT) or 0
-  lastT = t
-
-  local drewClouds, birdCount = false, 0
-  local starNote = ""
-
+  local dt = starT and math.max(0, math.min(0.1, t - starT)) or 0
+  starT = t
   -- ---- the night sky: field, twinklers, and the occasional streak
+  local starNote = ""
   if cfg.stars ~= false then
     local target = isNight() and 1 or 0
     if dt > 0 then
@@ -1066,6 +1060,7 @@ function Sky.draw(state)
     if nightAmt > 0.01 then
       if not starImg then starImg = makeStars() end
       if starImg and not starMesh then starMesh = makeStarMesh() end
+      birdMesh = birdMesh or makeBirdMesh()
       starDot = starDot or makeStarDot()
       twinkles = twinkles or makeTwinkles()
       shooters = shooters or {}
@@ -1077,9 +1072,9 @@ function Sky.draw(state)
           -- texel over a brighter sky. Keep the complete generated field and
           -- its four brightness levels, but bypass surface lighting and use
           -- additive composition so every star can only brighten the frame.
-          -- TEST396: no radial mask. The attempted atmospheric fade projected
-          -- as a visible termination band above the mountains. TEST392's
-          -- enlarged plane already places its real edge behind the panorama.
+          -- TEST133: this whole celestial pass runs BEFORE Backdrop. Its
+          -- opaque mountain/woodland pixels cover stars; transparent skyline
+          -- pixels retain them. No depth writes or artificial horizon band.
           -- TEST56: Battle Art exposes the required unlit path as
           -- lighting(false), not the donor renderer's emissive() alias.
           -- Calling the host API lets the star pass actually reach the draw.
@@ -1152,6 +1147,29 @@ function Sky.draw(state)
       end
     end
   end
+
+  lastStarNote = starNote
+end
+
+function Sky.drawForeground(state)
+  if abandoned() then return end
+  local cfg = config()
+  local map = state and state.map
+  if not map then return end
+  if not isOutdoor(map) then
+    status("indoors -- no sky here")
+    return
+  end
+
+  local p = state.player
+  local px = (p and p.px) or 0
+  local pz = (p and p.py) or 0
+  local t = now()
+  local dt = lastT and math.min(0.1, t - lastT) or 0
+  lastT = t
+
+  local drewClouds, birdCount = false, 0
+  local starNote = lastStarNote
 
   -- ---- clouds
   if (not TEST110_DISABLE_BUILTIN_CLOUD_DECKS) and cfg.clouds ~= false then
@@ -1275,6 +1293,13 @@ function Sky.draw(state)
          starNote .. airNote .. bowNote .. (flockNote or "")))
 end
 
+-- Compatibility for older external callers. Host scenes explicitly sandwich
+-- Backdrop between the two passes; calling draw alone retains both effects.
+function Sky.draw(state)
+  Sky.drawStars(state)
+  Sky.drawForeground(state)
+end
+
 function Sky.invalidate()
   for _, d in ipairs(decks or {}) do
     for _, band in ipairs(d.mesh or {}) do
@@ -1288,6 +1313,7 @@ function Sky.invalidate()
   flocks, twinkles, shooters, nightAmt = nil, nil, nil, 0
   planes, blimps, trails = nil, nil, nil
   ground = nil
+  lastT, starT, lastStarNote = nil, nil, ""
 end
 
 -- live registration: the installer hot-swaps refreshed modules

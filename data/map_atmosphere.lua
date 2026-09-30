@@ -50,6 +50,8 @@ return {
     canopyY = 56,
     fadeTo = 28,
     fog = { density = 0.0025, start = 112, heightK = 0.024 },
+    -- TEST96 free-roam woodland mist; preserve battle haze and rays.
+    roamFog = { density = 0.0048, start = 72, heightK = 0.045 },
     -- strength is calibrated against the march's real integral: the
     -- under-canopy stretch of an orbit ray is short and thinly dense, so
     -- the raw accumulation for a fully lit beam core is a few percent --

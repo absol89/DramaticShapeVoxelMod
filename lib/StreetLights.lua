@@ -90,13 +90,13 @@ local function build()
   local d=love.image.newImageData(6,1)
   d:setPixel(0,0,.105,.105,.125,1)
   d:setPixel(1,0,.20,.18,.15,1)
-  d:setPixel(2,0,.57,.44,.25,1)
-  d:setPixel(3,0,.66,.53,.31,1)
-  d:setPixel(4,0,.73,.60,.38,1)
-  d:setPixel(5,0,.66,.53,.31,1)
+  d:setPixel(2,0,.90,.75,.44,1)
+  d:setPixel(3,0,.96,.83,.53,1)
+  d:setPixel(4,0,1.0,.90,.65,1)
+  d:setPixel(5,0,.96,.83,.53,1)
   texture=love.graphics.newImage(d);texture:setFilter('nearest','nearest')
   local md=love.image.newImageData(6,1)
-  for x=0,5 do md:setPixel(x,0,1,1,1,x>=2 and .70 or 0) end
+  for x=0,5 do md:setPixel(x,0,1,1,1,x>=2 and 1 or 0) end
   mask=love.graphics.newImage(md);mask:setFilter('nearest','nearest')
   mesh=R.newMesh(M.geometry())
 end
