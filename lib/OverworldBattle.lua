@@ -139,6 +139,12 @@ end
 -- original UI anchor, and ROM uses that OG anchor outright.
 function OverworldBattle.backPinned()
   if not OverworldBattle.enabled() then return false end
+  -- The legacy battleBack behavior is only valid for the native ROM
+  -- presentation. STATIC/ANIMATED Battle Art stages the player back in the
+  -- world, so never let a persisted/legacy back-sprite state pin it back onto
+  -- the battle UI.
+  local artMode = BattleArt.setting:get()
+  if artMode ~= "rom" then return false end
   local battle = session and session.battle
   local trainerBack = battle and battle.showPlayerBack
                       and battle.playerBackPic
@@ -163,8 +169,6 @@ function OverworldBattle.backPinned()
     return false
   end
 
-  local artMode = BattleArt.setting:get()
-  if artMode == "static" then return false end
   if artMode == "rom" then return true end
 
   if not battle then return false end
