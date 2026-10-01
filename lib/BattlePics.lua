@@ -110,6 +110,12 @@ BattlePics.FILL = { 1, 1, 1, 1 }
 -- Anything at or under this alpha counts as keyed-out rather than drawn.
 local CUT = 0.5
 
+-- A mod can mark a gap in its own art as deliberate by giving those pixels an
+-- alpha above zero but no higher than this. They are invisible when drawn, but
+-- they are not keyed-out paper, so the fill below leaves them transparent
+-- instead of painting them white. Crystal Animated Sprites writes 1/255.
+local GAP = 0.02
+
 -- Read the pixels the engine would actually blit. A LOVE Image does not hand
 -- its data back, so it is drawn into a canvas of its own size and the canvas
 -- is read -- which is also what makes this work for every path that produces
@@ -319,7 +325,7 @@ function BattlePics.filled(img, sealBottom)
       for x = x0, x1 do
         if not outside[row + x] then
           local _, _, _, a = data:getPixel(x, y)
-          if a <= CUT then
+          if a <= CUT and not (a > 0 and a <= GAP) then
             data:setPixel(x, y, fr, fg, fb, fill[4])
             changed = true
           end
