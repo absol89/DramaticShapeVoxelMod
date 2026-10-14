@@ -124,6 +124,7 @@ local CommunityVisuals = V.require("CommunityVisuals")
 local ForestAtmos = V.require("ForestAtmos")
 local TowerFogSettings = V.require("TowerFogSettings")
 local LegendaryVisualsPreset = V.require("LegendaryVisualsPreset")
+local ItemPokeballs = V.require("ItemPokeballs")
 
 -- The public provider is created while this mod loads, before consumers resolve
 -- optional dependencies. The dispatcher starts at mods.loaded; a consumer that
@@ -765,6 +766,10 @@ local SETTINGS = {
     "Choose Battle Art's readable white sign or the Legendary Visuals low "
     .. "Kanto wayfinder with live location labels, including Viridian Forest.",
     full = true },
+  { ItemPokeballs.setting,
+    "BATTLE ART keeps overworld item balls as sprites. LEGENDARY VISUALS "
+    .. "uses the 3D ball mesh, including its reflection and shadow. "
+    .. "Item pickup behavior and battle capture balls are unchanged.", full = true },
   { CommunityVisuals.cityGround,
     "Choose Battle Art or Legendary Visuals city ground. Lavender Battle Art "
     .. "uses green lawns, lavender-grey paths and Tower flowers. Legendary keeps "
@@ -1192,7 +1197,7 @@ local LEGENDARY_CATEGORIES = {
     CommunityVisuals.pillars, CommunityVisuals.masonry,
   } },
   { id = "legendary_signs", label = "SIGNS & PROPS", settings = {
-    CommunityVisuals.signs, CommunityVisuals.cutTrees,
+    CommunityVisuals.signs, CommunityVisuals.cutTrees, ItemPokeballs.setting,
   } },
   { id = "legendary_nature", label = "GRASS & TREES", settings = {
     CommunityVisuals.grass,

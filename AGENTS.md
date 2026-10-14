@@ -48,13 +48,20 @@ reported location. Passing Lua tests alone is insufficient.
 
 ## Paths and preflight
 
-| Path | Role |
+Ask the user where their Gen1Recomp LÖVE2D engine is located before
+running engine commands. If they already supplied the location in this
+conversation, use it without asking again. Keep the answer in session
+variables only; never document the engine location or other machine-specific
+installation paths in any `AGENTS.md`. Verify the mod checkout, installed
+mod folder, packaged runtime and LÖVE executable separately when needed.
+
+| Location | Role |
 | --- | --- |
-| `D:\gen1recomp` | Engine source root, including `main.lua`, `conf.lua`, `src`, and `tests/drivers/util.lua`. Run source commands here. |
-| `D:\gen1recomp\dev\DramaticShapeVoxelMod` | Authoritative mod checkout, with its own Git repository. |
-| `D:\gen1recomp\mods\BATTLE_ART_VOXEL_FORK` | Engine-facing mod folder. On 2026-09-15 this was a junction to the checkout above. Verify each session. |
-| `D:\Games\gen1recomp-win64` | Current packaged Windows install. The directory and `gen1recomp.exe` were verified on 2026-09-15. Window inventory also observed running instances from this executable; package contents/capabilities must still be checked separately. |
-| `D:\gen1recomp\tmp\battle-art-repro\<case>\<run>` | Suggested scratch directory for drivers, logs, and screenshots. Use a fresh run directory. |
+| User-confirmed engine checkout | Engine source root and source-run working directory. |
+| This mod checkout | Authoritative mod source and separate Git repository. |
+| Installed mod folder (verify for this session) | Check its resolved target; do not assume a junction or installation layout. |
+| Packaged installation (verify for this session) | Inspect executable/archive, runtime DLLs and version before testing. |
+| Fresh scratch directory | Drivers, logs and captures; do not commit them. |
 
 The manifest ID is `BATTLE_ART_VOXEL_FORK`; directory and display names need not
 match. Editing `dev` affects a packaged install only if its installed mod points
@@ -62,12 +69,13 @@ there or you deliberately deploy the changes. Booting an old copy proves nothing
 about a fix.
 
 ```powershell
-$engineRoot = 'D:\gen1recomp'
-$modRoot = Join-Path $engineRoot 'dev\DramaticShapeVoxelMod'
-$packageRoot = 'D:\Games\gen1recomp-win64'
+$engineRoot = Read-Host "Where is your Gen1Recomp LÖVE2D engine?"
+$modRoot = Read-Host "Where is this mod checkout?"
+$packageRoot = Read-Host "Where is the packaged installation, if used?"
 git -C $modRoot status --short
 git -C $modRoot branch --show-current
-Get-Item (Join-Path $engineRoot 'mods\BATTLE_ART_VOXEL_FORK') |
+$installedModRoot = Read-Host "Where is the installed mod folder?"
+Get-Item -LiteralPath $installedModRoot |
     Select-Object FullName, LinkType, Target
 Get-Content (Join-Path $modRoot 'manifest.json')
 Get-Command love, lovec, luajit -ErrorAction SilentlyContinue
@@ -118,7 +126,7 @@ For the shared stateful reproduction sequence, see the engine [shared reproducti
 
 ## Route A: source engine with automated setup
 
-Use an installed compatible LÖVE runtime with working directory `D:\gen1recomp`.
+Use an installed compatible LÖVE runtime with working directory set to the user-confirmed engine root.
 `lovec.exe` is useful for logs. Pass the engine root, not the mod directory: the
 mod is not a standalone game.
 
@@ -175,15 +183,15 @@ end
 ```
 
 Launch from a dedicated PowerShell session. Set `$loveExe` to a discovered
-runtime. The placeholder is not an assumed installed path. Create SHOT_DIR
+runtime. Confirm its location for the current session. Create SHOT_DIR
 first: `U.shot` has a Unix-style mkdir fallback unsuitable as a Windows setup
 step. The wait is a starting point; inspect the loading veil and allow more
 frames if geometry is still building.
 
 ```powershell
-$engineRoot = 'D:\gen1recomp'
+$engineRoot = Read-Host "Where is your Gen1Recomp LÖVE2D engine?"
 $runDir = Join-Path $engineRoot 'tmp\battle-art-repro\lavender\before-01'
-$loveExe = 'C:\REPLACE_WITH_DISCOVERED_LOVE_DIRECTORY\lovec.exe'
+$loveExe = Read-Host "Where is the compatible LÖVE executable?"
 New-Item -ItemType Directory -Path $runDir -Force | Out-Null
 # Save the Lua template as $runDir\repro.lua first.
 if (-not (Test-Path -LiteralPath $loveExe)) { throw 'Locate LÖVE first' }
@@ -232,7 +240,7 @@ files: this survey logs capture requests without verifying disk writes.
 
 ## Route B: packaged game and developer console
 
-1. Verify `D:\Games\gen1recomp-win64` exists and list executables and archives.
+1. Verify the user-provided packaged installation exists and list executables and archives.
    Determine whether it has a fused game executable or a standalone LÖVE runtime
    plus `.love` archive. Do not guess an executable name or assume an older
    package includes source driver helpers or current flags.
@@ -351,11 +359,11 @@ viewpoints have been live-tested.
 Run relevant existing tests from the engine root. Select the mod path explicitly:
 
 ```powershell
-Set-Location 'D:\gen1recomp'
-$env:DS_MOD_PATH = 'dev/DramaticShapeVoxelMod'
-luajit dev/DramaticShapeVoxelMod/tests/battle_art_voxel_fork_test.lua
-python dev/DramaticShapeVoxelMod/tools/check_luajit_compile.py
-git -C dev/DramaticShapeVoxelMod diff --check
+Set-Location $engineRoot
+$env:DS_MOD_PATH = $modRoot
+luajit (Join-Path $modRoot 'tests/battle_art_voxel_fork_test.lua')
+python (Join-Path $modRoot 'tools/check_luajit_compile.py')
+git -C $modRoot diff --check
 ```
 
 Use discovered runtimes. The compile helper requires Lupa's `luajit21` backend;

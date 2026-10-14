@@ -1,6 +1,9 @@
 -- Live item actors only: no static copies, no changes to pickup scripts.
 local V=...
 local M={}
+M.setting=V.require('ModSetting').new('itemBall','ITEM BALL',
+ {'default','legendary'},{'BATTLE ART','LEGENDARY VISUALS'})
+function M.enabled() return M.setting:get()=='legendary' end
 local mesh,texture
 local function ballDef(d)
  return type(d)=='table'and(d.id=='SPRITE_POKE_BALL' or d.sprite=='SPRITE_POKE_BALL'
@@ -67,7 +70,7 @@ function M.transform(c,reflection)
  return model
 end
 function M.draw(c,shadow)
- if not M.accepts(c)then return false end
+ if not M.enabled() or not M.accepts(c)then return false end
  prepare()
  local model=M.transform(c,not shadow)
  if shadow then shadow.draw(mesh,texture,model)

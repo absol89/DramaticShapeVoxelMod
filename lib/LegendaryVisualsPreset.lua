@@ -9,6 +9,7 @@ local ModSetting = V.require("ModSetting")
 local CommunityVisuals = V.require("CommunityVisuals")
 local TowerFogSettings = V.require("TowerFogSettings")
 local ForestAtmos = V.require("ForestAtmos")
+local ItemPokeballs = V.require("ItemPokeballs")
 
 local P = {}
 P.setting = ModSetting.new("legendaryVisualsMode", "LEGENDARY VISUALS",
@@ -54,6 +55,7 @@ add(CommunityVisuals.trees,       "default", "n64memory",      "n64memory")
 add(CommunityVisuals.treeDetail,  "balanced","balanced",       "full")
 add(CommunityVisuals.cutTrees,    "default", "n64memory",      "n64memory")
 add(CommunityVisuals.signs,       "default", "n64memory",      "n64memory")
+add(ItemPokeballs.setting,        "default", "legendary",      "legendary")
 add(CommunityVisuals.cityGround,  "default", "n64memory",      "n64memory")
 add(CommunityVisuals.grass,       "default", "n64memory",      "n64memory")
 add(CommunityVisuals.roads,       "default", "n64memory",      "n64memory")

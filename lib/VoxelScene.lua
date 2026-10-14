@@ -1150,6 +1150,7 @@ local function shadowSignature(state, terrain, nbMesh, posed, cx, cy, vw, vh)
   -- spot re-fits and redraws exactly like a camera move ("" outside 1ST)
   put(FirstPerson.signature())
   put(CharacterRenderers.revision())
+  put(ItemPokeballs.enabled() and 1 or 0)
   put(tostring(terrain))
   put(ShipHull.signature(state))
   for i, nb in ipairs(state.neighbors or {}) do
