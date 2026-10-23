@@ -1,5 +1,8 @@
 -- TEST90: measured regional gardens, access corridors and actor-safe furniture.
 local V=...;local C=V.require('SurfaceCraft');local M={}
+-- LOADING-STUTTER: yield points so a pumped (background) build of the town's garden
+-- plan is sliced; anywhere else BuildBudget.tick returns at once.
+local Budget=V.require('BuildBudget')
 M.themes={
  PALLET_TOWN={stone={.71,.65,.53},border={.81,.76,.64},accent={.58,.34,.24},flower={.91,.75,.59},limit=24,rooms=3,bed=8},
  VIRIDIAN_CITY={stone={.59,.62,.51},border={.77,.74,.61},accent={.39,.46,.32},flower={.93,.77,.47},limit=64,rooms=8,bed=12},
@@ -108,7 +111,7 @@ function M.plan(map,S,key,options)
   end end
  end
  local lawnArea=0
- for z=0,height-1 do for x=0,width-1 do if lawn(x,z)then lawnArea=lawnArea+64 end end end
+ for z=0,height-1 do Budget.tick() for x=0,width-1 do if lawn(x,z)then lawnArea=lawnArea+64 end end end
  P.planting.lawnArea=lawnArea;P.planting.maxArea=lawnArea*policy.area
  local function planted(f)return f.kind=='borderbed' or f.kind=='centerpiece' or f.kind=='rockgarden'end
  local function add(f)
@@ -151,7 +154,7 @@ function M.plan(map,S,key,options)
  -- Coverage is balanced across the town, not only the closest landmark.
  local function district(x,z)return math.floor(x/(width/3))..':'..math.floor(z/(height/3))end
  local bedZones={}
- for z=2,height-2 do for x=2,width-2 do if lawn(x,z)then
+ for z=2,height-2 do Budget.tick() for x=2,width-2 do if lawn(x,z)then
   centers[#centers+1]={x=x,z=z}
   for _,d in ipairs(dirs)do if path(x+d[2],z+d[3])then candidates[#candidates+1]={x=x,z=z,edge=d[1],dx=d[2],dz=d[3]}end end
   -- Safari's upper gardens use walkable turf rather than paved streets.
@@ -181,7 +184,7 @@ function M.plan(map,S,key,options)
  local spec=amenities[map.id]
  if spec and grassEnabled then
   local locations={}
-  for _,p in ipairs(centers)do
+  for _,p in ipairs(centers)do Budget.tick()
    local score=math.huge;local edge='n'
    if spec.water then
     for _,d in ipairs(dirs)do for step=2,5 do

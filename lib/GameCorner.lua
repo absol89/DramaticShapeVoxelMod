@@ -435,10 +435,18 @@ local function prepare(map)
  cached={mesh=mesh,texture=texture,mask=mask,layout=layout,shell=shell};return cached
 end
 function M.build(S,map)
+ V.require('ScenicFixtures').build(S,map)
+ if V.require('OakLabRoom').accepts(map) then return V.require('OakLabRoom').build(S,map) end
+ if V.require('RedsHouseRoom').accepts(map) then return V.require('RedsHouseRoom').build(S,map) end
+ if V.require('RedsBedroomRoom').accepts(map) then return V.require('RedsBedroomRoom').build(S,map) end
+ if V.require('CeladonRoof').accepts(map) then return V.require('CeladonRoof').build(S,map) end
+ if V.require('LeagueGateRoom').accepts(map) then return V.require('LeagueGateRoom').build(S,map) end
+ if V.require('LeagueRooms').accepts(map) then return V.require('LeagueRooms').build(S,map) end  -- TEST172
  if V.require("RocketRoom").accepts(map) then return V.require("RocketRoom").build(S,map) end
  if map and map.id=='ROUTE_10' then return V.require('LegendaryGarden').build(S,map) end
  if map and map.tileset and V.require('UndergroundRoom').accepts(map) then return V.require('UndergroundRoom').build(S,map) end
  if map and map.id=='GAME_CORNER_PRIZE_ROOM' then return V.require('PrizeRoom').build(S,map) end
+ if V.require('InteriorRooms').accepts(map) then return V.require('InteriorRooms').build(S,map) end  -- TEST173
  local r=prepare(map);if not r then return end
  for k in pairs(r.layout.claim)do
   S.skip[k]=true;S.ground[k]=false
@@ -446,10 +454,18 @@ function M.build(S,map)
  end
 end
 function M.draw(map,shadow)
+ V.require('ScenicFixtures').draw(map,shadow)
+ if V.require('OakLabRoom').accepts(map) then return V.require('OakLabRoom').draw(map,shadow) end
+ if V.require('RedsHouseRoom').accepts(map) then return V.require('RedsHouseRoom').draw(map,shadow) end
+ if V.require('RedsBedroomRoom').accepts(map) then return V.require('RedsBedroomRoom').draw(map,shadow) end
+ if V.require('CeladonRoof').accepts(map) then return V.require('CeladonRoof').draw(map,shadow) end
+ if V.require('LeagueGateRoom').accepts(map) then return V.require('LeagueGateRoom').draw(map,shadow) end
+ if V.require('LeagueRooms').accepts(map) then return V.require('LeagueRooms').draw(map,shadow) end  -- TEST172
  if V.require("RocketRoom").accepts(map) then return V.require("RocketRoom").draw(map,shadow) end
  if map and map.id=='ROUTE_10' then return V.require('LegendaryGarden').draw(map,shadow) end
  if map and map.tileset and V.require('UndergroundRoom').accepts(map) then return V.require('UndergroundRoom').draw(map,shadow) end
  if map and map.id=='GAME_CORNER_PRIZE_ROOM' then return V.require('PrizeRoom').draw(map,shadow) end
+ if V.require('InteriorRooms').accepts(map) then return V.require('InteriorRooms').draw(map,shadow) end  -- TEST173
  local r=prepare(map);if not r then return end
  if shadow then shadow.draw(r.mesh,r.texture)else
   local R=V.require('Voxel3D');local old=R.glassMask
@@ -465,7 +481,11 @@ function M.draw(map,shadow)
   if not ok then error(err)end
  end
 end
+-- Whether Battle Art draws this whole room itself (companions stay out).
+function M.owns(map)return V.require('OakLabRoom').accepts(map) or V.require('RedsHouseRoom').accepts(map) or V.require('RedsBedroomRoom').accepts(map) or V.require('LeagueGateRoom').accepts(map) or V.require('LeagueRooms').accepts(map) or V.require('InteriorRooms').accepts(map)end
 function M.support(map,cx,cy)
+ local interior=V.require('InteriorRooms').support(map,cx,cy)  -- TEST173
+ if interior~=nil then return interior end
  if V.require("CommunityVisuals").casino:get()~="n64memory" then return end
  if map and map.id=='GAME_CORNER' and map.cellTile then
   local t=map:cellTile(cx,cy)
@@ -479,17 +499,32 @@ function M.visibleShell(eye)
   ceiling=eye[2]<69,chandeliers=eye[2]<69}
 end
 function M.invalidate()
+ V.require('ScenicFixtures').invalidate()
+ V.require('OakLabRoom').invalidate()
+ V.require('RedsHouseRoom').invalidate()
+ V.require('RedsBedroomRoom').invalidate()
+ V.require('CeladonRoof').invalidate()
+ V.require('LeagueGateRoom').invalidate()
+ V.require('LeagueRooms').invalidate()
  V.require("RocketRoom").invalidate()
  V.require('LegendaryGarden').invalidate()
  V.require('UndergroundRoom').invalidate()
  V.require('PrizeRoom').invalidate()
+ V.require('InteriorRooms').invalidate()  -- TEST173
  if cached then for _,mesh in pairs(cached.shell or {})do mesh:release()end;cached.mesh:release();cached.texture:release();cached.mask:release();cached=nil end
 end
 function M.setLive(live)
+ V.require('OakLabRoom').setLive(live)
+ V.require('RedsHouseRoom').setLive(live)
+ V.require('RedsBedroomRoom').setLive(live)
+ V.require('CeladonRoof').setLive(live)
+ V.require('LeagueGateRoom').setLive(live)
+ V.require('LeagueRooms').setLive(live)
  V.require("RocketRoom").setLive(live)
  V.require('LegendaryGarden').setLive(live)
  V.require('UndergroundRoom').setLive(live)
  V.require('PrizeRoom').setLive(live)
+ V.require('InteriorRooms').setLive(live)  -- TEST173
  if not live.GAME_CORNER and cached then
   for _,mesh in pairs(cached.shell or {})do mesh:release()end
   cached.mesh:release();cached.texture:release();cached.mask:release();cached=nil

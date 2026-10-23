@@ -100,8 +100,31 @@ local function build()
   mask=love.graphics.newImage(md);mask:setFilter('nearest','nearest')
   mesh=R.newMesh(M.geometry())
 end
+-- Shared world-local anchors for decorations; uses the same points and gate
+-- as the lamp meshes. No dependency on the current camera or neighbor offsets.
+function M.anchors(map)
+ local out={}
+ if not(map and map.id=='LAVENDER_TOWN' and V.require('CommunityVisuals').customCityGround())then return out end
+ for _,p in ipairs(points)do
+  out[#out+1]={x=p[1]*8+4,z=p[2]*8+4,height=37.525,shaftHeight=25,radius=.85}
+ end
+ return out
+end
+local leaguePools=false
 function M.configure(state)
   R.streetLamps=nil
+  leaguePools=false
+  -- TEST165: on the League road the four lamp lights become warm pools
+  -- under the fires (LeagueRoad picks the nearest four).
+  do
+    local ok,pools=pcall(function()return V.require("LeagueRoad").lampPools(state)end)
+    if ok and pools then R.streetLamps=pools;leaguePools=true;return end
+  end
+  -- TEST175: Vermilion Dock's lamps light the quay the same way
+  do
+    local ok,pools=pcall(function()return V.require("DockLights").lampPools(state)end)
+    if ok and pools then R.streetLamps=pools;leaguePools=true;return end
+  end
   if not V.require("CommunityVisuals").customCityGround() then return end
   local map,ox,oz=state.map,0,0
   if map.id~='LAVENDER_TOWN' then
@@ -119,7 +142,7 @@ function M.configure(state)
   R.streetLamps=positions
 end
 function M.draw(state)
-  if not R.streetLamps then return end
+  if not R.streetLamps or leaguePools then return end
   if not mesh then build() end
   local model=Mat4.translate(originX,0,originZ)
   local old=R.glassMask

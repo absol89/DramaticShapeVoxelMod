@@ -299,6 +299,8 @@ local function modelMatrix(arena, groundY, battle, side, actor, metrics)
   groundY=V.require("SafariFooting").ground(battle,arena,side,groundY)
   local worldHeight = math.max(5, math.min(18,
     14 * math.sqrt(metrics.height / 52.25)))
+  -- Onix battle size: preserve its silhouette after the shared height cap.
+  if tonumber(actor.dex) == 95 then worldHeight = worldHeight * 1.6 end
   local battler = battle and battle[side]
   local grow = battler and safeCall(battle, "growInScale", battler) or 1
   grow = tonumber(grow) or 1

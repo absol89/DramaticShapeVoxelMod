@@ -541,6 +541,10 @@ uniform float rippleT; // continuous, independent of paused engine tile ticks
 uniform vec4 faceShade;      // the mesh's own direction shading: E, W, S, N
 uniform float gardenWater;
 uniform float reserveWater;
+uniform float leagueWater;   // TEST166: the League canal (clear, mosaic bed)
+uniform float indoorPool;    // TEST95: Cerulean authored indoor pool
+uniform vec4 leagueLamps[8];  // TEST169: lanterns mirrored in the canal (xyz, strength)
+uniform float leagueLampN;
 uniform float atlasTileScale;
 uniform vec2 atlasSize;      // the tileset atlas, in texels
 uniform float fresnelFloor;
@@ -852,6 +856,55 @@ float gardenNoise(vec2 p) {
   return mix(mix(gardenHash(i),gardenHash(i+vec2(1,0)),f.x),
              mix(gardenHash(i+vec2(0,1)),gardenHash(i+vec2(1,1)),f.x),f.y);
 }
+
+// TEST96: muted submerged mosaic. Small soft light patches belong on
+// the bed; the water surface never carries a bright outlined web.
+vec3 indoorPoolBed(vec2 q, float t) {
+  vec2 cell=floor(q/4.0), f=fract(q/4.0);
+  vec2 edge=min(f,1.0-f)*4.0;
+  float pixel=max(max(fwidth(q.x),fwidth(q.y)),.025);
+  float joint=(1.0-smoothstep(.045,.045+pixel,min(edge.x,edge.y)))
+              *(1.0-smoothstep(.9,2.2,pixel));
+  float tone=sin(dot(cell,vec2(1.73,2.41)))*.009;
+  vec3 bed=vec3(.19,.38,.40)+vec3(tone);
+  bed=mix(bed,vec3(.14,.27,.29),joint*.42);
+  float light=sin(q.x*.31+q.y*.13+t*.35)*sin(q.y*.38-q.x*.17-t*.25);
+  bed+=vec3(.009,.020,.019)*smoothstep(.25,.95,light);
+  return bed;
+}
+
+// A soft reflection of this room's actual two ceiling-light lanes.
+// Cerulean's accepted 5x7 layout has shell bounds (0,16)..(160,224),
+// with six 28-unit-target panel columns and six 36-unit-target rows.
+// Match InteriorGyms' panel layout, without another canvas or scene pass.
+vec3 indoorPoolLight(vec3 pos,vec3 view,float t) {
+  vec3 n=normalize(vec3(.014*sin(pos.x*.13+pos.z*.08+t*.35),1.0,
+                        .012*sin(pos.z*.19-pos.x*.05-t*.45)));
+  vec3 r=reflect(view,n);
+  vec2 q=pos.xz+r.xz*((64.0-.9-.35-pos.y)/max(r.y,.08));
+  float row=floor((q.y-16.0)/(208.0/6.0));
+  float z=16.0+(row+.5)*(208.0/6.0);
+  float dx=min(abs(q.x-160.0/12.0),abs(q.x-160.0*11.0/12.0));
+  float aa=clamp(length(fwidth(q)),.3,3.0);
+  float bar=(1.0-smoothstep(.55,.9+aa,dx))
+           *(1.0-smoothstep(8.0,8.5+aa,abs(q.y-z)));
+  bar*=step(0.0,row)*step(row,5.0)*smoothstep(.08,.15,r.y);
+  float grazing=pow(clamp(1.0-abs(view.y),0.0,1.0),3.0);
+  return vec3(.80,.91,.96)*bar*(.18+.35*grazing);
+}
+
+// TEST96: quiet water, with a refracted bed in the low-cost fallback.
+// The reflective path replaces this bed hint with the actual captured basin.
+vec3 indoorPoolColor(LOVE_HIGHP_OR_MEDIUMP vec3 pos, vec3 view, float t) {
+  vec2 bedUV=pos.xz+clamp(view.xz/max(abs(view.y),.35),vec2(-2.0),vec2(2.0))*7.5;
+  bedUV+=vec2(sin(pos.z*.15+t*.35),sin(pos.x*.18-t*.45))*.30;
+  float grazing=pow(clamp(1.0-abs(view.y),0.0,1.0),3.0);
+  vec3 bed=indoorPoolBed(bedUV,t)*vec3(.70,.94,.98);
+  vec3 body=mix(bed,vec3(.105,.29,.33),.26+grazing*.48);
+  float ripple=sin(pos.x*.13+pos.z*.08+t*.35)*sin(pos.z*.19-pos.x*.05-t*.45);
+  return body+vec3(.004,.009,.011)*ripple;
+}
+
 float gardenRipple(vec2 q, float t) {
   vec2 drift=vec2(cos(t*.10),sin(t*.10))*3.0;
   float flow=gardenNoise(q*.034+drift);
@@ -867,6 +920,11 @@ float gardenRipple(vec2 q, float t) {
 }
 
 float waveRaw(vec2 q) {
+  if (indoorPool > .5) {
+    return .5+.25*sin(dot(q,vec2(.12,.06))+rippleT*.35)
+             +.175*sin(dot(q,vec2(.06,-.20))-rippleT*.5)
+             +.075*sin(dot(q,vec2(.29,.19))+rippleT*.7);
+  }
   if (gardenWater > .5) {
     return .5 + .5*gardenRipple(q,rippleT);
   }
@@ -1125,6 +1183,7 @@ vec4 effect(mediump vec4 color, Image tex, mediump vec2 tc, mediump vec2 sc) {
   // and the bar's centre, so a column is sampled and reflected from one
   // place rather than from wherever inside it the fragment happened to land
   vec3 surf = vec3(col.x + 0.5, hit.y, col.y + 0.5);
+  if (indoorPool > .5) { surf=sheet; col=sheet.xz; face=1.0; }
 
   // Continuous custom ripples do not live on the source tile's pixel grid.
   // waveUV's centre offset can cross an 8px tile edge at fractional columns.
@@ -1138,7 +1197,9 @@ vec4 effect(mediump vec4 color, Image tex, mediump vec2 tc, mediump vec2 sc) {
   float broad = .5 + .25*sin(surf.x*.027 + surf.z*.013)
                    + .25*cos(surf.z*.033 - surf.x*.009);
   vec3 calm = mix(vec3(.13,.25,.34),vec3(.22,.37,.45),broad);
+  calm = mix(calm, mix(vec3(.05,.30,.37),vec3(.09,.42,.48),broad), leagueWater);
   vec3 material = mix(p.rgb,calm,gardenWater);
+  if (indoorPool > .5) material=indoorPoolColor(surf,view,rippleT);
   float reliefShade = mix(face,mix(1.0,face,.40),gardenWater);
   vec3 base = material * vShade * reliefShade * sunlight(vSun) * dayTint;
 
@@ -1146,7 +1207,7 @@ vec4 effect(mediump vec4 color, Image tex, mediump vec2 tc, mediump vec2 sc) {
   // takes from the neighbours it stands beside -- rather than an invented
   // wobble, so the sky and the sun break along the bars instead of across
   // them. Opened up by the lean, which is about to squash it (see below).
-  vec3 n = waveNormal(col, waveSlope * (1.0 + lean * waveSlopeLean) * mix(1.0,.38,gardenWater));
+  vec3 n = waveNormal(col, waveSlope * (1.0 + lean * waveSlopeLean) * mix(1.0,.38,gardenWater) * mix(1.0,.45,indoorPool));
   vec3 r = reflect(view, n);
   // the same reflection off a LEVEL surface, which is what the lean below
   // moves: the difference between the two is this column's own contribution
@@ -1215,21 +1276,92 @@ vec4 effect(mediump vec4 color, Image tex, mediump vec2 tc, mediump vec2 sc) {
       float waterDepth=sheet.y-bed.y;
       if (waterDepth>.10 && waterDepth<40.0) {
         vec3 bedColor=Texel(underColor,tuv).rgb;
-        float transmission=exp(-waterDepth*.065);
-        vec3 tinted=bedColor*vec3(.78,.94,1.0);
-        base=mix(base,tinted,transmission*.58);
+        float transmission=exp(-waterDepth*mix(mix(.065,.032,leagueWater),.021,indoorPool));
+        vec3 tinted=bedColor*mix(vec3(.78,.94,1.0),vec3(.66,.97,1.0),leagueWater);
+        // TEST166: caustics -- the sun's light focused into a moving web on
+        // the League canal's mosaic bed.
+        if (leagueWater > .5) {
+          vec2 cq=bed.xz*.21;
+          float ca=gardenNoise(cq+vec2(rippleT*.19,rippleT*.12));
+          float cb=gardenNoise(cq*1.63-vec2(rippleT*.15,-rippleT*.17)+ca*1.4);
+          float web=pow(1.0-abs(2.0*cb-1.0),7.0);
+          tinted+=vec3(.42,.62,.60)*web*max(dayTint,vec3(.10))*transmission;
+        }
+        base=mix(base,tinted,transmission*mix(mix(.58,.84,leagueWater),.88,indoorPool));
         f=mix(.14,.78,pow(1.0-ct,3.0));
       }
     }
   }
 #endif
+  if (indoorPool > .5) f=.08+.55*pow(clamp(1.0-ct,0.0,1.0),4.0);
   vec3 rgb = mix(base, refl, clamp(f * mix(1.0,.78,gardenWater), 0.0, 1.0));
+  if (indoorPool > .5) rgb+=indoorPoolLight(surf,view,rippleT)*dayTint;
   // Surface detail belongs above transmitted bed color. Small broken crests
   // remain readable at night even when the reflected sky is nearly uniform.
   float ripple=waveRaw(surf.xz);
   float crest=smoothstep(.68,.94,ripple);
-  rgb += gardenWater * (vec3(.024,.046,.065)*(ripple-.5)
+  rgb += gardenWater * mix(1.0,.20,indoorPool) * (vec3(.024,.046,.065)*(ripple-.5)
          + vec3(.030,.058,.076)*crest) * max(dayTint,vec3(.38));
+  // TEST166: sun sparkle on the League canal's crests
+  rgb += leagueWater * vec3(.85,.82,.72) * pow(crest,5.0) * .45 * dayTint;
+  // TEST169: THE LEAGUE CANAL, ALIVE. Its blue stays; what it gains is
+  // depth and light that moves:
+  //  * a second, finer ripple set rides on the swell for the light to
+  //    break on;
+  //  * looking INTO the water, the web of light on the mosaic bed lies a
+  //    few units down and slides against the surface as the view moves,
+  //    bent by the ripples above it (parallax, not a decal);
+  //  * slow drifts of deeper and shallower blue;
+  //  * the sun or moon glitters on the ripples;
+  //  * after dark the canal glows from below, and the lanterns along the
+  //    walk are mirrored in it as warm light breaking on the water.
+  if (leagueWater > .5) {
+    float nightK = 1.0 - smoothstep(.62, .95, dot(dayTint, vec3(.3333)));
+    float tt = rippleT;
+    float r1 = gardenNoise(surf.xz*.42 + vec2(tt*.31, -tt*.23));
+    float r2 = gardenNoise(surf.xz*.71 - vec2(tt*.27, tt*.35) + r1*1.7);
+    vec3 nf = normalize(n + vec3((r1-.5)*.55, 0.0, (r2-.5)*.55));
+    vec3 rf = reflect(view, nf);
+    float dv = max(-view.y, .25);
+    vec2 bedP = surf.xz + view.xz/dv*7.5 + nf.xz*3.2;
+    vec2 cq = bedP*.15;
+    float ca = gardenNoise(cq + vec2(tt*.12, tt*.08));
+    float cb = gardenNoise(cq*1.7 - vec2(tt*.10, -tt*.13) + ca*1.3);
+    float cc = gardenNoise(cq*3.1 + vec2(-tt*.16, tt*.11) + cb*.9);
+    float web = pow(1.0-abs(2.0*cb-1.0), 5.0)*.75 + pow(1.0-abs(2.0*cc-1.0), 8.0)*.45;
+    float deepN = gardenNoise(surf.xz*.028 + vec2(3.1 + tt*.012, 7.7));
+    vec3 body = mix(vec3(.025,.20,.36), vec3(.06,.40,.52), deepN);
+    // by day: the sunlit web shows through, deeper patches darken
+    rgb += (vec3(.09,.19,.18)*web - vec3(.03,.05,.04)*(1.0-deepN)) * dayTint * (1.0-nightK);
+    // after dark: lit from below
+    rgb += nightK * (body*.50 + vec3(.06,.27,.29)*web);
+    // the sun or the moon, glittering on the ripples
+    if (bodyOn > .5) {
+      float g = max(dot(rf, bodyDir), 0.0);
+      float tw = smoothstep(.45, .85, gardenNoise(surf.xz*1.9 + vec2(tt*.9, -tt*.7)));
+      float glit = (pow(g, 90.0)*.55 + pow(g, 600.0)*2.2) * tw;
+      vec3 gc = bodyMoon > .5 ? vec3(.70,.82,1.0) : vec3(1.0,.93,.78)*dayTint;
+      rgb += gc * glit * (bodyMoon > .5 ? .65 : 1.2);
+    }
+    // the lanterns along the walk, mirrored and broken by the ripples
+    if (nightK > .02 && leagueLampN > .5) {
+      vec3 warm = vec3(0.0);
+      for (int i = 0; i < 8; i++) {
+        vec4 lm = leagueLamps[i];
+        if (lm.w > 0.0) {
+          vec3 L = lm.xyz - surf;
+          float d = length(L);
+          vec3 ld = L / max(d, .001);
+          float sp = max(dot(rf, ld), 0.0);
+          float a = lm.w / (1.0 + d*d/1600.0);
+          warm += a * (pow(sp, 30.0)*.95 + pow(sp, 280.0)*3.2);
+          float dx = length(L.xz);
+          warm += a * .20 * exp(-dx*dx/300.0);
+        }
+      }
+      rgb += vec3(1.0,.58,.24) * warm * nightK;
+    }
+  }
 
   // THE CAST, mirrored in this plane (see CAST_ALPHA). Read at this
   // fragment's own place on the screen, because that is where the mirrored
@@ -1353,6 +1485,7 @@ end
 -- ------- the pass
 
 local active = nil        -- the shader this pass bound, or nil
+local leagueLamps, leagueLampsAt = nil, -1   -- TEST169 (see setLeagueLamps)
 
 -- The ripple phase. Driven by the ENGINE's tile-animation clock, the same
 -- 60Hz counter the water tiles rotate on, so the ripple and the art it
@@ -1414,6 +1547,9 @@ function Water.begin(ctx, skyOnly)
 
   send("gardenWater", 0)
   send("reserveWater", 0)
+  send("leagueWater", 0)
+  send("indoorPool", 0)
+  send("leagueLampN", 0)
   send("vp", "row", ctx.vp)
   send("eye", ctx.eye)
   send("curve", ctx.curve)
@@ -1565,17 +1701,38 @@ end
 -- Draw one water mesh with `model` applied. Mirrors Voxel3D.draw, minus the
 -- camera-ward pull (a flat sheet has nothing to lean over) and the separate
 -- sun transform (water is terrain: the sun saw the same matrix).
-function Water.draw(mesh, texture, model)
+function Water.draw(mesh, texture, model, indoorPool)
   if not (active and mesh) then return end
   if texture then mesh:setTexture(texture) end
   local safariScale=V.require("SafariMaterials").texelScale(texture)
   local atlasScale=safariScale or V.require("DecorAtlas").texelScale(texture)
   local garden = atlasScale>1 and V.require("CommunityVisuals").customRoads()
+  -- TEST166: the League canal rides the planted-water path (continuous
+  -- ripples, the bed seen through the surface) with its own clear finish.
+  local league = V.require("TerrainAtlas").isLeague(texture)
+  if league or indoorPool then garden=true end
+  pcall(active.send,active,"indoorPool",indoorPool and 1 or 0)
+  pcall(active.send,active,"leagueWater",league and 1 or 0)
+  -- TEST169: the lanterns this canal mirrors (handed in this frame)
+  if league then
+    local now = love.timer and love.timer.getTime() or 0
+    if leagueLamps and #leagueLamps > 0 and now - leagueLampsAt < .5 then
+      local args = {}
+      for i = 1, 8 do
+        local l = leagueLamps[i]
+        args[i] = l and { l[1], l[2], l[3], l[4] or 1 } or { 0, 0, 0, 0 }
+      end
+      pcall(active.send, active, "leagueLamps", (table.unpack or unpack)(args))
+      pcall(active.send, active, "leagueLampN", math.min(8, #leagueLamps))
+    else
+      pcall(active.send, active, "leagueLampN", 0)
+    end
+  end
   pcall(active.send,active,"reserveWater",safariScale and 1 or 0)
   -- Existing town pads start at +.14; keep the crest below them. Moving
   -- normals/reflections remain full strength. Safari's taller plants retain
   -- their accepted .22 profile; unmodified atlases retain the voxel waves.
-  pcall(active.send,active,"waveHeight",safariScale and .22 or garden and .12 or Water.WAVE_HEIGHT)
+  pcall(active.send,active,"waveHeight",indoorPool and .08 or safariScale and .22 or garden and .12 or Water.WAVE_HEIGHT)
   pcall(active.send,active,"atlasTileScale",atlasScale)
   pcall(active.send,active,"gardenWater",(safariScale or garden) and 1 or 0)
   pcall(active.send, active, "model", "row", model or Mat4.identity())
@@ -1590,6 +1747,14 @@ function Water.draw(mesh, texture, model)
     end
   end
   love.graphics.draw(mesh)
+end
+
+-- TEST169: the lanterns the League canal mirrors after dark. LeagueRoad
+-- hands in the nearest few (world xyz, strength) every frame; it draws
+-- before the water does. A list older than half a second is ignored.
+function Water.setLeagueLamps(list)
+  leagueLamps = list
+  leagueLampsAt = love.timer and love.timer.getTime() or 0
 end
 
 function Water.finish()

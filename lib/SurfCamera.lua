@@ -37,11 +37,15 @@ function M.measure(me, posed, state)
   return {radius=66, top=math.max(ground+64,seat+24),seat=seat,distance=180,minDistance=90}
 end
 -- Zoomed-in framing targets the seated trainer, not the mount's highest fin.
-function M.framing(surf, zoom)
+function M.framing(surf, zoom, maxHeight)
   local wide=math.max(0,math.min(1,((zoom or 1)-0.4)/0.6))
   wide=wide*wide*(3-2*wide)
   local shoulder=surf.seat+9
   local high=math.max(surf.top+8,surf.seat+13)
-  return shoulder+(high-shoulder)*wide, wide
+  local height=shoulder+(high-shoulder)*wide
+  -- A wide outdoor mount estimate must not lift the rider's cave camera
+  -- through the roof. Keep the zoom blend; only constrain its height.
+  if maxHeight then height=math.min(height,maxHeight) end
+  return height, wide
 end
 return M

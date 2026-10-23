@@ -3000,6 +3000,9 @@ return {
       -- Keep the wall-scroll facade, but cap it with the adjacent plain wall.
       wall = { 52, 67, 82, 83 },
       top_tiles = { [52] = 5, [67] = 5, [82] = 5, [83] = 5 },
+      -- TEST38: the redesigned lab's tables stand waist-high (lib/OakLabRoom
+      -- TABLE); the starter balls and Pokedexes ride this support height.
+      heights = { table = 12 },
     },
   },
 

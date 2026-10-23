@@ -163,7 +163,15 @@ function WorldUnderlay.draw(state, cx, cy, resolvedColor)
   -- The untextured plane follows the camera focus exactly. Its 65K-wide edge
   -- therefore stays beyond the practical far plane forever, without making a
   -- new GPU mesh at a map boundary or visibly sliding any pattern underfoot.
-  Voxel3D.draw(mesh, texture, Mat4.translate(cx or 0, 0, cy or 0))
+  -- TEST167: the League maps' gorges drop far below Y=-20; lower the plane
+  -- there so it stays beneath the valley floor.
+  local drop = 0
+  local okL, LA = pcall(V.require, "LeagueArchitecture")
+  if okL and LA and LA.underlayDrop then
+    local okD, d = pcall(LA.underlayDrop, state and state.map)
+    if okD and type(d) == "number" then drop = d end
+  end
+  Voxel3D.draw(mesh, texture, Mat4.translate(cx or 0, drop, cy or 0))
   Voxel3D.glass(true)
   Voxel3D.seams(true)
   Voxel3D.lighting(true)

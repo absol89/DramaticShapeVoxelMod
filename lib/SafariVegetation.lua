@@ -10,7 +10,7 @@ local function ellipsoid(G,x,y,z,rx,ry,rz,seed,n,lat)
   end
  end
  for j=1,lat do for i=1,n do local k=i%n+1
-  G.face(rings[j][i],rings[j][k],rings[j+1][k],rings[j+1][i],'forestCore',.91+.10*math.sin(i+seed))
+  G.face(rings[j][i],rings[j][k],rings[j+1][k],rings[j+1][i],'tropicCore',.91+.10*math.sin(i+seed))
  end end
 end
 local function frond(G,a,b,width,seed,feathered)
@@ -26,7 +26,7 @@ local function frond(G,a,b,width,seed,feathered)
   local row={{c[1]+ux*w,c[2]-.32*w+curl,c[3]+uz*w},c,{c[1]-ux*w,c[2]-.42*w-curl,c[3]-uz*w}}
   if prev then
    for k=1,2 do
-    G.face(prev[k],prev[k+1],row[k+1],row[k],'forestLeaf',k==1 and 1.03 or .83)
+    G.face(prev[k],prev[k+1],row[k+1],row[k],'tropicLeaf',k==1 and 1.03 or .83)
     G.out[#G.out].uv={{0,(j-1)/6},{1,(j-1)/6},{1,t},{0,t}}
    end
    -- The midrib follows the leaf's arch; no straight floating stick below it.
@@ -44,7 +44,7 @@ local function frond(G,a,b,width,seed,feathered)
     local p={cx+ux*span*.7*side,cy-span*.25,cz+uz*span*.7*side}
     local q={cx+ux*span*1.4*side+dx*.065,cy-span*.56,cz+uz*span*1.4*side+dz*.065}
     local r={p[1]+dx*.053,p[2]-.09,p[3]+dz*.053}
-    G.face(p,q,r,r,'forestLeaf',.87+(j%3)*.065)
+    G.face(p,q,r,r,'tropicLeaf',.87+(j%3)*.065)
    end
   end
  end
@@ -74,7 +74,7 @@ function M.template(kind,variant)
      local ux,uz=-math.sin(aa),math.cos(aa)
      local root={cx,cy,cz};local tip={cx+math.cos(aa)*.65,cy+.8,cz+math.sin(aa)*.65}
      local left={cx+ux*.52,cy+.28,cz+uz*.52};local right={cx-ux*.52,cy+.28,cz-uz*.52}
-     G.face(root,left,tip,tip,'forestLeaf',1.02);G.face(root,tip,right,right,'forestLeaf',.86)
+     G.face(root,left,tip,tip,'tropicLeaf',1.02);G.face(root,tip,right,right,'tropicLeaf',.86)
     end
     for j=0,3+tier do local aa=j*2.399+variant+i
      local radius=4.8+(j%2)*.9

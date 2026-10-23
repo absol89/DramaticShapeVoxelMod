@@ -156,9 +156,27 @@ function CharacterRenderers.first(method, context)
     if Items.accepts(context) then
       return Items.draw(context,method=='drawShadow' and V.require('ShadowMap') or nil)
     end
+    -- TEST191: the Strength boulders are solid rock (StrengthBoulders)
+    local okB,Boulders=pcall(V.require,'StrengthBoulders')
+    -- TEST192: the push dust is drawn in 3D round the boulder; the flat
+    -- smoke tiles are set aside while it runs (and put back after)
+    if okB and Boulders and Boulders.maintain and context then pcall(Boulders.maintain,context.state) end
+    if okB and Boulders and Boulders.accepts(context) then
+      return Boulders.draw(context,method=='drawShadow' and V.require('ShadowMap') or nil)
+    end
   end
   discoverExports()
   if not CALLBACKS[method] then return false end
+  -- TEST200: in a League stadium battle the opponent is drawn beside their
+  -- Pokemon rather than on its spot (LeagueStadium.trainerStand).
+  if (method=='drawEntity' or method=='drawShadow' or method=='drawReflection')
+      and type(context)=='table' and not context.isPlayer then
+    local okL,L=pcall(V.require,'LeagueStadium')
+    if okL and L and L.trainerStand then
+      local okT,nx,ny=pcall(L.trainerStand,context)
+      if okT and nx and ny then context.px,context.py=nx,ny end
+    end
+  end
   for _, entry in ipairs(CharacterRenderers.entries) do
     local fn = not entry.removed and entry.spec[method] or nil
     if type(fn) == "function" then

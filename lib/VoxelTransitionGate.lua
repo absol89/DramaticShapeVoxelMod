@@ -1,7 +1,6 @@
--- Visual blackout for destination loads which cannot safely reveal a partly
--- generated voxel scene. Ordinary doors, stairs, caves and map connections do
--- not use it: only Continue/boot and explicit travel moves (Fly, Teleport, Dig
--- and Escape Rope) arm the gate.
+-- Bounded presentation cover for voxel loads. Continue/travel arm ahead of
+-- the map swap; ordinary crossings arm only when no complete frame exists.
+-- This owns no input, transition callbacks or world simulation.
 
 local V = ...
 
@@ -11,13 +10,35 @@ local Gate = {
   -- turn a presentation effect into a soft lock. Healthy builds normally clear
   -- in a fraction of this; after the ceiling the engine's 2D world is safer.
   MAX_SECONDS = 20,
+  -- TEST145: the 20 s ceiling used to fire on big areas (Lavender after Fly)
+  -- that were still building fine, dropping the player into 2D for most of
+  -- a minute. Now the card stays while the build is visibly progressing and
+  -- only gives up after STALL_SECONDS with no build work at all, or at the
+  -- hard ceiling HARD_SECONDS. A genuine renderer failure still exits at once.
+  STALL_SECONDS = 10,
+  HARD_SECONDS = 60,
 }
+local progressMark, progressAt = nil, 0
+local function buildProgress()
+  local ok, B = pcall(V.require, "BuildBudget")
+  return ok and B and B.progress or nil
+end
 
 local active = false
 local map = nil
 local targetId = nil
 local ready = false
 local elapsed = 0
+local automatic = false
+local suppressedMap, observedMap
+
+local function warn(reason, destination)
+  local log = V.mod and V.mod.log
+  if log and log.warn then
+    pcall(log.warn, log, "Legendary loading fallback: %s; map=%s",
+      reason, tostring(destination and destination.id or targetId))
+  end
+end
 
 function Gate.qualifies(opts, arrival)
   local via = opts and opts.via
@@ -31,13 +52,31 @@ local function voxelEnabled()
   return Voxel.active() and Voxel3D.available()
 end
 
-function Gate.arm(destinationOrId)
+function Gate.arm(destinationOrId, cold)
   if not destinationOrId then return end
   map = type(destinationOrId) == "table" and destinationOrId or nil
   targetId = map and map.id or destinationOrId
   active = true
   ready = false
   elapsed = 0
+  automatic = cold == true
+  suppressedMap = nil
+  progressMark, progressAt = buildProgress(), 0
+end
+
+-- Do not re-arm every frame after a timeout or a genuine renderer failure.
+-- A successful frame or a different map permits the next loading episode.
+function Gate.coverCold(destination)
+  if not destination or active or suppressedMap == destination then return end
+  Gate.arm(destination, true)
+end
+
+function Gate.fail(destination, reason)
+  if suppressedMap ~= destination then
+    warn(reason or "renderer failure", destination)
+  end
+  Gate.cancel()
+  suppressedMap = destination
 end
 
 -- startWarpTo arms before the engine's fade and before the destination Map
@@ -52,10 +91,14 @@ end
 function Gate.cancel(destination)
   if destination ~= nil and destination ~= map then return end
   active, map, targetId, ready, elapsed = false, nil, nil, false, 0
+  automatic = false
 end
 
 function Gate.observe(destination, isReady)
+  if isReady and suppressedMap == destination then suppressedMap = nil end
   if not active or destination ~= map then return end
+  -- Cold crossings have no minimum hold: reveal the first complete frame.
+  if isReady and automatic then Gate.cancel(); return end
   if isReady then
     ready = true
   else
@@ -64,19 +107,37 @@ function Gate.observe(destination, isReady)
 end
 
 function Gate.update(dt, enabled, destination)
+  if destination and observedMap ~= destination then
+    observedMap = destination
+    if suppressedMap ~= destination then suppressedMap = nil end
+  end
+  if not enabled then suppressedMap = nil end
   if not active then return end
   if not enabled then
     Gate.cancel()
     return
   end
   elapsed = elapsed + math.max(0, dt or 0)
-  if elapsed >= Gate.MAX_SECONDS then
+  local mark = buildProgress()
+  if mark ~= progressMark then progressMark, progressAt = mark, elapsed end
+  local stalled = elapsed - progressAt >= Gate.STALL_SECONDS
+  if (elapsed >= Gate.MAX_SECONDS and (stalled or mark == nil))
+      or elapsed >= Gate.HARD_SECONDS then
+    local timedOut = map or destination
+    warn(elapsed >= Gate.HARD_SECONDS and "60-second safety timeout"
+         or "build stalled", timedOut)
     Gate.cancel()
+    suppressedMap = timedOut
     return
   end
   if ready and elapsed >= Gate.HOLD_SECONDS then
     Gate.cancel()
   end
+end
+
+-- Read-only presentation details; the card cannot arm or extend the gate.
+function Gate.status()
+  return { targetId = targetId, ready = ready, elapsed = elapsed, active = active }
 end
 
 function Gate.blocking(destination)
@@ -118,6 +179,7 @@ end
 -- temporal contract deterministic in the headless SDK suite.
 function Gate._reset()
   Gate.cancel()
+  suppressedMap, observedMap = nil, nil
 end
 
 return Gate

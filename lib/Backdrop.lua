@@ -1,5 +1,5 @@
 -- The BACKDROP: a distant horizon for the outdoor world.
--- payload-version: 9
+-- payload-version: 10
 --
 -- Dramatic Shape's outdoor maps end where their meshes end -- past the
 -- last connected map is sky meeting nothing.  This hangs a painted
@@ -192,6 +192,11 @@ local function isOutdoor(map)
   end
   local tid = def.tileset or (map.tileset and map.tileset.id)
   if tid and OPEN_AIR_TILESETS[tid] then return true end
+  -- TEST179: a room under a glass roof
+  if okDN and DayNight and DayNight.isOpenSky then
+    local okS, open = pcall(DayNight.isOpenSky, map)
+    if okS and open then return true end
+  end
   local ok, outdoor = pcall(function()
     local Map = require("src.world.Map")
     return Map.isOutdoor and Map.isOutdoor(def)
@@ -342,6 +347,17 @@ local function abandoned()
   return not CommunityVisuals.customSky()
 end
 
+local function landscapeSeason()
+  -- The same resolved holiday as the decorations includes AUTO's Christmas
+  -- dates. Settled snow controls the distant ground; falling snow is separate.
+  local ok, snowy, autumn = pcall(function()
+    local settings = V.require("SeasonalDecor").Settings
+    return settings.get("holiday") == "christmas"
+       and settings.get("groundSnow") == "full", V.require("AutumnGround").active()
+  end)
+  return ok and snowy or false, ok and autumn or false
+end
+
 function Backdrop.draw(state)
   if abandoned() then return end
   local cfg = { backdrop = true }
@@ -357,6 +373,8 @@ function Backdrop.draw(state)
     return
   end
 
+  local snowy, autumn = landscapeSeason()
+  Scenic.setSeason(snowy,autumn)
   local tex,packed = texture()
   if not tex then return end
   packed=not not packed
@@ -389,13 +407,36 @@ function Backdrop.draw(state)
     local night=(phase.night or 0)+(phase.violet or 0)*.35
     nr,ng,nb=1-.32*night,1-.27*night,1-.16*night
   end
+  -- TEST135: aerial haze. The painting used to reach the camera at full
+  -- clarity and warmth while the 3D world in front sat in blue night light,
+  -- so it read as a picture pinned behind a wall. Fade the distant meadow and
+  -- the panorama's foot toward the sky's own horizon band (already the
+  -- hour's color), more strongly at night, less on the high peaks.
+  local hazeColor, hazeDensity
+  do
+    local okSky, band = pcall(function() return V.require("Sky").haze() end)
+    if okSky and band then
+      local dark = 0
+      if okDN and DayNight then
+        local okMix, phase = pcall(function() return DayNight.mix(DayNight.time()) end)
+        if okMix and phase then
+          dark = math.min(1, (phase.night or 0) + (phase.violet or 0) * .6
+            + ((phase.dusk or 0) + (phase.dawn or 0)) * .25)
+        end
+      end
+      hazeColor = { band[1], band[2], band[3] }
+      -- 1-exp(-d*640): about 24% by day and 50% at night at the panorama foot
+      hazeDensity = .00043 + dark * .00065
+    end
+  end
   local drew = guarded(function()
     -- behind everything: test against depth but never write to it, so no
     -- real geometry can ever be occluded by the painting
     love.graphics.setDepthMode("lequal", false)
+    if hazeColor then Voxel3D.haze(hazeColor, hazeDensity, 120, .0032) end
     -- the distant ground first, so the painted panorama draws over its rim
     underMesh = underMesh or buildUnder()
-    local ground = V.require('SafariReserve').enabled(map)
+    local ground = not snowy and not autumn and V.require('SafariReserve').enabled(map)
       and V.require('SafariMaterials').distantGround() or groundTexture()
     local fallback = ground == nil
     ground = ground or white()
@@ -413,6 +454,7 @@ function Backdrop.draw(state)
     local model = Mat4.mul(Mat4.translate(px, 0, pz), Mat4.rotateY(yaw))
     Voxel3D.draw(mesh, tex, model)
   end)
+  if hazeColor then pcall(Voxel3D.haze) end
   if drew then
     -- Report once per selected material (also available in the existing status
     -- bridge). This distinguishes an old active module, custom override, or a
@@ -421,7 +463,7 @@ function Backdrop.draw(state)
     local material=packed and (Scenic.panoramaStatus or "four-sector atlas")
       or (imagePath~=builtin and ("external panorama: "..tostring(imagePath))
           or ("legacy fallback; "..tostring(Scenic.panoramaStatus)))
-    local report="Legendary TEST134 backdrop: "..material
+    local report="Legendary TEST27 backdrop: "..material
     if report~=lastReport then
       lastReport=report
       if V.mod and V.mod.log and V.mod.log.info then

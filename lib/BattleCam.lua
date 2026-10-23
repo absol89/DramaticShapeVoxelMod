@@ -294,14 +294,59 @@ function BattleCam.reset(arena)
   -- TEST102. The failure came after free-roam yaw/pitch were copied into it
   -- and the eye was steered into the enlarged Legendary tree crowns. Safe
   -- arenas therefore open on the proven authored pose instead.
+  BattleCam.seedRefused = nil
   if arena and arena.cameraSafe then
     BattleCam.recentre()
-  else
-    BattleCam.seedFromFreeCamera()
+  elseif BattleCam.seedFromFreeCamera() then
+    -- TEST233: the saved free-roam angle is a wish, not a promise. On
+    -- Route 1 it put the eye inside a Legendary tree crown, or behind a row
+    -- of them, for the whole intro. Keep it only when that pose is clear of
+    -- crowns (BattleCrowns); otherwise open on the solved rig's own angle
+    -- and height, which the arena was chosen for (the lens the player chose
+    -- stays: zoom never moves the eye). Any failure keeps the seed, exactly
+    -- as before; the spring arm still guards whatever pose results.
+    local ok, clear = pcall(BattleCam.seedClear, arena)
+    if ok and clear == false then
+      BattleCam.orbit, BattleCam.orbitGoal = 0, 0
+      BattleCam.pitch, BattleCam.pitchGoal = 0, 0
+      BattleCam.seedRefused = true
+      local log = V.mod and V.mod.log
+      if log and log.info then
+        pcall(log.info, log, "TEST233 battle camera: the saved free-camera "
+          .. "angle looks through a tree crown here; opening on the solved angle")
+      end
+    end
   end
   BattleCam.orbit = BattleCam.orbitGoal
   BattleCam.pitch = BattleCam.pitchGoal
   BattleCam.zoom  = BattleCam.zoomGoal
+end
+
+-- TEST233: is the pose the battle is about to open on (the current GOALS)
+-- clear of tree crowns -- the eye outside every crown and both Pokemon in
+-- plain view past them? True when there is nothing to test (no Legendary
+-- trees, no map); false only for a real crown in the way.
+function BattleCam.seedClear(arena)
+  if not (arena and arena.map and arena.mid) then return true end
+  local Crowns = V.require("BattleCrowns")
+  local set = Crowns.forArena(arena.map, arena)
+  if not (set and set.count and set.count > 0) then return true end
+  local g = 0
+  local okS, VoxelScene = pcall(V.require, "VoxelScene")
+  if okS and VoxelScene and VoxelScene.groundAt and arena.playerCell then
+    local okH, h = pcall(VoxelScene.groundAt, arena.map,
+                         arena.playerCell[1], arena.playerCell[2])
+    if okH and tonumber(h) then g = h end
+  end
+  local o, p, z = BattleCam.orbit, BattleCam.pitch, BattleCam.zoom
+  BattleCam.orbit, BattleCam.pitch = BattleCam.orbitGoal, BattleCam.pitchGoal
+  BattleCam.zoom = BattleCam.zoomGoal
+  local ok, cam = pcall(BattleCam.rig, arena, g)
+  BattleCam.orbit, BattleCam.pitch, BattleCam.zoom = o, p, z
+  if not (ok and cam and cam.eye) then return true end
+  local ta, tb = Crowns.targets(arena, g)
+  local clear = Crowns.poseClear(set, cam.eye, ta, tb, cam.focus)
+  return clear and true or false
 end
 
 -- Back to the solved shot, for anything that wants the composition as

@@ -61,6 +61,23 @@ AntiAlias.LABEL = "AA"
 AntiAlias.setting = ModSetting.new(AntiAlias.KEY, AntiAlias.LABEL,
                                    { 0, 2, 4 }, { "OFF", "2X", "4X" })
 
+-- TEST184: RENDER SCALE (PERFORMANCE). The opposite end of the same knob:
+-- the 3D pass renders SMALLER than the window and the fold below scales it
+-- back up (bilinear). The HUD, menus and text are drawn after and stay at the
+-- screen's full resolution; only the diorama is softened. On a phone that is
+-- GPU-bound out of doors, 75% is 56% of the pixels.
+AntiAlias.scaleSetting = ModSetting.new("legendaryRenderScale", "RENDER SCALE",
+  { "100", "85", "75", "67", "50" }, { "100%", "85%", "75%", "67%", "50%" }, 1)
+-- PerfProbe's temporary override (a number), never persisted
+AntiAlias.probeScale = nil
+
+function AntiAlias.renderScale()
+  if AntiAlias.probeScale then return AntiAlias.probeScale end
+  local ok, v = pcall(AntiAlias.scaleSetting.get, AntiAlias.scaleSetting)
+  local n = ok and tonumber(v) or 100
+  return math.max(0.4, math.min(1, (n or 100) / 100))
+end
+
 -- The scale the pass currently open was actually expanded by (see expand).
 -- 1 while there is no supersampling in force, which is also what every
 -- reader gets on a frame that never opened a pass at all.
@@ -74,8 +91,9 @@ end
 -- clamped to what the driver will actually allocate.
 local function wanted()
   local n = AntiAlias.samples()
-  if n <= 1 then return 1 end
-  return math.sqrt(n)
+  local r = AntiAlias.renderScale()
+  if n <= 1 then return r end
+  return math.sqrt(n) * r
 end
 
 -- The biggest canvas this driver admits to, or nil where it will not say.
@@ -106,7 +124,7 @@ function AntiAlias.expand(w, h)
     -- than a row that silently does nothing at that size
     s = math.min(s, max / math.max(1, w), max / math.max(1, h))
   end
-  if not (s > 1.01) then
+  if math.abs(s - 1) < 0.01 then
     live = 1
     return w, h
   end
@@ -215,7 +233,13 @@ function AntiAlias.resolve(canvas, w, h, slot)
   love.graphics.setBlendMode("replace", "premultiplied")
   if sh then
     love.graphics.setShader(sh)
-    pcall(sh.send, sh, "tap", { 0.5 / cw, 0.5 / ch })
+    -- TEST184: scaling UP (RENDER SCALE) is one bilinear tap; the box is
+    -- only for folding a supersampled pass down
+    if cw < w then
+      pcall(sh.send, sh, "tap", { 0, 0 })
+    else
+      pcall(sh.send, sh, "tap", { 0.5 / cw, 0.5 / ch })
+    end
   end
   local drew = pcall(function()
     love.graphics.setCanvas(target)

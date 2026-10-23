@@ -157,7 +157,7 @@ end
 -- void to wants -- the overworld battle's arena shot is one of those. The
 -- gradient is added on top of this by skyFor, for the free-roam camera alone.
 function VoxelScene.skyColor(map, t)
-  if not (map and map.def and (Map.isOutdoor(map.def) or DayNight.isOpenForest(map) or map.id == 'SAFARI_ZONE_CENTER')) then return nil end
+  if not (map and map.def and (Map.isOutdoor(map.def) or DayNight.isOpenAir(map) or map.id == 'SAFARI_ZONE_CENTER' or DayNight.isOpenSky(map))) then return nil end
   if not t or t <= 0 then return nil end
   local sky = VoxelScene.skyShade(SKY_SHADE, t)
   -- outdoors the flat fill follows the CLOCK: it becomes the hour's haze --
@@ -179,6 +179,7 @@ end
 -- flat fill it has always had -- there is no gradient to see from down there,
 -- and the arena's look is not this rung's to change.
 local function skyFor(map)
+  if V.require("ScenicViews").roof(map) then return Sky.dress(V.require("ScenicViews").sky()) end
   if map and map.tileset and map.tileset.id == "CAVERN" then
     return { .045, .030, .034, 1 }
   end
@@ -450,6 +451,18 @@ local function drawEntity(sprite, px, py, facing, phase, flip, gh, colors,
 end
 
 VoxelScene.drawEntity = drawEntity
+-- Parade fallback cards use the same frame and caster as the stock pass.
+-- Export beside drawEntity so the Collection's runtime scene patch keeps
+-- this helper when it replaces the actor loop.
+function VoxelScene.drawEntityShadow(sprite,px,py,facing,phase,flip,gh,colors,lift,visualAnchorY)
+  local def=sprite.def
+  local frame,mirror=frameFor(def,facing,phase,flip)
+  local mesh=SpriteBillboards.shadowQuad(def,frame,visualAnchorY)
+  if not mesh then return false end
+  ShadowMap.draw(mesh,sprite:resolveImage(),
+    ShadowMap.snug(Voxel3D.casterMatrix(px,py,gh+(lift or 0),mirror)))
+  return true
+end
 
 -- The player's silhouette, for wherever the scenery is standing in front of
 -- them (Voxel3D.beginGhost inverts the depth test around this call).
@@ -486,7 +499,7 @@ end
 -- update + render). Keep stable masks/live metadata and reuse the output arrays.
 local neighborhood = { map = nil, count = 0, rows = {} }
 local cachedMasks = {}
-local lastTreeLiveKey
+local lastTreeLiveKey, lastKeepPrevious
 local CacheTrace = V.require("CacheTrace")
 local nbMeshBuf, nbWaterBuf, nbVisualShadowBuf = {}, {}, {}
 local lastCompleteCanvas, lastCompleteW, lastCompleteH = nil, 0, 0
@@ -510,7 +523,6 @@ end
 
 local function rebuildNeighborhood(state)
   local nbs = state.neighbors or {}
-  local live = { [state.map.id] = true }
   local masks = {}
 
   neighborhood.map = state.map
@@ -523,7 +535,6 @@ local function rebuildNeighborhood(state)
     r.map, r.ox, r.oy = nb.map, nb.ox, nb.oy
     r.w, r.h = def and def.width, def and def.height
 
-    live[nb.map.id] = true
     masks[i] = {
       nb.ox, nb.oy,
       nb.ox + nb.map.def.width * 32,
@@ -533,11 +544,6 @@ local function rebuildNeighborhood(state)
   for i = #nbs + 1, #neighborhood.rows do neighborhood.rows[i] = nil end
 
   cachedMasks = masks
-  TerrainAtlas.setLive(live)
-  SafariFoliage.setLive(live)
-  V.require("GameCorner").setLive(live)
-  SafariStatues.setLive(live)
-  if GranitePillars.setLive then GranitePillars.setLive(live) end
 end
 
 -- Request everything `state`'s frame wants and evict what it no longer
@@ -549,6 +555,33 @@ end
 -- the destination's build: the map swaps behind the fade, and waiting
 -- for the first visible frame to request meshes would show the flat
 -- fallback while the first slices run.
+local function authoredRoomReady(map)
+  if not (ChunkMesher.slotKnown(map, true) or ChunkMesher.slotKnown(map, false)) then
+    return false
+  end
+  -- Terrain may survive an indoor detour while GameCorner.setLive releases
+  -- the room's separate GPU meshes. Its settled empty terrain is intentional:
+  -- restore the missing room before deciding that the host failed. A cached
+  -- false is a real build/draw failure and must not retry every frame. Both
+  -- owners' prepare paths publish only complete uploads and roll back errors.
+  local function roomReady(owner)
+    if not owner.accepts(map) then return false end
+    if owner.ready(map.id) == nil then owner.prepare(map) end
+    return owner.ready(map.id) == true
+  end
+  local rooms = V.require("InteriorRooms")
+  if roomReady(rooms) then return true end
+  -- TEST193: the League's rooms (the Indigo Plateau lobby, the Elite Four,
+  -- the Champion, the Hall of Fame) claim their map AND its whole border
+  -- ring the same way, so their native terrain is empty too. Without this
+  -- the lobby read as a failed build and the game dropped to 2D in it.
+  local okL, league = pcall(V.require, "LeagueRooms")
+  return okL and league and roomReady(league) or false
+end
+
+-- Shared by staged battles: authored rooms can own the whole visible floor.
+VoxelScene.authoredRoomReady = authoredRoomReady
+
 function VoxelScene.prefetch(state)
   local Voxel = V.require("VoxelState")
 
@@ -559,12 +592,24 @@ function VoxelScene.prefetch(state)
       ids[#ids + 1] = nb.map.id
     end
   end
+  V.require("ScenicViews").retain(state.map, live, ids)
   table.sort(ids)
   local liveKey = table.concat(ids, "|")
-  if liveKey ~= lastTreeLiveKey then
+  -- Keep the previous town only for an indoor detour. Outdoors, off-range
+  -- terrain and trees must be gone before the next neighborhood allocates.
+  local keepPrevious = not Map.isOutdoor(state.map.def)
+  if liveKey ~= lastTreeLiveKey or keepPrevious ~= lastKeepPrevious then
     CacheTrace.log("live-set", state.map.id, "from=" .. tostring(lastTreeLiveKey) .. " to=" .. liveKey)
-    lastTreeLiveKey = liveKey
-    ChunkMesher.setLive(live)
+    lastTreeLiveKey, lastKeepPrevious = liveKey, keepPrevious
+    ChunkMesher.setLive(live, keepPrevious)
+    -- All resource owners use the SAME distance-filtered live set. This
+    -- also runs when walking changes eligibility without changing maps.
+    TerrainAtlas.setLive(live)
+    SafariFoliage.setLive(live)
+    V.require("GameCorner").setLive(live)
+    SafariStatues.setLive(live)
+    if GranitePillars.setLive then GranitePillars.setLive(live) end
+    V.require("LeagueRoad").setLive(live)
   end
   if neighborhoodChanged(state) then
     rebuildNeighborhood(state)
@@ -584,8 +629,10 @@ function VoxelScene.prefetch(state)
   -- cut out of that build's own geometry (ChunkMesher.pair), so the two
   -- always come from the same slot and a lake is never drawn twice or left
   -- as a hole.
-  local terrain, water, _, visualShadows = ChunkMesher.pair(state.map, false)
-  if not terrain then
+  local roofOnly = V.require("ScenicViews").roof(state.map)
+  local terrain, water, _, visualShadows = ChunkMesher.pair(state.map, roofOnly)
+  if not terrain and not (authoredRoomReady(state.map)
+      and ChunkMesher.slotKnown(state.map, roofOnly)) then
     terrain, water, _, visualShadows = ChunkMesher.pair(state.map, true)
   end
   -- A cold WARP destination has never been a connected neighbour, so it has
@@ -595,9 +642,13 @@ function VoxelScene.prefetch(state)
   if not terrain and not ChunkMesher.slotKnown(state.map, true) then
     ChunkMesher.request(state.map, true, nil, true)
   end
-  ChunkMesher.request(state.map, false, cachedMasks, true)
+  ChunkMesher.request(state.map, roofOnly, roofOnly and nil or cachedMasks, true)
   local nbs = state.neighbors or {}
-  local ready = terrain ~= nil
+  -- Authored rooms own their meshes; their successfully claimed native
+  -- terrain stream can be empty. Wait for a settled slot so kept water and
+  -- other native sidecars are complete before revealing the room.
+  local hostReady = terrain ~= nil or authoredRoomReady(state.map)
+  local ready = hostReady
   for i, nb in ipairs(nbs) do
     if RenderDistance.neighbor(nb, state.player) then
       ChunkMesher.request(nb.map, true, nil, "visible")
@@ -607,17 +658,22 @@ function VoxelScene.prefetch(state)
         nbMeshBuf[i], nbWaterBuf[i], _, nbVisualShadowBuf[i] =
           ChunkMesher.pair(nb.map, false)
       end
+      -- TEST50: only reveal an eligible neighbour after its terrain lands.
+      -- A settled false slot is unsupported/failed, not an endless build.
+      if not nbMeshBuf[i] and not ChunkMesher.slotKnown(nb.map, true) then
+        ready = false
+      end
     else
       nbMeshBuf[i], nbWaterBuf[i] = nil, nil
       nbVisualShadowBuf[i] = nil
     end
-    -- if not nbMeshBuf[i] then ready = false end
   end
   for i = #nbs + 1, #nbMeshBuf do
     nbMeshBuf[i], nbWaterBuf[i] = nil, nil
     nbVisualShadowBuf[i] = nil
   end
-  Voxel.ready = ready
+  -- The camera may finish easing under the cover as soon as the host exists.
+  Voxel.ready = hostReady
   return terrain, nbMeshBuf, water, nbWaterBuf, ready,
     visualShadows, nbVisualShadowBuf
 end
@@ -641,6 +697,7 @@ local function heldFrame(w, h, mapId)
 end
 
 function VoxelScene.invalidate()
+  V.require("ScenicViews").invalidate()
   ItemPokeballs.invalidate()
   GranitePillars.invalidate()
   SafariFoliage.invalidate()
@@ -696,7 +753,7 @@ local function tableItemAnchor(map, entity, sprite, gh)
   local d = entity.def
   if map.id ~= "OAKS_LAB" or not d or not starterBalls[d.name]
       or d.sprite ~= "SPRITE_POKE_BALL" or d.movement ~= "STAY"
-      or gh ~= 6 or entity.moving or entity.cellY ~= 3
+      or (gh ~= 6 and gh ~= V.require("OakLabRoom").TABLE) or entity.moving or entity.cellY ~= 3
       or entity.cellX < 6 or entity.cellX > 8
       or entity.cellX ~= d.x or entity.cellY ~= d.y
       or entity.px ~= entity.cellX * 16 or entity.py ~= entity.cellY * 16
@@ -995,9 +1052,10 @@ function VoxelScene.drawWater(draws, cast, fallbackDraw)
   local underColor,underDepth
   local gardenWater=false
   for _,d in ipairs(draws)do
-    if (V.require('CommunityVisuals').customRoads()
+    if d[5] or (V.require('CommunityVisuals').customRoads()
         and V.require('DecorAtlas').texelScale(d[2])>1)
-        or V.require('SafariMaterials').texelScale(d[2]) then
+        or V.require('SafariMaterials').texelScale(d[2])
+        or TerrainAtlas.isLeague(d[2]) then   -- TEST166 League canal
       gardenWater=true;break
     end
   end
@@ -1067,7 +1125,7 @@ function VoxelScene.drawWater(draws, cast, fallbackDraw)
                and Water.begin(waterContext(mirror, depth), false)
     if ok then
       for _, d in ipairs(draws) do
-        Water.draw(d[1], d[2], d[3])
+        Water.draw(d[1], d[2], d[3], d[5])
       end
       Water.finish()
       reflected = true
@@ -1087,7 +1145,7 @@ function VoxelScene.drawWater(draws, cast, fallbackDraw)
     local ok = Water.begin(waterContext(nil, nil), true)
     if ok then
       for _, d in ipairs(draws) do
-        Water.draw(d[1], d[2], d[3])
+        Water.draw(d[1], d[2], d[3], d[5])
       end
       Water.finish()
       -- This path never called beginWater, but the following world passes
@@ -1101,7 +1159,8 @@ function VoxelScene.drawWater(draws, cast, fallbackDraw)
   -- same meshes down, in which case a bailed frame is already whole
   if plain or (not reflected and fallbackDraw ~= Voxel3D.draw) then
     for _, d in ipairs(draws) do
-      fallbackDraw(d[1], d[2], d[3])
+      if d[5] then Voxel3D.drawBattleWater(d[1],d[2],d[3],true)
+      else fallbackDraw(d[1], d[2], d[3])end
     end
   end
   -- TEST127: submerged bodies must lose the depth test against the surface.
@@ -1123,7 +1182,7 @@ end
 -- redrawing the whole world from the sun would buy nothing -- which is
 -- most of a dialog, a menu, or any moment standing still.
 local sigBuf = {}
-local function shadowSignature(state, terrain, nbMesh, posed, cx, cy, vw, vh)
+local function shadowSignature(state, terrain, nbMesh, posed, cx, cy, vw, vh, part)
   local n = 0
   local function put(v)
     n = n + 1
@@ -1149,6 +1208,11 @@ local function shadowSignature(state, terrain, nbMesh, posed, cx, cy, vw, vh)
   -- and the sprite cards swap frames as it circles them, so a turn on the
   -- spot re-fits and redraws exactly like a camera move ("" outside 1ST)
   put(FirstPerson.signature())
+  put(V.perfProbe and V.perfProbe.noNeighbors and 1 or 0)
+  -- TEST189: the per-map NO <MAP> steps change what casts too
+  if V.perfProbe and V.perfProbe.noMaps then
+    for id in pairs(V.perfProbe.noMaps) do put("no:" .. id) end
+  end
   put(CharacterRenderers.revision())
   put(ItemPokeballs.enabled() and 1 or 0)
   put(tostring(terrain))
@@ -1158,6 +1222,13 @@ local function shadowSignature(state, terrain, nbMesh, posed, cx, cy, vw, vh)
       put(tostring(nbMesh[i]))
     end
   end
+  -- TEST184: part 'world' stops here (the world layer); 'cast' is the
+  -- characters alone (drawn over a copy of it); nil is both (one pass)
+  if part == "world" then
+    for i = n + 1, #sigBuf do sigBuf[i] = nil end
+    return table.concat(sigBuf, ",")
+  end
+  if part == "cast" then n = 0 end
   for _, p in ipairs(posed) do
     if RenderDistance.point(p.px + 8, p.py + 8, state.player) then
       put(p.sprite.def.image)
@@ -1181,6 +1252,19 @@ end
 -- Runs BEFORE Voxel3D.beginScene, because canvases do not nest. Grass is
 -- left out on purpose: thousands of tufts would cast a speckle no bigger
 -- than the pixels it lands on, at the cost of the mesh being drawn twice.
+-- TEST188: which neighbours the frame DRAWS (and casts). Only PerfProbe's
+-- NO NEIGHBOUR MAPS step differs from RenderDistance.neighbor, and only
+-- here: prefetch and every setLive keep using RenderDistance.neighbor, so
+-- the probe no longer evicts the neighbours and reloads them afterwards.
+local function drawNb(nb, player)
+  local probe = V.perfProbe
+  if probe and (probe.noNeighbors
+      or (probe.noMaps and nb.map and probe.noMaps[nb.map.id])) then
+    return false
+  end
+  return RenderDistance.neighbor(nb, player)
+end
+
 local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
                            atlasFor, water, nbWater, visualShadows,
                            nbVisualShadows)
@@ -1197,14 +1281,42 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
     return
   end
   if not Timings.call("shadow_setup", ShadowMap.available) then return end
+  -- TEST184: two layers. The WORLD layer (everything but the characters) is
+  -- fitted round an anchor that follows the camera only when it strays a
+  -- few steps (ShadowMap.anchor), so walking and every animation frame no
+  -- longer redraw the whole map; the CAST is drawn over a copy of it.
+  -- ShadowMap.SPLIT=false (or a driver that refuses the copy) keeps the
+  -- original one-pass map.
+  local split = ShadowMap.SPLIT ~= false and ShadowMap.beginWorld ~= nil
+  local ax, ay = cx, cy
+  if split then ax, ay = ShadowMap.anchor(cx, cy) end
+  local worldSig, castSig
   local function signature()
+    if split then
+      worldSig = shadowSignature(state, terrain, nbMesh, posed, ax, ay, vw, vh, "world")
+        .. "|community-tree:" .. CommunityFlora.shadowSignature(state)
+      castSig = shadowSignature(state, terrain, nbMesh, posed, ax, ay, vw, vh, "cast")
+      return worldSig .. "|cast:" .. castSig
+    end
     local sig = shadowSignature(state, terrain, nbMesh, posed, cx, cy, vw, vh)
     return sig .. "|community-tree:" .. CommunityFlora.shadowSignature(state)
   end
   local sig = Timings.call("shadow_keys", signature)
   if not ShadowMap.stale(sig) then return end
-  if not Timings.call("shadow_setup", ShadowMap.begin, cx, cy, vw, vh) then
-    return
+  local castOnly = false
+  if split then
+    if ShadowMap.worldStale(worldSig) then
+      if not Timings.call("shadow_setup", ShadowMap.beginWorld, ax, ay, vw, vh) then
+        split = false
+      end
+    else
+      castOnly = true
+    end
+  end
+  if not split then
+    if not Timings.call("shadow_setup", ShadowMap.begin, cx, cy, vw, vh) then
+      return
+    end
   end
 
   local function castWorld()
@@ -1214,7 +1326,7 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
     ShadowMap.draw(visual.mesh, atlasFor(state.map), nil)
   end
   for i, nb in ipairs(state.neighbors or {}) do
-    if RenderDistance.neighbor(nb, state.player) then
+    if drawNb(nb, state.player) then
       ShadowMap.draw(nbMesh[i], atlasFor(nb.map),
                      Mat4.translate(nb.ox, 0, nb.oy))
       for _, visual in ipairs((nbVisualShadows and nbVisualShadows[i]) or {}) do
@@ -1229,7 +1341,7 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
   -- far plane answers for the surface a shoreline tree's shadow falls on.
   ShadowMap.draw(water, atlasFor(state.map), nil)
   for i, nb in ipairs(state.neighbors or {}) do
-    if RenderDistance.neighbor(nb, state.player) then
+    if drawNb(nb, state.player) then
       ShadowMap.draw(nbWater and nbWater[i], atlasFor(nb.map),
                      Mat4.translate(nb.ox, 0, nb.oy))
     end
@@ -1243,12 +1355,13 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
   ShadowMap.draw(ChunkMesher.flowers(state.map), atlasFor(state.map),
                  ShadowMap.snug(nil))
   for _, nb in ipairs(state.neighbors or {}) do
-    if RenderDistance.neighbor(nb, state.player) then
+    if drawNb(nb, state.player) then
       ShadowMap.draw(ChunkMesher.flowers(nb.map), atlasFor(nb.map),
                      ShadowMap.snug(Mat4.translate(nb.ox, 0, nb.oy)))
     end
   end
   end
+  if not castOnly then
   Timings.call("shadow_world", castWorld)
   pcall(Timings.call, "shadow_trees", CommunityFlora.castShadows,
         state, ShadowMap, Mat4)
@@ -1257,18 +1370,19 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
   -- still shades a lake, a silhouette of somebody standing beside it does
   -- not. Ground, roofs and the characters themselves take them as before.
   SafariFoliage.draw(state.map,0,0,ShadowMap)
-  for _,nb in ipairs(state.neighbors or {})do if RenderDistance.neighbor(nb,state.player)then SafariFoliage.draw(nb.map,nb.ox or 0,nb.oy or 0,ShadowMap)end end
+  for _,nb in ipairs(state.neighbors or {})do if drawNb(nb, state.player)then SafariFoliage.draw(nb.map,nb.ox or 0,nb.oy or 0,ShadowMap)end end
   V.require("GameCorner").draw(state.map,ShadowMap)
   LegendaryTowerExterior.drawMap(state.map,nil,ShadowMap)
   for _,nb in ipairs(state.neighbors or {})do
-    if RenderDistance.neighbor(nb,state.player)then
+    if drawNb(nb, state.player)then
       V.require("LegendaryGarden").draw(nb.map,ShadowMap,Mat4.translate(nb.ox,0,nb.oy))
       LegendaryTowerExterior.drawMap(nb.map,Mat4.translate(nb.ox,0,nb.oy),ShadowMap)
     end
   end
   SafariStatues.draw(state.map,0,0,ShadowMap,atlasFor(state.map))
-  for _,nb in ipairs(state.neighbors or {})do if RenderDistance.neighbor(nb,state.player)then SafariStatues.draw(nb.map,nb.ox or 0,nb.oy or 0,ShadowMap,atlasFor(nb.map))end end
+  for _,nb in ipairs(state.neighbors or {})do if drawNb(nb, state.player)then SafariStatues.draw(nb.map,nb.ox or 0,nb.oy or 0,ShadowMap,atlasFor(nb.map))end end
   ShadowMap.sprites(true)
+  -- (TEST184: still the world layer -- authored figures stand still)
   -- authored figures cast too, for the same reason the flowers do: a
   -- handful of cards per map, and a person with no shadow reads as pasted on
   local function castFigures()
@@ -1276,7 +1390,7 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
     ShadowMap.draw(mesh, atlasFor(state.map), ShadowMap.snug(caster))
   end)
   for _, nb in ipairs(state.neighbors or {}) do
-    if RenderDistance.neighbor(nb, state.player) then
+    if drawNb(nb, state.player) then
       eachFigure(nb.map, nb.ox, nb.oy, function(mesh, _, caster)
         ShadowMap.draw(mesh, atlasFor(nb.map), ShadowMap.snug(caster))
       end)
@@ -1284,6 +1398,20 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
   end
   end
   Timings.call("shadow_figures", castFigures)
+  if split then
+    ShadowMap.sprites(false)
+    Timings.call("shadow_finish", ShadowMap.finishWorld, worldSig)
+  end
+  end -- not castOnly
+  if split then
+    if not Timings.call("shadow_setup", ShadowMap.beginCast) then
+      -- the copy failed: this frame and the next fall back to one pass
+      ShadowMap.SPLIT = false
+      ShadowMap.discard()
+      return
+    end
+    ShadowMap.sprites(true)
+  end
   -- Keep the actor loop and its trailing sprites(false) inside one helper:
   -- Stadium ba.9 replaces that loop verbatim when rebuilding this scene.
   local function castActors()
@@ -1334,20 +1462,84 @@ function VoxelScene.warmAtlas(map)
                       map, modeColors(lastPaletteFor, map))
 end
 
+-- TEST186: inclusive CPU time per stretch of the scene pass, for PerfProbe.
+-- Plain clock marks (nothing on LoadTimings' stack), summed per key.
+VoxelScene.sectionMs = {}
+local secKey, secT = nil, 0
+local secClock = love and love.timer and love.timer.getTime or os.clock
+function VoxelScene.section(key)
+  local t = secClock()
+  if secKey then
+    VoxelScene.sectionMs[secKey] = (VoxelScene.sectionMs[secKey] or 0) + (t - secT) * 1000
+  end
+  secKey, secT = key, t
+end
+local section = VoxelScene.section
+
+-- TEST187: the maps whose meshes carry the League's or the rooms' finishes
+-- out of doors. Anywhere else outside, the scene uses the smaller shader.
+VoxelScene.FULL_SHADER_MAPS = { ROUTE_23 = true, INDIGO_PLATEAU = true,
+  VERMILION_DOCK = true, ROUTE_22_GATE = true }
+local profileCache = setmetatable({}, { __mode = "k" })
+local shaderProfileOf
+local function shaderProfile(state, outdoor)
+  if not outdoor then return nil end
+  local key = {}
+  for _, nb in ipairs(state.neighbors or {}) do key[#key + 1] = nb.map and nb.map.id or "?" end
+  key = table.concat(key, ",")
+  local c = profileCache[state.map]
+  if c and c.key == key then return c.value end
+  local value = shaderProfileOf(state)
+  profileCache[state.map] = { key = key, value = value }
+  return value
+end
+function shaderProfileOf(state)
+  local def = state.map and state.map.def
+  if not (def and Map.isOutdoor(def)) then return nil end
+  for _, owner in ipairs({ "InteriorRooms", "LeagueRooms", "LeagueGateRoom" }) do
+    local ok, own = pcall(function() return V.require(owner).accepts(state.map) end)
+    if ok and own then return nil end
+  end
+  local full = VoxelScene.FULL_SHADER_MAPS
+  if full[state.map.id] then return nil end
+  if V.require("ScenicViews").roof(state.map) then return nil end
+  for _, nb in ipairs(state.neighbors or {}) do
+    if nb.map and full[nb.map.id] then return nil end
+  end
+  return "kanto"
+end
+
 function VoxelScene.render(state, w, h, vw, vh, paletteFor)
+  Voxel3D.shaderProfile = nil
+  section("scene_setup")
+  -- TEST184: PerfProbe's switches (nil outside a probe run)
+  local probe = V.perfProbe
+  local noSky = probe and probe.noSky
+  local noProps = probe and probe.noProps
+  local noGrass = probe and probe.noGrass
+  V.require("ScenicViews").prepareWindows(state)
+  Voxel3D.cullStats.drawn, Voxel3D.cullStats.total = 0, 0
   lastPaletteFor = paletteFor
   -- With nothing cached at all (the first frame of a fresh toggle), return
   -- nil and let the pipeline choose its cold-build veil.  A settled failure
   -- still falls back to the engine's 2D path; an in-flight healthy build stays
   -- black so flat tiles are never exposed immediately before the voxels land.
-  -- Voxel.ready also holds the camera tween at flat until terrain exists.
+  -- Voxel.ready also holds the camera tween until terrain or a room exists.
   local terrain, nbMesh, water, nbWater, neighborhoodReady,
     visualShadows, nbVisualShadows =
     Timings.call("prefetch", VoxelScene.prefetch, state)
   if not neighborhoodReady then
+    -- TEST50: a settled failed host must use the safe native fallback instead
+    -- of claiming to load forever. Roof scenes only request their body slot.
+    if not Voxel.ready and ChunkMesher.slotKnown(state.map, true)
+        and (V.require("ScenicViews").roof(state.map)
+             or ChunkMesher.slotKnown(state.map, false)) then
+      return nil, false
+    end
     -- The FULL mesh already suppresses its ring beneath every connected map.
     -- Drawing before those BODY meshes arrive exposes literal holes around the
     -- perimeter. Keep the last complete frame instead and switch atomically.
+    section(nil)
     return heldFrame(w, h, state.map and state.map.id), true
   end
 
@@ -1360,7 +1552,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- every surface by. A CANOPY map (Viridian Forest) is the case between:
   -- the rig stays at noon and no sky is painted, but the hour's tint still
   -- falls through the leaves -- night reaches a forest floor.
-  local outdoor = state.map.def and (Map.isOutdoor(state.map.def) or DayNight.isOpenForest(state.map) or state.map.id == 'SAFARI_ZONE_CENTER') or false
+  local outdoor = state.map.def and (Map.isOutdoor(state.map.def) or DayNight.isOpenAir(state.map) or state.map.id == 'SAFARI_ZONE_CENTER' or V.require('ScenicViews').roof(state.map)) or false
   DayNight.applyRig(outdoor)
   Voxel3D.tint = DayNight.tint(outdoor or DayNight.isCanopy(state.map))
   -- and the window glass: the tileset's own panes (found in its art --
@@ -1370,11 +1562,18 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   local GlassMask = V.require("GlassMask")
   Voxel3D.glassMask = outdoor and GlassMask.texture(state.map.tileset) or nil
   Voxel3D.glassNight = outdoor and DayNight.windowLight() or 0
+  -- TEST179: the rooms' painted window views follow the clock too
+  Voxel3D.roomNight = DayNight.windowLight() or 0
   local g = VoxelScene.glintStep(glint, cx, cy)
   Voxel3D.glassPhase, Voxel3D.glassGlint = g.phase, g.amp
   local atmos = CommunityVisuals.customForest()
                 and ForestAtmos.frame(state.map) or nil
   Voxel3D.fog = atmos and (atmos.roamFog or atmos.fog) or nil
+  -- TEST139: caves get their own depth fog (forest fog keeps priority).
+  if not Voxel3D.fog then
+    local okCave, caveFog = pcall(V.require("CaveMood").fog, state.map)
+    Voxel3D.fog = okCave and caveFog or nil
+  end
 
   renderGeneration = renderGeneration + 1
   local generation = renderGeneration
@@ -1458,25 +1657,35 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   local underlayColor = WorldUnderlay.resolve(state, colorsFor(state.map))
 
   local shCx, shCy = FirstPerson.shadowCenter(cx, cy, vh)
+  Voxel3D.shaderProfile = shaderProfile(state, outdoor)
+  -- TEST189: what PerfProbe precompiles its variants against
+  Voxel3D.lastShaderProfile = Voxel3D.shaderProfile
+  section("scene_shadows")
   Timings.call("shadows", castShadows,
               state, terrain, nbMesh, posed, shCx, shCy, vw, vh, atlasFor,
               water, nbWater, visualShadows, nbVisualShadows)
 
+  section("scene_begin")
   V.require("StreetLights").configure(state)
   if not Voxel3D.beginScene(w, h, cx, cy, vw, vh, skyFor(state.map)) then
     Voxel3D.setCompanionCameraDelta(nil)
     Voxel3D.fog = nil
+    Voxel3D.shaderProfile = nil
+    section(nil)
     return nil
   end
+  section("scene_sky")
 
   -- TEST55 N64 Memory scenic layer.  Both modules retain their own outdoor
   -- and canopy guards, and the option defaults to Battle Art, so this is an
   -- additive background seam rather than a renderer replacement.
   Voxel3D.glass(false)
   -- TEST133: mountains cover stars; nearby sky life stays in front.
+  if not noSky then
   pcall(SkyLayer.drawStars, state)
   pcall(Backdrop.draw, state)
   pcall(SkyLayer.drawForeground, state)
+  end
   Voxel3D.glass(true)
 
   -- Extension backgrounds run after the host has opened its isolated 3D
@@ -1489,64 +1698,77 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- One material-coloured plane below the whole loaded neighborhood closes
   -- literal terrain holes without obscuring a single valid world fragment.
   -- Drawn before terrain, depth alone decides where it remains visible.
-  WorldUnderlay.draw(state, cx, cy, underlayColor)
-  Voxel3D.draw(terrain, atlasFor(state.map), nil)
+  section("scene_terrain")
+  if V.require("ScenicViews").roof(state.map) then
+    V.require("ScenicViews").drawRoof(state)
+  else WorldUnderlay.draw(state, cx, cy, underlayColor) end
+  Voxel3D.drawCulled(terrain, atlasFor(state.map), nil)
   CavePerimeter.draw(state.map, atlasFor(state.map))
+  -- TEST158: high-res cave floor + reflective puddles, under every decal.
+  pcall(V.require("CaveMood").drawFloor, state)
   ShipHull.draw(state, atlasFor(state.map), false)
   local drawnVisuals, drawnNeighborVisuals = {}, {}
   for _, visual in ipairs(visualShadows or {}) do
     if ChunkMesher.visualObjectVisible(visual.id) then
-      Voxel3D.draw(visual.mesh, atlasFor(state.map), nil)
+      Voxel3D.drawCulled(visual.mesh, atlasFor(state.map), nil)
       drawnVisuals[visual.id] = true
     end
   end
   for i, nb in ipairs(state.neighbors or {}) do
-    if RenderDistance.neighbor(nb, state.player) then
-      Voxel3D.draw(nbMesh[i], atlasFor(nb.map),
-                   Mat4.translate(nb.ox, 0, nb.oy))
+    if drawNb(nb, state.player) then
+      Voxel3D.drawCulled(nbMesh[i], atlasFor(nb.map),
+                   Mat4.translate(nb.ox, 0, nb.oy), nil, nil, nb.ox, nb.oy)
       local drawn = {}
       drawnNeighborVisuals[i] = drawn
       for _, visual in ipairs((nbVisualShadows and nbVisualShadows[i]) or {}) do
         if ChunkMesher.visualObjectVisible(visual.id) then
-          Voxel3D.draw(visual.mesh, atlasFor(nb.map),
-                       Mat4.translate(nb.ox, 0, nb.oy))
+          Voxel3D.drawCulled(visual.mesh, atlasFor(nb.map),
+                       Mat4.translate(nb.ox, 0, nb.oy), nil, nil, nb.ox, nb.oy)
           drawn[visual.id] = true
         end
       end
     end
   end
 
+  section("scene_props")
+  if not noProps then
   SafariFoliage.draw(state.map,0,0)
-  for _,nb in ipairs(state.neighbors or {})do if RenderDistance.neighbor(nb,state.player)then SafariFoliage.draw(nb.map,nb.ox or 0,nb.oy or 0)end end
+  for _,nb in ipairs(state.neighbors or {})do if drawNb(nb, state.player)then SafariFoliage.draw(nb.map,nb.ox or 0,nb.oy or 0)end end
+  end
   V.require("GameCorner").draw(state.map)
   LegendaryTowerExterior.drawMap(state.map)
   for _,nb in ipairs(state.neighbors or {})do
-    if RenderDistance.neighbor(nb,state.player)then
+    if drawNb(nb, state.player)then
       V.require("LegendaryGarden").draw(nb.map,nil,Mat4.translate(nb.ox,0,nb.oy))
       LegendaryTowerExterior.drawMap(nb.map,Mat4.translate(nb.ox,0,nb.oy))
     end
   end
   SafariStatues.draw(state.map,0,0,nil,atlasFor(state.map))
-  for _,nb in ipairs(state.neighbors or {})do if RenderDistance.neighbor(nb,state.player)then SafariStatues.draw(nb.map,nb.ox or 0,nb.oy or 0,nil,atlasFor(nb.map))end end
-  V.require("StreetLights").draw(state)
+  for _,nb in ipairs(state.neighbors or {})do if drawNb(nb, state.player)then SafariStatues.draw(nb.map,nb.ox or 0,nb.oy or 0,nil,atlasFor(nb.map))end end
+  if not noProps then V.require("StreetLights").draw(state) end
   V.require("CeladonParkFX").draw(state)
   GranitePillars.draw(state.map,0,0)
-  for _,nb in ipairs(state.neighbors or {}) do if RenderDistance.neighbor(nb,state.player) then GranitePillars.draw(nb.map,nb.ox or 0,nb.oy or 0) end end
+  for _,nb in ipairs(state.neighbors or {}) do if drawNb(nb, state.player) then GranitePillars.draw(nb.map,nb.ox or 0,nb.oy or 0) end end
 
   Voxel3D.glass(false)
+  section("scene_trees")
+  if not noProps then
   pcall(ForestDressing.draw, state)
   pcall(CommunityFlora.drawCommunityTrees, state)
   pcall(CommunityFlora.drawCommunityForest, state, atlasFor)
+  end
   pcall(TowerLobbyDetails.draw, state)
+  V.require('TowerCeiling').draw(state.map,atlasFor(state.map))
   pcall(CaveSconces.draw, state)
   pcall(CaveAtmosphere3D.draw, state)
+  pcall(V.require("CaveMood").draw, state)
   pcall(CommunityFlora.drawCommunityCaveAtmosphere, state)
   Voxel3D.glass(true)
 
   -- Trees or rocks continue the authored route beyond its finite mesh. They
   -- stand only on world cells outside the root/connected-map rectangles,
   -- so no billboard can poke through valid terrain or block the player.
-  WorldFillProps.draw(state, cx, cy, vw, vh)
+  if not noProps then WorldFillProps.draw(state, cx, cy, vw, vh) end
 
   -- The first additive world seam: base terrain and distant host props are
   -- complete, while actors, water, and translucent work have not drawn.
@@ -1564,7 +1786,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
     end
   end
   for i, nb in ipairs(state.neighbors or {}) do
-    if RenderDistance.neighbor(nb, state.player) then
+    if drawNb(nb, state.player) then
       local drawn = drawnNeighborVisuals[i] or {}
       for _, visual in ipairs((nbVisualShadows and nbVisualShadows[i]) or {}) do
         if not drawn[visual.id]
@@ -1575,6 +1797,10 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
       end
     end
   end
+
+  section("scene_windows_decor")
+  V.require("ScenicViews").drawWindows(state)
+  if not noProps then V.require("SeasonalDecor").draw(state,false) end
 
   -- Without a shadow map (headless, or a driver that could not make the
   -- canvas) the old flat decals stand in: ground-only, characters only,
@@ -1608,24 +1834,30 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- lake would otherwise wear one as a black smear. Water covers them,
   -- which is the same answer the shadow map's own pass gives (see
   -- ShadowMap.sprites) -- people do not shadow water either way.
+  section("scene_water")
   VoxelScene._waterDrawBuf = VoxelScene._waterDrawBuf or {}
   local waterDraws = VoxelScene._waterDrawBuf
   local waterN = 0
 
-  local function addWaterDraw(mesh, texture, model, visuals)
+  local function addWaterDraw(mesh, texture, model, visuals, map)
     waterN = waterN + 1
     local d = waterDraws[waterN]
     if not d then d = {}; waterDraws[waterN] = d end
     d[1], d[2], d[3], d[4] = mesh, texture, model, visuals
+    -- Only a successfully built authored gym gets this finish. Reassign on
+    -- every draw: this tuple buffer is reused after entering another map.
+    local room=V.require('InteriorRooms')
+    d[5]=map and map.id=='CERULEAN_GYM'and room.accepts(map)and room.ready(map.id)==true or false
   end
 
-  if water then
-    addWaterDraw(water, atlasFor(state.map), nil, visualShadows)
+  if water and Voxel3D.meshVisible(water, 0, 0) then
+    addWaterDraw(water, atlasFor(state.map), nil, visualShadows, state.map)
   end
   for i, nb in ipairs(state.neighbors or {}) do
-    if RenderDistance.neighbor(nb, state.player) and nbWater and nbWater[i] then
+    if drawNb(nb, state.player) and nbWater and nbWater[i]
+        and Voxel3D.meshVisible(nbWater[i], nb.ox, nb.oy) then
       addWaterDraw(nbWater[i], atlasFor(nb.map),
-                   Mat4.translate(nb.ox, 0, nb.oy), nbVisualShadows and nbVisualShadows[i])
+                   Mat4.translate(nb.ox, 0, nb.oy), nbVisualShadows and nbVisualShadows[i], nb.map)
     end
   end
   for i = waterN + 1, #waterDraws do waterDraws[i] = nil end
@@ -1643,6 +1875,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- mean nothing to the tileset-shaped glass mask, so the glass is off or
   -- the panes' atlas positions stripe the cast with lamplight at night
   Voxel3D.glass(false)
+  section("scene_characters")
 
   -- The player's silhouette goes down BEFORE the characters, so the only
   -- thing it can meet in the depth buffer is the WORLD -- terrain, buildings,
@@ -1689,16 +1922,18 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- is preserved, so the row still overdraws feet -- the 3D version of
   -- the GB's grass-over-feet trick -- while grass keeps losing to the
   -- buildings it genuinely stands behind (far deeper than the pull).
+  section("scene_grass")
   local Voxel = V.require("VoxelState")
   local pull = VoxelScene.pull(math.max(Voxel.angle, 0.05))
+  if not noGrass then
   Timings.call("grass_flowers", function()
-  Voxel3D.draw(ChunkMesher.grass(state.map), atlasFor(state.map), nil,
+  Voxel3D.drawCulled(ChunkMesher.grass(state.map), atlasFor(state.map), nil,
     V.require("SafariLandscape").grassPull(state.map,pull))
   for _, nb in ipairs(state.neighbors or {}) do
-    if RenderDistance.neighbor(nb, state.player) then
-      Voxel3D.draw(ChunkMesher.grass(nb.map), atlasFor(nb.map),
+    if drawNb(nb, state.player) then
+      Voxel3D.drawCulled(ChunkMesher.grass(nb.map), atlasFor(nb.map),
                    Mat4.translate(nb.ox, 0, nb.oy),
-                   V.require("SafariLandscape").grassPull(nb.map,pull))
+                   V.require("SafariLandscape").grassPull(nb.map,pull), nil, nb.ox, nb.oy)
     end
   end
   end)
@@ -1716,26 +1951,30 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- flowers are snugged casters too, so they read their own shadowing
   -- through the same snugged transform the sun stored them with
   Timings.call("grass_flowers", function()
-  Voxel3D.draw(ChunkMesher.flowers(state.map), atlasFor(state.map), nil,
+  Voxel3D.drawCulled(ChunkMesher.flowers(state.map), atlasFor(state.map), nil,
                fpull, ShadowMap.snug(nil))
   for _, nb in ipairs(state.neighbors or {}) do
-    if RenderDistance.neighbor(nb, state.player) then
-      Voxel3D.draw(ChunkMesher.flowers(nb.map), atlasFor(nb.map),
+    if drawNb(nb, state.player) then
+      Voxel3D.drawCulled(ChunkMesher.flowers(nb.map), atlasFor(nb.map),
                    Mat4.translate(nb.ox, 0, nb.oy), fpull,
-                   ShadowMap.snug(Mat4.translate(nb.ox, 0, nb.oy)))
+                   ShadowMap.snug(Mat4.translate(nb.ox, 0, nb.oy)), nb.ox, nb.oy)
     end
   end
   end)
+  end
 
 
   -- Viridian's depth-aware atmosphere is last among world visuals, matching
   -- the donor build: terrain, trees, leaves and actors occlude its light.
+  section("scene_life")
   if CommunityVisuals.customForest() then
     pcall(ForestAtmos.draw, state.map)
     pcall(function() V.require("ForestLife").draw(state) end)
   end
 
-  pcall(function() V.require("KantoLife").draw(state) end)
+  if not noProps then pcall(function() V.require("KantoLife").draw(state) end) end
+  -- TEST175: Vermilion Dock's lanterns, reflections and glows (after the water)
+  pcall(function() V.require("DockLights").drawLate(state) end)
 
   -- The second additive world seam: host actors, water, grass, and flowers
   -- are complete. The companion may add bounded blended packets before the
@@ -1747,7 +1986,13 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   if companion and companion.renderAtmosphere then
     companion:renderAtmosphere("translucent_after_actors", state)
   end
-  if state.map.id == "MUSEUM_1F" then V.require("MuseumFossils").drawGlass(state.map) end
+  if state.map.id == "MUSEUM_1F" then
+    -- TEST173: InteriorRooms' museum draws its own case glass
+    local okI, own = pcall(function() return V.require("InteriorRooms").accepts(state.map) end)
+    if not (okI and own) then V.require("MuseumFossils").drawGlass(state.map) end
+  end
+  if not noProps then V.require("SeasonalDecor").draw(state,true) end
+  section("scene_end")
   local finished = Voxel3D.endScene()
   if finished and companion and companion.completeAtmosphereCamera then companion:completeAtmosphereCamera(state) end
   -- The delta belongs only to this overworld render. Do not let it reach a
@@ -1758,6 +2003,8 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
     lastCompleteCanvas, lastCompleteW, lastCompleteH = finished, w, h
     lastCompleteMapId = state.map and state.map.id or nil
   end
+  Voxel3D.shaderProfile = nil
+  section(nil)
   return finished, false
 end
 

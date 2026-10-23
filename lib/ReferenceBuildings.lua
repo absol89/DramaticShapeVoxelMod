@@ -194,12 +194,21 @@ function M.model(spec)
   end
  end
  if rise>19 and not hipped then front[#front+1]={u=cx,y=eave+4,w=9,h=10,shutters=true} end
+ if spec.map=='VERMILION_CITY'and style=='townhouse'then
+  for _,u in ipairs({x0+W*.26,x0+W*.74})do
+   local safe=true;for _,d in ipairs(doors)do if math.abs(u-d.x)<9 then safe=false end end
+   if safe then front[#front+1]={u=u,y=31,w=9,h=7,lit=false}end
+  end
+ end
  elevation(3,z1,1,x0,x1,front,rise>0 and not hipped)
  local back={};for i=1,math.max(1,math.floor(W/24))do back[#back+1]={u=x0+W*i/(math.max(1,math.floor(W/24))+1),y=12,w=9,h=12,lit=i%2==1} end
  elevation(3,z0,-1,x0,x1,back,rise>0 and not hipped)
  for _,side in ipairs({-1,1})do
   local windows={};local n=math.max(1,math.floor(D/22))
   for i=1,n do windows[#windows+1]={u=z0+D*i/(n+1),y=12,w=10,h=12,shutters=not civic,lit=(i+side)%3~=0} end
+  if spec.map=='VERMILION_CITY'and style=='townhouse'then
+   for i=1,n do windows[#windows+1]={u=z0+D*i/(n+1),y=31,w=9,h=7,lit=false}end
+  end
   elevation(1,side<0 and x0 or x1,side,z0,z1,windows,false)
  end
  -- Roof tiles are the roof surface itself. Staggered joints and overlap lips
@@ -352,7 +361,7 @@ function M.model(spec)
   box(lx-1.4,22.7,z1+.5,lx+1.4,23.2,z1+2.9,'slate',1)
  end
  -- Shallow window boxes are mounted above the pavement and outside doors.
- for _,o in ipairs(front)do if not o.door and o.y<eave then
+ for _,o in ipairs(front)do if not o.door and o.y<math.min(eave,28) then
   local l,r=o.u-o.w/2-.5,o.u+o.w/2+.5
   box(l,6,z1+1.9,r,8,z1+4.3,'terra',1)
   box(l+.3,8.05,z1+.8,r-.3,8.2,z1+4.0,'dark',.8)
@@ -455,7 +464,10 @@ function M.build(S,map,data)
      style=n==0 and 'bluehouse' or n==1 and 'townhouse' or 'cottage'
     end
     local spec={x0=a[1]+1,x1=c[1]-1,z0=a[3]+1,z1=c[3]-(b.frontEave or 0),doors=doors,style=style}
-    local mesh=M.model(spec)
+    spec.map=map.id;spec.destination=dest
+    spec.kind=(style=='gym'or style=='center'or style=='mart'or style=='club')and style or'house'
+    local mesh=V.require('KantoArchitecture').model(spec)or M.model(spec)
+    V.require('KantoHarborDetails').append(mesh,spec)
     replace[b.first]=mesh;for i=b.first+1,b.last do replace[i]=false end
     built=built+1
    end

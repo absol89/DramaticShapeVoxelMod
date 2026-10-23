@@ -1696,6 +1696,11 @@ local function snapshotFor(self)
   }
 end
 
+function VoxelCompanion:seasonalSnapshot(map, entities)
+  return snapshotFor({state={map=map,entities=entities or {},neighbors={}},
+    revision=self.revision or 0,wantsVisualObjects=function()return false end})
+end
+
 local function cameraContext(self)
   local camera = Voxel3D.camera
   local eye = camera and camera.eye or Voxel3D.eye

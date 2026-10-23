@@ -208,9 +208,17 @@ end
 -- make the ground or grass appear to pop out of existence.
 function StadiumBackground.camera(next, ctx)
   local frame = next(ctx)
+  if type(frame) == "table" and (frame.legendarySharedCamera or frame.legendaryBaseCamera) then return frame end
   local safeArena = cameraSafeArena()
   local cavern = cavernBattle(ctx)
-  if (not safeArena and not cavern) or type(frame) ~= "table" then
+  local league = false
+  if UiBackplates.arenaFill:get() == "OFF" then
+    local map = battleMap(ctx)
+    local ok, st = pcall(V.require, "LeagueStadium")
+    league = ok and st and map and st.ROOMS[map.id]
+      and st.ready(map.id) == true or false
+  end
+  if (not safeArena and not cavern and not league) or type(frame) ~= "table" then
     return frame
   end
 
@@ -223,7 +231,24 @@ function StadiumBackground.camera(next, ctx)
   if not (ex and ey and ez and fx and fy and fz) then return frame end
 
   local correctedEye, correctedFocus, fov
-  if safeArena then
+  if league then
+    -- Follow the hosted camera's live user controls instead of locking a
+    -- pose. A longer arm gives a wider default; keep its zoom lens live.
+    local dx, dy, dz = ex - fx, ey - fy, ez - fz
+    local flat = math.sqrt(dx * dx + dz * dz)
+    local distance = math.sqrt(flat * flat + dy * dy)
+    if flat < 1e-6 or distance < 1e-6 then return frame end
+    local elevation = math.max(math.rad(10), math.min(math.rad(50),
+      math.atan2(dy, flat)))
+    local radius = math.max(100, distance * 1.8)
+    local run = radius * math.cos(elevation)
+    correctedFocus = { 0, 10, 0 }
+    correctedEye = { dx / flat * run, 10 + radius * math.sin(elevation),
+      dz / flat * run }
+    local lens = math.abs(tonumber(projection[6]) or 0)
+    if lens < 1e-6 then return frame end
+    fov = 2 * math.atan(1 / lens)
+  elseif safeArena then
     -- BattleCam returns world-map coordinates. Stadium's camera is local to
     -- the arena origin; remove that translation here and providerRender will
     -- add the chosen arena midpoint and ground height exactly once.
@@ -258,6 +283,35 @@ function StadiumBackground.camera(next, ctx)
       and StadiumBackground.CAVE_NARROW_FOV
       or StadiumBackground.CAVE_BATTLE_FOV
   end
+  -- TEST245: lift the shared camera BEFORE the importer projects models,
+  -- shadows and marks. Previously BattleScene treated this owned camera as
+  -- external and the entire victory show could remain above a downward lens.
+  local victoryCamera = false
+  if league then
+    local arena = OverworldBattle.arena and OverworldBattle.arena()
+    local map = battleMap(ctx)
+    if arena and arena.mid and map then
+      local ok = pcall(function()
+        local groundY = V.require("BattleScene").groundY(arena.map or map, arena)
+        local mx, mz = arena.mid[1], arena.mid[2]
+        local box = frame.letterbox or {}
+        local cam = {
+          eye={correctedEye[1]+mx,correctedEye[2]+groundY,correctedEye[3]+mz},
+          focus={correctedFocus[1]+mx,correctedFocus[2]+groundY,correctedFocus[3]+mz},
+          fov=fov, aspect=box.pw and box.ph and box.pw/math.max(1,box.ph) or nil,
+        }
+        local victory = V.require("LeagueVictory")
+        local lifted = victory.camera(cam,map,groundY,false)
+        if lifted then
+          correctedEye={lifted.eye[1]-mx,lifted.eye[2]-groundY,lifted.eye[3]-mz}
+          correctedFocus={lifted.focus[1]-mx,lifted.focus[2]-groundY,lifted.focus[3]-mz}
+          fov=lifted.fov
+        end
+        victory.sharedEye(correctedEye,true)
+      end)
+      victoryCamera = ok
+    end
+  end
   local correctedProjection = projectionAtFov(projection, fov)
 
   local correctedView = Mat4.lookAt(correctedEye, correctedFocus, { 0, 1, 0 })
@@ -270,6 +324,8 @@ function StadiumBackground.camera(next, ctx)
   out.projection = correctedProjection
   out.vp = correctedVp
   out.viewProjection = correctedVp
+  out.legendaryBaseCamera = true
+  out.legendaryVictoryCamera = victoryCamera
   return out
 end
 

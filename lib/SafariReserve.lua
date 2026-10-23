@@ -2,7 +2,7 @@
 -- collision, encounter cells, event records and real map entrances are untouched.
 local V=...;local M={}
 M.maps={SAFARI_ZONE_CENTER=true,SAFARI_ZONE_EAST=true,SAFARI_ZONE_NORTH=true,SAFARI_ZONE_WEST=true}
-M.REVISION='safari-reserve-116'
+M.REVISION='safari-reserve-152-moss'
 local function key(x,z)return(z+64)*4096+x+64 end
 function M.enabled(map)
  return map and M.maps[map.id]and map.tileset and map.tileset.id=='FOREST'
@@ -142,7 +142,7 @@ local function amenities(S,map,candidates)
 end
 function M.build(S,map)
  if not M.enabled(map)then return false end
- S.outdoor=true;S.safariClaims={};S.safariAmenities={};S.safariTrees={};S.safariRockCount=0;S.safariPlanting={};S.safariBanks={};S.safariAprons={};S.safariGroves={}
+ S.outdoor=true;S.safariStumps={};S.safariClaims={};S.safariAmenities={};S.safariTrees={};S.safariRockCount=0;S.safariPlanting={};S.safariBanks={};S.safariAprons={};S.safariGroves={}
  V.require('SafariArchitecture').build(S,map)
  local W,H=map.def.width*4,map.def.height*4;local shrubs={}
  for z=0,H-2,2 do for x=0,W-2,2 do
@@ -173,6 +173,7 @@ function M.build(S,map)
  for z=0,H-2,2 do for x=0,W-2,2 do
   if clear(S,x,z,2,2)and matches(map,x,z,stump)and not map:isWalkableCell(x/2,z/2)then
    append(S,M.stump(x*8+8,z*8+8,(x+z)%3));claim(S,x,z,2,2,'stump')
+   S.safariStumps[#S.safariStumps+1]={x=x*8+8,z=z*8+8,variant=(x+z)%3}
   end
  end end
  local G=V.require('CityMesh').new({.5/128,.5/48})
@@ -199,6 +200,8 @@ function M.build(S,map)
   end
  end end
  V.require('SafariWetlands').build(S,map,G,W,H)
+ -- TEST150: low meadow life on the bare lawns, pond banks and stump rows.
+ pcall(V.require('SafariMeadow').build,S,map,G,W,H)
  append(S,G.out);V.require('SafariLandscape').perimeter(S,map,W,H);V.require('SafariArchitecture').exit(S,map)
  return true
 end

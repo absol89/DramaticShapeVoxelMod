@@ -297,6 +297,165 @@ local function newSpans(count)
   }
 end
 
+-- TEST24: a suspended terrain job owns every mesh until publication. Dropping
+-- its coroutine is not a release: LOVE's native buffers can outgrow Lua's GC
+-- trigger during repeated crossings. Keep explicit ownership across yields.
+local Upload = { owners = setmetatable({}, { __mode = "k" }) }
+function Upload.track(mesh)
+  local co = coroutine.running()
+  local owner = co and Upload.owners[co]
+  if owner and mesh then owner[mesh] = true end
+  return mesh
+end
+function Upload.publish(mesh)
+  local co = coroutine.running()
+  local owner = co and Upload.owners[co]
+  if owner and mesh then owner[mesh] = nil end
+end
+function Upload.release(mesh)
+  local idx = mesh and Voxel3D.meshIndex and Voxel3D.meshIndex[mesh]
+  if idx then idx.bad = true; Voxel3D.meshIndex[mesh] = nil end
+  Upload.publish(mesh)
+  if mesh and mesh.release then pcall(mesh.release, mesh) end
+end
+function Upload.clear(co)
+  local owner = co and Upload.owners[co]
+  if owner then
+    Upload.owners[co] = nil
+    for mesh in pairs(owner) do
+      if mesh.release then pcall(mesh.release, mesh) end
+    end
+  end
+end
+-- TEST184: the coarse spatial index Voxel3D.drawCulled reads -- a box per
+-- block of INDEX_BV vertices, covering every vertex in the uploaded slice.
+-- Six floats a vertex, x y z first (PACKED_VERTEX_BYTES = 24).
+local INDEX_BV = 768
+-- All uploaded vertices bound the block, including skewed/rotated faces.
+local indexQueue = {}          -- string slices waiting to be indexed
+local function newIndex(mesh)
+  local idx = Voxel3D.meshIndex[mesh]
+  if not idx then
+    idx = { owner = setmetatable({mesh}, {__mode="v"}), bv = INDEX_BV, nb = 0, verts = 0, pending = 0,
+            x0 = {}, y0 = {}, z0 = {}, x1 = {}, y1 = {}, z1 = {} }
+    Voxel3D.meshIndex[mesh] = idx
+  end
+  return idx
+end
+local function grow(idx, g, x, y, z)
+  local b = math.floor(g / INDEX_BV) + 1
+  local x0, y0, z0, x1, y1, z1 = idx.x0, idx.y0, idx.z0, idx.x1, idx.y1, idx.z1
+  if b > idx.nb then
+    for k = idx.nb + 1, b do
+      x0[k], y0[k], z0[k] = math.huge, math.huge, math.huge
+      x1[k], y1[k], z1[k] = -math.huge, -math.huge, -math.huge
+    end
+    idx.nb = b
+  end
+  if x < x0[b] then x0[b] = x end
+  if x > x1[b] then x1[b] = x end
+  if y < y0[b] then y0[b] = y end
+  if y > y1[b] then y1[b] = y end
+  if z < z0[b] then z0[b] = z end
+  if z > z1[b] then z1[b] = z end
+end
+
+-- Index part of a queued string slice: up to `quads` quads from item.j on.
+-- True when the slice is finished.
+local function indexString(item, quads)
+  local stop = math.min(item.count, item.j + quads * 6)
+  for j = item.j, stop - 1 do
+    grow(item.idx, item.g0 + j, love.data.unpack("<fff", item.value, j * 24 + 1))
+  end
+  item.j = stop
+  return stop >= item.count
+end
+
+local function indexSlice(mesh, value, first, pointer)
+  if not (Voxel3D.meshIndex and mesh) then return end
+  local idx = newIndex(mesh)
+  if idx.bad then return end
+  local g0 = (first or 1) - 1
+  if pointer then
+    -- the native path reads the floats directly: cheap, done at once
+    if not ffi then idx.bad = true return end
+    local count = math.floor((tonumber(value) or 0) / 24)
+    local fp = ffi.cast("const float*", pointer)
+    for j = 0, count - 1 do
+      local o = j * 6
+      grow(idx, g0 + j, fp[o], fp[o + 1], fp[o + 2])
+    end
+  elseif type(value) == "string" then
+    -- queued: ChunkMesher.indexPump works through it a little a frame; the
+    -- mesh draws whole until its index is complete
+    local count = math.floor(#value / 24)
+    idx.pending = (idx.pending or 0) + 1
+    indexQueue[#indexQueue + 1] = { idx = idx, value = value, g0 = g0, count = count,
+                                    j = 0 }
+  else
+    idx.bad = true
+    return
+  end
+  local g1 = g0 + (pointer and math.floor((tonumber(value) or 0) / 24) or math.floor(#value / 24))
+  if g1 > idx.verts then idx.verts = g1 end
+  idx.finalN, idx.cache = nil, nil
+end
+
+-- Index queued slices for up to `budget` seconds (default 2 ms).
+-- TEST188: slices still waiting to be indexed (PerfProbe waits for 0)
+function ChunkMesher.indexPending()
+  return #indexQueue
+end
+
+function ChunkMesher.indexPump(budget)
+  if #indexQueue == 0 then return end
+  local now = love and love.timer and love.timer.getTime
+  local t0 = now and now() or 0
+  budget = budget or 0.002
+  while #indexQueue > 0 do
+    local item = indexQueue[1]
+    local mesh = item.idx.owner[1]
+    local alive = mesh and pcall(mesh.getVertexCount, mesh)
+    local ok, done
+    if not alive or item.idx.bad then ok, done = true, true
+    else ok, done = pcall(indexString, item, 256) end
+    if not ok then item.idx.bad = true; done = true end
+    if done then
+      table.remove(indexQueue, 1)
+      item.idx.pending = item.idx.pending - 1
+      item.idx.finalN, item.idx.cache = nil, nil
+    end
+    if not now or now() - t0 > budget then break end
+  end
+end
+
+function Upload.vertices(mesh, value, first, pointer)
+  local indexed = pcall(indexSlice, mesh, value, first, pointer)
+  if not indexed and Voxel3D.meshIndex[mesh] then Voxel3D.meshIndex[mesh].bad = true end
+  local data = love.data.newByteData(value)
+  local ok, err = pcall(function()
+    if pointer then ffi.copy(data:getFFIPointer(), pointer, value) end
+    Timings.call("mesh_write", mesh.setVertices, mesh, data, first)
+  end)
+  -- Also release staging bytes when a driver write or pointer copy throws.
+  pcall(data.release, data)
+  if not ok then error(err, 0) end
+end
+function Upload.mesh(n, writer)
+  local mesh
+  local ok, err = pcall(function()
+    mesh = Upload.track(Timings.call("mesh_alloc", love.graphics.newMesh,
+      Voxel3D.FORMAT, n, "triangles", "static"))
+    writer(mesh)
+  end)
+  if not ok then
+    Upload.release(mesh)
+    CacheTrace.log("upload-failed", nil, tostring(err))
+    return nil
+  end
+  return mesh
+end
+
 local function newTableSink()
   local verts, indices, quads = {}, {}, 0
   local spans = newSpans(function() return #verts end)
@@ -319,7 +478,7 @@ local function newTableSink()
     end,
     finish = function()
       spans.close()
-      return Voxel3D.newMesh(verts, indices)
+      return Upload.track(Voxel3D.newMesh(verts, indices))
     end,
   }
 end
@@ -373,22 +532,16 @@ local function newPackedSink()
       spans.close()
       if n == 0 then return nil end
       flush()
-      local ok, mesh = pcall(function()
-        local result = Timings.call("mesh_alloc", love.graphics.newMesh,
-                                             Voxel3D.FORMAT, n,
-                                             "triangles", "static")
+      local mesh = Upload.mesh(n, function(result)
         local first = 1
         for _, chunk in ipairs(chunks) do
-          local data = love.data.newByteData(chunk)
-          Timings.call("mesh_write", result.setVertices, result, data, first)
+          Upload.vertices(result, chunk, first)
           first = first + math.floor(#chunk / PACKED_VERTEX_BYTES)
-          data:release()
           Budget.check()
         end
-        return result
       end)
       chunks, parts = {}, {}
-      return ok and mesh or nil
+      return mesh
     end,
     raw = function()
       flush()
@@ -434,25 +587,17 @@ local function newFfiSink()
       -- is ~10-20MB and one atomic setVertices was the last remaining
       -- frame spike. The mesh is not cached (so never drawn) until the
       -- whole upload lands, and LuaJIT yields fine across pcall.
-      local ok, mesh = pcall(function()
-        local m = Timings.call("mesh_alloc", love.graphics.newMesh,
-                                        Voxel3D.FORMAT, n,
-                                        "triangles", "static")
+      return Upload.mesh(n, function(m)
         local CHUNK = UPLOAD_VERTICES_PER_SLICE
         local i = 0
         while i < n do
           local count = math.min(CHUNK, n - i)
           local bytes = count * 6 * 4
-          local data = love.data.newByteData(bytes)
-          ffi.copy(data:getFFIPointer(), buf + i * 6, bytes)
-          Timings.call("mesh_write", m.setVertices, m, data, i + 1)
-          data:release()
+          Upload.vertices(m, bytes, i + 1, buf + i * 6)
           i = i + count
           Budget.check()
         end
-        return m
       end)
-      return ok and mesh or nil
     end,
     raw = function()
       return { ptr = buf, n = n, spans = spans.runs() }
@@ -488,43 +633,28 @@ end
 local function meshFromRaw(record)
   if not (record and record.n and record.n > 0) then return nil end
   if record.ptr and ffi then
-    local ok, mesh = pcall(function()
-      local result = Timings.call("mesh_alloc", love.graphics.newMesh,
-                                           Voxel3D.FORMAT, record.n,
-                                           "triangles", "static")
+    return Upload.mesh(record.n, function(result)
       local first = 0
       while first < record.n do
         local count = math.min(UPLOAD_VERTICES_PER_SLICE, record.n - first)
         local byteCount = count * PACKED_VERTEX_BYTES
-        local data = love.data.newByteData(byteCount)
-        ffi.copy(data:getFFIPointer(),
-          ffi.cast("const uint8_t*", record.ptr)
-            + first * PACKED_VERTEX_BYTES, byteCount)
-        Timings.call("mesh_write", result.setVertices, result, data, first + 1)
-        data:release()
+        Upload.vertices(result, byteCount, first + 1,
+          ffi.cast("const uint8_t*", record.ptr) + first * PACKED_VERTEX_BYTES)
         first = first + count
         Budget.check()
       end
-      return result
     end)
-    return ok and mesh or nil
   end
   if not record.chunks then return nil end
-  local ok, mesh = pcall(function()
-    local result = Timings.call("mesh_alloc", love.graphics.newMesh,
-                                         Voxel3D.FORMAT, record.n,
-                                         "triangles", "static")
+  local mesh = Upload.mesh(record.n, function(result)
     local first, carry = 1, ""
     local sliceBytes = UPLOAD_VERTICES_PER_SLICE * PACKED_VERTEX_BYTES
     for _, chunk in ipairs(record.chunks) do
       local bytes = carry .. chunk
       local offset = 1
       while #bytes - offset + 1 >= sliceBytes do
-        local data = love.data.newByteData(
-          bytes:sub(offset, offset + sliceBytes - 1))
-        Timings.call("mesh_write", result.setVertices, result, data, first)
+        Upload.vertices(result, bytes:sub(offset, offset + sliceBytes - 1), first)
         first = first + UPLOAD_VERTICES_PER_SLICE
-        data:release()
         offset = offset + sliceBytes
         Budget.check()
       end
@@ -533,22 +663,19 @@ local function meshFromRaw(record)
     local usable = math.floor(#carry / PACKED_VERTEX_BYTES)
                    * PACKED_VERTEX_BYTES
     if usable > 0 then
-      local data = love.data.newByteData(carry:sub(1, usable))
-      Timings.call("mesh_write", result.setVertices, result, data, first)
+      Upload.vertices(result, carry:sub(1, usable), first)
       first = first + usable / PACKED_VERTEX_BYTES
-      data:release()
       carry = carry:sub(usable + 1)
       Budget.check()
     end
     if #carry ~= 0 or first ~= record.n + 1 then
       error("invalid packed voxel vertex stream", 0)
     end
-    return result
   end)
   -- setVertices copied every slice into the Mesh; release the decoded strings
   -- immediately instead of retaining a second world-sized CPU representation.
   record.chunks = nil
-  return ok and mesh or nil
+  return mesh
 end
 
 -- -------------------------------------------------------------- geometry
@@ -597,13 +724,30 @@ end
 
 local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local LG={} -- Group city material state to stay within Lua/LuaJIT local limits.
-  local push = sink.push
+  -- TEST206: while LG.rockTag is set, faces are tagged with Cerulean
+  -- Cave's slate finish (ReferenceMaterials rkBlue, the cave mouths' 218)
+  local rawPush = sink.push
+  local function push(c, uvs, shades)
+    if LG.rockTag then
+      local ok, tagged = pcall(LG.RM.encode, "rkBlue", shades)
+      if ok then shades = tagged end
+    end
+    return rawPush(c, uvs, shades)
+  end
   local waterPush = waterSink and waterSink.push or nil
   local tileset = map.tileset
   local viridianForest = CommunityVisuals.customForest()
     and tileset.id == "FOREST"
     and tostring(map.id or "") == "VIRIDIAN_FOREST"
   LG.mapId = tostring(map.id or ""):upper()
+  -- TEST191: Victory Road's loose rocks stand low (CaveRubble heaps them)
+  -- TEST203: and Cerulean Cave's maze walls keep their source 16
+  do
+    local R = V.require("CaveRubble")
+    LG.caveRubble = (R.applies(map) or R.lowWalls(map)) and R or nil
+    -- TEST206: and its rock (walls, wall tops, shelf risers) is slate
+    LG.ceruleanRock = R.lowWalls(map) and true or false
+  end
   LG.safari = V.require("SafariReserve").enabled(map)
   LG.coast = V.require('CinnabarCoast')
   LG.cinnabarCoast = LG.coast.enabled(LG.mapId,CommunityVisuals.customRoads(),tileset.id)
@@ -623,6 +767,25 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   LG.fuchsiaGround = LG.legendaryCityGround and LG.mapId == "FUCHSIA_CITY"
   LG.customGrass = CommunityVisuals.customGrass() and not LG.cityGroundMap
   LG.grassReplacement = LG.customGrass or LG.fuchsiaGround
+  -- TEST176: each route's own path and grass (RouteLooks). The path takes
+  -- over the generic cobble only; bespoke trails and towns keep their own.
+  LG.routeLooks = V.require("RouteLooks")
+  LG.RM = V.require("ReferenceMaterials")
+  LG.routePathKind = not LG.routeTrail and not LG.cityStreetEnabled
+    and LG.routeLooks.pathKind(LG.mapId, tileset.id, CommunityVisuals.customRoads()) or nil
+  do
+    local lawn = LG.routeLooks.lawnMaterial(LG.mapId, tileset.id, LG.customGrass)
+    LG.routeLawnTag = lawn and (4096 + LG.RM.ids[lawn] * 128) or nil
+  end
+  function LG.tagged(base, tag)
+    return function(c, uv, shade)
+      if type(shade) == "table" then
+        base(c, uv, { shade[1] + tag, shade[2] + tag, shade[3] + tag, shade[4] + tag })
+      else
+        base(c, uv, shade + tag)
+      end
+    end
+  end
   LG.lavenderBattleCurrentGround = LG.lavenderGround and not LG.legendaryCityGround
   local towerInterior = tileset.id == "CEMETERY"
     and LG.mapId:match("^POKEMON_TOWER_[1-7]F$") ~= nil
@@ -707,7 +870,9 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     return towerMaterialUV(TOWER_WALL_REGION_X, TOWER_WALL_REGION_Y,
       TOWER_WALL_SIZE,
       (axis + TOWER_MAP_MARGIN) / towerWallSpan,
-      (y + 8) / 80)
+      -- Match the broad, nearly isotropic ceiling veining. The former 80px
+      -- vertical range compressed a room-sized slab into narrow wall bands.
+      (y + TOWER_MAP_MARGIN) / towerWallSpan)
   end
 
   local function towerGranitePlanUV(x, z)
@@ -1191,6 +1356,9 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local function caveRenderHeight(s, tile, h)
     if CommunityVisuals.customCaves() and tileset.id == "CAVERN"
        and h > 0 and s and s.class == "wall" then
+      if LG.caveRubble then
+        return LG.caveRubble.heightFor(map, tile) or h * CAVE_INNER_WALL_SCALE
+      end
       return h * CAVE_INNER_WALL_SCALE
     end
     return h
@@ -1553,7 +1721,9 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     if kind == "dirt" or kind == "shelf" then
       caveDirtTop(tx, ty, x0, z0, h, shade)
     else
+      LG.rockTag = LG.ceruleanRock and kind == "rock"
       caveContinuousSurface(tx, ty, x0, z0, h, shade, kind)
+      LG.rockTag = false
     end
   end
 
@@ -1892,6 +2062,42 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
       push(c,uv,shadeRect(c,shade,1,x0,x0+8,3,z0,z0+8,tone))
     else LG.pathFace(c,KANTO_PATH_SWATCH_TILE,swatch,shade,tone,x0,z0) end
   end
+  -- TEST176: a route's own path (RouteLooks). Its shader materials carry an
+  -- opaque donor texel for the shadow pass; creeping turf and leaves keep
+  -- the lawn's atlas art, tinted like the route's lawn. Route 10's sandy
+  -- Lavender approach (not a path tile) keeps its approved finish.
+  function LG.routePath(tx, ty, x0, z0, h, shade)
+    local own = S.tileAt[keyOf(tx, ty)]
+    if route10LavenderApproachAt(ty) and not KANTO_PATH_TILE[own] then return false end
+    local function side(dx, dz)
+      local k = keyOf(tx + dx, ty + dz); local near = S.shapeAt[k]
+      if not near then return false end
+      if near.class == "water" then return "water" end
+      if near.class ~= "ground" then return false end
+      local t = S.tileAt[k]
+      if KANTO_PATH_TILE[t] or KANTO_COURTYARD_ANCHOR_TILE[t]
+         or ChunkMesher.kantoBlock55CourtyardMember(t) then return "path" end
+      if S.skip[k] then return false end
+      if near.art == "grass" then return "tall" end
+      if t == KANTO_GRASS_TILE or t == 48 then return "grass" end
+      return false
+    end
+    if not LG.routeUVs then
+      local u = rockUV(KANTO_PATH_SWATCH_TILE, ROCK_TEXEL.body); LG.routeUVs = { u, u, u, u }
+    end
+    local edges = { w = side(-1, 0), e = side(1, 0), n = side(0, -1), s = side(0, 1),
+      nw = side(-1, -1), ne = side(1, -1), sw = side(-1, 1), se = side(1, 1) }
+    return LG.routeLooks.buildPath(LG.routePathKind, x0, z0, h, edges, function(c, mat, tone)
+      if mat == "turf" or mat == "leaf" then
+        local previous = push
+        if LG.routeLawnTag then push = LG.tagged(previous, LG.routeLawnTag) end
+        LG.pathFace(c, KANTO_PATH_SWATCH_TILE, mat, shade, tone, x0, z0)
+        push = previous
+      else
+        push(c, LG.routeUVs, LG.RM.encode(mat, shadeRect(c, shade, 1, x0, x0 + 8, 3, z0, z0 + 8, tone)))
+      end
+    end)
+  end
   local function kantoPavedTop(tx, ty, x0, z0, h, shade)
     local parkCell=LG.parkCell(tx,ty)
     if parkCell then
@@ -2009,6 +2215,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
       push=previousPush
       return
     end
+    if LG.routePathKind and LG.routePath(tx,ty,x0,z0,h,shade) then return end
     if tileset.id=='OVERWORLD' and CommunityVisuals.customRoads() then
       local function border(dx,dz)
         local k=keyOf(tx+dx,ty+dz);local near=S.shapeAt[k]
@@ -2129,6 +2336,8 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
         local plan=LG.cityPlan();push=LG.coast.lightPush(push,plan.lamps,h)
         if plan.cells[keyOf(tx,ty)] or plan.approachCells[keyOf(tx,ty)] then safe=false;verge=false end
       end
+      -- TEST176: the route's own grass (the tint rides the vertex shade)
+      if LG.routeLawnTag then push=LG.tagged(push,LG.routeLawnTag) end
       LG.gardens.build('lawn',LG.mapId,x0,z0,h,{
         bed=safe and not groundOnly,verge=verge and not groundOnly,w=foundation(-1,0),e=foundation(1,0),
         n=foundation(0,-1),s=foundation(0,1)},function(c,swatch,tone)
@@ -2140,10 +2349,11 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     end
     local x1, z1 = x0 + 8, z0 + 8
     local variant = math.floor(rockNoise(tx, ty, 425) * 4)
+    local turf = grassShades(x0, z0, shade)
+    if LG.routeLawnTag then for i = 1, 4 do turf[i] = turf[i] + LG.routeLawnTag end end
     push({ { x0, h, z0 }, { x1, h, z0 },
            { x1, h, z1 }, { x0, h, z1 } },
-         pavedUV(KANTO_GRASS_TILE, variant),
-         grassShades(x0, z0, shade))
+         pavedUV(KANTO_GRASS_TILE, variant), turf)
   end
 
   local function lavenderPathTile(tile)
@@ -2737,8 +2947,28 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     -- restrained value and depth rather than a manufactured panel texture.
     projectedPanel(axis0, axis1, 0.0, 2.0, 0.92, 0.46,
                    uvShadow, 1.00)
-    projectedPanel(axis0, axis1, 61.4, 64.0, 1.12, 0.46,
-                   uvLight, 1.16)
+    -- TEST12: a continuous, bevelled cornice follows the ACTUAL wall faces,
+    -- including recesses and interior corners. It closes the vault transition
+    -- below the old bright wall cap instead of leaving a pasted-on roof edge.
+    -- y/depth/tone: a narrow shadow reveal, stepped lip, cove and upper bed.
+    local profile={{54.2,.26,.42},{54.65,.26,.42},{54.9,1.85,.66},
+      {55.55,2.7,.90},{56.35,3.20,.74},{58.8,3.20,.72},
+      {60.0,2.35,.86},{63.6,2.35,.68}}
+    for j=1,#profile-1 do
+      local a,b=profile[j],profile[j+1]
+      local sy,ey=math.max(y0,a[1]),math.min(y1,b[1])
+      if ey>sy then
+        local function depth(y)return a[2]+(b[2]-a[2])*(y-a[1])/(b[1]-a[1])end
+        local corners={faceAxisPoint(d,x0,z0,axis0,sy,depth(sy)),
+          faceAxisPoint(d,x0,z0,axis1,sy,depth(sy)),
+          faceAxisPoint(d,x0,z0,axis1,ey,depth(ey)),
+          faceAxisPoint(d,x0,z0,axis0,ey,depth(ey))}
+        push(corners,{towerGraniteWallUV(axis0,sy),towerGraniteWallUV(axis1,sy),
+          towerGraniteWallUV(axis1,ey),towerGraniteWallUV(axis0,ey)},
+          {shadeAt(axis0,sy,b[3]),shadeAt(axis1,sy,b[3]),
+           shadeAt(axis1,ey,b[3]),shadeAt(axis0,ey,b[3])})
+      end
+    end
 
     -- Tall rectangular stone ribs. In the reference they are pale but still
     -- part of the wall, so their projection and value contrast stay modest.
@@ -2775,7 +3005,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
       projectedPanel(center - half - 0.75, center + half + 0.75,
                      0.0, 4.3, 1.78, 0.46, uvBody, 1.22)
       projectedPanel(center - half - 0.85, center + half + 0.85,
-                     58.7, 64.0, 1.88, 0.46, uvLight, 1.23)
+                     52.8, 55.45, 3.35, 0.46, uvLight, 1.08)
     end
   end
 
@@ -3118,7 +3348,8 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
       -- that the 2x2 grouping could not take -- a canopy whose partners
       -- fall outside the shortened ring is left unclaimed, and one strip of
       -- boxes along an edge is the whole artefact this avoids.
-      if not inBody and S.hideBareRing and not S.skip[k] then
+      if not inBody and S.hideBareRing and not S.skip[k]
+          and not (LG.cinnabarCoast and LG.coast.outerStripAt(map,S,keyOf,tx,ty)) then
         s = nil
       end
 
@@ -3135,7 +3366,13 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                         TOWER_GRANITE_SWATCH_TILE, false)
       end
 
-      if s and S.skip[k] then
+      if s and S.skip[k] and S.roomClaim and S.roomClaim[k] then
+        -- TEST191: an authored room (InteriorRooms) owns this cell and
+        -- brings its own floor. Structures' later passes can still give a
+        -- claimed cell synthesized ground (the gym statue's drawn cell);
+        -- painted here it lay exactly in the room floor's plane and the
+        -- two fought (the shimmer behind the Cerulean Gym's statues).
+      elseif s and S.skip[k] then
         -- an object stands here; paint its synthesized ground and let the
         -- prebuilt prism quads (appended below) carry the art
         local g = S.ground[k]
@@ -3154,7 +3391,16 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           local caveKind = caveSurfaceKind({ class="ground" }, g)
           local edgeFinish=LG.cliffGroundFinishAt(tx,ty)
           if V.require("TowerGarden").contains(S,tx,ty) then edgeFinish="towerGarden" end
-          if LG.cinnabarCoast and g==KANTO_GRASS_TILE then
+          if LG.cinnabarCoast and (LG.coast.boundaryGroundAt(map,S,keyOf,tx,ty)
+              or LG.coast.outerStripAt(map,S,keyOf,tx,ty)) then
+            -- Continue the grass verge beneath the outer wall, including the
+            -- border ring. One flat quad per cell; no flowers or city paving.
+            -- Keep the existing below-ground shoreline sides emitted below.
+            local x,z=tx*8,ty*8
+            push({{x,0,z},{x+8,0,z},{x+8,0,z+8},{x,0,z+8}},
+              pavedUV(KANTO_GRASS_TILE,math.floor(rockNoise(tx,ty,425)*4)),
+              grassShades(x,z,aoShades(tx,ty,0,1)))
+          elseif LG.cinnabarCoast and g==KANTO_GRASS_TILE then
             kantoPavedTop(tx,ty,tx*8,ty*8,0,aoShades(tx,ty,0,1))
           elseif edgeFinish=="towerGarden" then
             kantoGrassTop(tx,ty,tx*8,ty*8,0,aoShades(tx,ty,0,1))
@@ -3363,7 +3609,11 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           local paved = kantoSurfaceKind(s, tile)
           local caveKind = caveSurfaceKind(s, tile)
           local edgeFinish=s.class=="ground" and LG.cliffGroundFinishAt(tx,ty)
-          if LG.cityStreetEnabled and S.cityLawnCells and S.cityLawnCells[k] then
+          if LG.cinnabarCoast and LG.coast.outerStripAt(map,S,keyOf,tx,ty) then
+            push({{x0,h,z0},{x0+8,h,z0},{x0+8,h,z0+8},{x0,h,z0+8}},
+              pavedUV(KANTO_GRASS_TILE,math.floor(rockNoise(tx,ty,425)*4)),
+              grassShades(x0,z0,aoShades(tx,ty,h,1)))
+          elseif LG.cityStreetEnabled and S.cityLawnCells and S.cityLawnCells[k] then
             kantoGrassTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1))
           elseif tileset.id=='OVERWORLD' and (LG.customGrass or LG.legendaryCityGround)
               and s.art=='grass' and map:isGrassCell(math.floor(tx/2),math.floor(ty/2)) then
@@ -3601,7 +3851,9 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                   towerGraniteCounterSide(d, x0, z0, y0, y1, faceShade)
                 elseif CommunityVisuals.customCaves() and tileset.id == "CAVERN"
                    and (s.class == "wall" or s.class == "ledge") then
+                  LG.rockTag = LG.ceruleanRock
                   caveNaturalSide(d, x0, z0, y0, y1, faceShade)
+                  LG.rockTag = false
                 -- Match the top-face scope above: indoor CAVERN ledges keep
                 -- their own folded riser art rather than outdoor masonry.
                 elseif LG.safari and s.class=='ledge' then
@@ -3689,7 +3941,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local scUV = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } }
   local function quadUV(q)
     -- Native forest leaves use local 0..1 vein coordinates, not atlas UVs.
-    if q.referenceMaterial=='forestLeaf' and q.uv then return q.uv end
+    if (q.referenceMaterial=='forestLeaf' or q.referenceMaterial=='worldLeaf' or q.referenceMaterial=='tropicLeaf') and q.uv then return q.uv end
     if q.harborMaterial then
       local mat=q.harborMaterial
       local tile=(mat=='wood' or mat=='metal' or mat=='glass') and 60 or 57
@@ -3784,8 +4036,16 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     -- the edge keep-rules entirely: its eave legitimately overhangs the
     -- boundary plane into the neighbour's airspace, and no variant of
     -- the neighbour will ever draw that geometry
-    if q.own or outwardOnEdge(q, x0, z0, x1, z1)
-        or keepQuad(x0, z0, x1, z1) then
+    -- Border palms belong only to the current map's full mesh. Cull each
+    -- whole crown at a connected-map mask, never leave floating leaf scraps.
+    -- TEST191: nothing of the engine's stands inside an authored room's
+    -- claimed cells (the ROM statue's lifted art inside the room's statue)
+    local roomOwned = S.roomClaim
+      and S.roomClaim[keyOf(math.floor((x0 + x1) / 16), math.floor((z0 + z1) / 16))]
+    if not roomOwned and (not q.borderBounds or (not bodyOnly and not maskedClosed(
+          q.borderBounds[1],q.borderBounds[2],q.borderBounds[3],q.borderBounds[4])))
+        and (q.own or outwardOnEdge(q, x0, z0, x1, z1)
+        or keepQuad(x0, z0, x1, z1)) then
       local target = push
       if q.visualObjectId and visualSinks then
         local visualSink = visualSinks[q.visualObjectId]
@@ -3844,6 +4104,12 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
       keepAll = keepQuad(mx - e, mz - e, mx + e, mz + e)
       skipAll = not keepAll
     end
+    -- TEST191: an authored room models its own cans, statues and plants;
+    -- a hull stamped into one of its claimed cells is a second copy whose
+    -- base lies in the room floor's plane
+    if S.roomClaim and S.roomClaim[keyOf(math.floor(mx / 8), math.floor(mz / 8))] then
+      keepAll, skipAll = false, true
+    end
     if not skipAll and st.forestBoulder then
       -- ForestDressing owns the complete replacement at this cell.
     elseif not skipAll and st.hideCrown and st.lift and st.lift > 0
@@ -3889,6 +4155,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           s2[3] = c[3] + mz
         end
         if st.forestTree then V.require('ForestTrees').expand(q,st,sc)end
+        if st.worldTree then V.require('WorldTrees').expand(q,st,sc)end
         local ok = keepAll
         if not ok then
           local x0 = math.min(sc[1][1], sc[2][1], sc[3][1], sc[4][1])
@@ -4010,7 +4277,7 @@ local function quadsMesh(quads, uScale, vScale)
     Voxel3D.pushQuad(indices, n)
     n = n + 1
   end
-  return Voxel3D.newMesh(verts, indices), spans
+  return Upload.track(Voxel3D.newMesh(verts, indices)), spans
 end
 
 -- Flatten auxiliary quads into the same unindexed six-float stream terrain
@@ -4161,6 +4428,7 @@ end
 
 -- Replace a cached slot, releasing whatever mesh it held.
 local function swapSlot(c, slot, mesh)
+  Upload.publish(mesh)
   local old = c[slot]
   if old and old ~= mesh and old.release then pcall(old.release, old) end
   c[slot] = mesh
@@ -4177,6 +4445,7 @@ local function visualSlot(slot)
 end
 
 local function swapVisualSlot(c, slot, visuals)
+  for _, mesh in pairs(visuals or {}) do Upload.publish(mesh) end
   local name = visualSlot(slot)
   if c[name] ~= visuals then releaseVisualMeshes(c[name]) end
   c[name] = visuals
@@ -4325,9 +4594,23 @@ local function jobKey(id, slot)
   return id .. ":" .. slot
 end
 
+local function cancelJob(job)
+  local ok, err = true
+  if job.cancel then ok, err = pcall(job.cancel) end
+  Upload.clear(job.co)
+  if job.co then Timings.cancel(job.co) end
+  job.co = nil
+  if not ok then CacheTrace.log("cancel-failed", job.id, tostring(err)) end
+end
+
 local function finishJob(job, ok, err)
   CacheTrace.log(ok and "job-done" or "job-failed", job.id, "slot=" .. job.slot .. " error=" .. tostring(err))
-  if not ok and job.cancel then job.cancel() end
+  if not ok or (job.co and coroutine.status(job.co) ~= "dead") then
+    cancelJob(job)
+  else
+    Upload.clear(job.co)
+    job.co = nil
+  end
   local key = jobKey(job.id, job.slot)
   jobIndex[key] = nil
   for i, j in ipairs(jobs) do
@@ -4341,7 +4624,7 @@ local function finishJob(job, ok, err)
     print("[warn] voxel mesh build failed for " .. tostring(job.id)
           .. ": " .. tostring(err))
     if (gen[job.id] or 0) == job.gen then
-      entry(job.id)[job.slot] = false
+      swapSlot(entry(job.id), job.slot, false)
     end
     jobFailures[key] = tostring(err or "unknown mesh build error")
   else
@@ -4390,9 +4673,9 @@ local function runJob(job)
       flowerSpans = (okF and builtFlowers) and builtFlowerSpans or nil
     end
     if not current() then
-      if grass and grass.release then pcall(grass.release, grass) end
-      if flowers and flowers.release then pcall(flowers.release, flowers) end
-      releaseFigures(figures)
+      Upload.release(grass)
+      Upload.release(flowers)
+      for _, f in ipairs(figures or {}) do Upload.release(f.mesh) end
       return
     end
     swapSlot(c, "grass", grass or false)
@@ -4400,6 +4683,7 @@ local function runJob(job)
     c.grassSpans = grass and grassSpans or nil
     c.flowersSpans = flowers and flowerSpans or nil
     releaseFigures(c.figures)
+    for _, f in ipairs(figures or {}) do Upload.publish(f.mesh) end
     c.figures = figures or false
     if c.stale then c.stale.aux = nil end
   end
@@ -4407,10 +4691,27 @@ local function runJob(job)
   local mesh, water, visualMeshes, spans
   -- The moving vessel is a session mesh, also needed after disk restoration.
   local sessionVessel = map.id == "VERMILION_DOCK" and V.require("ShipHull").enabled(map)
+  -- TEST93: a terrain disk record does not contain the authored room's GPU
+  -- meshes. Build/claim that room before accepting its cached empty terrain.
+  -- On failure the analysis keeps native tiles; never load or save a terrain
+  -- record that could confuse that fallback with a successfully claimed room.
+  local interiors = V.require("InteriorRooms")
+  local authoredInterior = interiors.accepts(map)
+  if authoredInterior then Structures.forMap(map) end
+  -- TEST193: the same for the League's rooms (LeagueRooms), which claim
+  -- their whole map too: a cached empty terrain record is only accepted once
+  -- the room itself exists (Structures runs GameCorner -> LeagueRooms.build)
+  local okLeague, league = pcall(V.require, "LeagueRooms")
+  local leagueRoom = not authoredInterior and okLeague and league
+    and league.accepts(map) or false
+  if leagueRoom then Structures.forMap(map) end
+  local cacheTerrain = not job.bypassCache
+    and (not authoredInterior or interiors.ready(map.id) == true)
+    and (not leagueRoom or league.ready(map.id) == true)
   -- TEST96: ask for the complete cached answer before invoking Structures.
   -- Revision-36 records include suppressible sign streams plus tree/pillar
   -- registries, so those features no longer make a cache hit ineligible.
-  local cached = not sessionVessel and not job.bypassCache
+  local cached = not sessionVessel and cacheTerrain
     and MeshDisk.loadTerrain(map, job.slot, job.masks) or nil
   if cached then
     CacheTrace.log("upload-cached", job.id, "slot=" .. job.slot)
@@ -4450,12 +4751,12 @@ local function runJob(job)
       if not next(visualMeshes) then visualMeshes = nil end
     end
     if not current() then
-      if mesh and mesh.release then pcall(mesh.release, mesh) end
-      if water and water.release then pcall(water.release, water) end
-      releaseVisualMeshes(visualMeshes)
+      Upload.release(mesh)
+      Upload.release(water)
+      for _, m in pairs(visualMeshes or {}) do Upload.release(m) end
       return
     end
-    if terrainRaw and waterRaw and not job.bypassCache then
+    if terrainRaw and waterRaw and cacheTerrain then
       local savedTerrain, terrainError =
         MeshDisk.saveTerrain(map, job.slot, job.masks, terrainRaw, waterRaw,
           visualRaw, registrySnapshot(map))
@@ -4466,9 +4767,9 @@ local function runJob(job)
     end
   end
   if not current() then
-    if mesh and mesh.release then pcall(mesh.release, mesh) end
-    if water and water.release then pcall(water.release, water) end
-    releaseVisualMeshes(visualMeshes)
+    Upload.release(mesh)
+    Upload.release(water)
+    for _, m in pairs(visualMeshes or {}) do Upload.release(m) end
     return
   end
   swapSlot(c, job.slot, mesh or false)
@@ -4555,7 +4856,7 @@ function ChunkMesher.requestWork(map, name, signature, priority, work, cancel)
     return false
   end
   if prior then
-    if prior.cancel then prior.cancel() end
+    cancelJob(prior)
     for i = #jobs, 1, -1 do if jobs[i] == prior then table.remove(jobs, i) end end
   end
   local job = { id = map.id, map = map, slot = slot, signature = signature,
@@ -4570,7 +4871,7 @@ function ChunkMesher.cancelWork(mapId, name)
   local key = jobKey(mapId, "work-" .. name)
   local job = jobIndex[key]
   if not job then return end
-  if job.cancel then job.cancel() end
+  cancelJob(job)
   jobIndex[key] = nil
   for i = #jobs, 1, -1 do if jobs[i] == job then table.remove(jobs, i) end end
 end
@@ -4635,6 +4936,7 @@ function ChunkMesher.cancelSpeculative(mapId, bodyOnly)
   local key = jobKey(mapId, bodyOnly and "body" or "full")
   local job = jobIndex[key]
   if not job or (job.priority or 0) > 0 then return false end
+  cancelJob(job)
   jobIndex[key] = nil
   for i = #jobs, 1, -1 do
     if jobs[i] == job then table.remove(jobs, i); break end
@@ -4676,6 +4978,14 @@ end
 -- failed/empty build.  Unlike peek(), this distinguishes that settled state
 -- from an invalidated slot so the background precacher retries only real
 -- invalidations, not an unsupported map forever.
+function ChunkMesher.seasonalState(map, bodyOnly)
+  local c=map and cache[map.id]
+  local slot=bodyOnly and "body" or "full"
+  local ready=c and c[slot] and not(c.stale and c.stale[slot])
+    and not jobIndex[jobKey(map.id,slot)]
+  return ready and true or false, map and (gen[map.id] or 0) or 0
+end
+
 function ChunkMesher.slotKnown(map, bodyOnly)
   local c = map and cache[map.id]
   return c ~= nil and c[bodyOnly and "body" or "full"] ~= nil
@@ -4693,6 +5003,9 @@ local BODY_BOOTSTRAP_SLICE = 0.0065
 local FOREGROUND_SLICE = 0.00475
 local IDLE_SLICE = 0.005
 local COVERED_SLICE = 0.030
+-- TEST145: behind the loading card. The card repaints at 15 fps, so the
+-- build can take most of each frame and the area appears far sooner.
+local CARD_SLICE = 0.050
 
 local function nextJob()
   local pick = jobs[1]
@@ -4707,7 +5020,8 @@ function ChunkMesher.pump(covered)
   if #jobs == 0 then return end
   local pick = nextJob()
   local bootstrap = pick.slot == "body" and (pick.priority or 0) >= 2
-  local slice = covered and COVERED_SLICE
+  local slice = covered == "card" and CARD_SLICE
+                or covered and COVERED_SLICE
                 or (bootstrap and BODY_BOOTSTRAP_SLICE)
                 or ((pick.priority or 0) > 0 and FOREGROUND_SLICE
                     or IDLE_SLICE)
@@ -4715,6 +5029,7 @@ function ChunkMesher.pump(covered)
   while pick do
     if not pick.co then
       pick.co = coroutine.create(runJob)
+      Upload.owners[pick.co] = {}
     end
     -- Cap the whole pump, not each resumed job separately. Keep the registered
     -- coroutine guard in BuildBudget even with more frequent visible polling.
@@ -5007,7 +5322,7 @@ function ChunkMesher.refresh(mapId, bx, by, map, before)
   for i = #jobs, 1, -1 do
     local job = jobs[i]
     if job.id == mapId then
-      if job.cancel then job.cancel() end
+      cancelJob(job)
       jobIndex[jobKey(job.id, job.slot)] = nil
       table.remove(jobs, i)
     end
@@ -5026,17 +5341,19 @@ end
 -- rendered neighbours, so memory stays bounded by what is on or near the
 -- screen instead of growing with every area ever visited.
 --
--- The PREVIOUS live set is retained too: warping into a building
--- collapses the set to one small interior, and evicting the town at the
--- door means rebuilding the whole neighbourhood on the way out -- a
--- flat-world flash after every house. One set of history makes the
--- round trip free while staying bounded at two neighbourhoods.
+-- An indoor detour can retain the previous live set so the return to town
+-- reuses its meshes. Outdoor traversal passes keepPrevious=false: keeping
+-- another entire outdoor neighborhood raises peak memory at each seam.
+-- Omitted policy retains the historical behavior for other callers.
 local prevLive = {}
 
-function ChunkMesher.setLive(live)
-  trees("setLive", live)
+function ChunkMesher.setLive(live, keepPrevious)
+  -- TEST98: preserve a town while briefly indoors, but not an entire old
+  -- outdoor neighborhood while a new one is being allocated.
+  local history = keepPrevious == false and {} or prevLive
+  trees("setLive", live, keepPrevious)
   for id, c in pairs(cache) do
-    if not live[id] and not prevLive[id] then
+    if not live[id] and not history[id] then
       CacheTrace.log("evict-gpu", id, "outside current/previous live set")
       releaseEntry(c)
       cache[id] = nil
@@ -5046,8 +5363,8 @@ function ChunkMesher.setLive(live)
   end
   for i = #jobs, 1, -1 do
     local job = jobs[i]
-    if not live[job.id] and not prevLive[job.id] then
-      if job.cancel then job.cancel() end
+    if not live[job.id] and not history[job.id] then
+      cancelJob(job)
       jobIndex[jobKey(job.id, job.slot)] = nil
       table.remove(jobs, i)
     end
@@ -5081,7 +5398,7 @@ function ChunkMesher.evictRuntime(mapId)
   for i = #jobs, 1, -1 do
     local job = jobs[i]
     if mapId == nil or job.id == mapId then
-      if job.cancel then job.cancel() end
+      cancelJob(job)
       jobIndex[jobKey(job.id, job.slot)] = nil
       table.remove(jobs, i)
     end
@@ -5109,7 +5426,7 @@ function ChunkMesher.invalidate(mapId, reason)
   for i = #jobs, 1, -1 do
     local job = jobs[i]
     if mapId == nil or job.id == mapId then
-      if job.cancel then job.cancel() end
+      cancelJob(job)
       jobIndex[jobKey(job.id, job.slot)] = nil
       table.remove(jobs, i)
     end
@@ -5135,6 +5452,7 @@ function ChunkMesher.invalidateVoidRings()
     for i = #jobs, 1, -1 do
       local job = jobs[i]
       if job.id == id and not job.bodyOnly then
+        cancelJob(job)
         jobIndex[jobKey(job.id, job.slot)] = nil
         table.remove(jobs, i)
       end

@@ -1,8 +1,9 @@
 -- TEST132: four detailed 90-degree sectors in one 4096x1024 atlas.
 -- Same pixel budget and one horizon draw; raw source assets stay unmodified.
 local V=...
-local M={revision='legendary-landscape-134',panoramaStatus='atlas not attempted'}
+local M={revision='legendary-landscape-34-full-autumn',panoramaStatus='atlas not attempted'}
 local panorama,meadow
+local winter,autumn=false,false
 local tried={}
 local WIDTH,HEIGHT,PAD=4096,1024,4
 -- Inset every sector into its own padded tile. Do not sample across atlas rows.
@@ -13,6 +14,8 @@ function M.uv(sector,u,v)
 end
 M.source=[[
 extern number artwork;
+extern number winter;
+extern number autumn;
 extern Image artworkTexture;
 extern Image meadowTexture;
 extern Image horizon1;extern Image horizon2;extern Image horizon3;
@@ -63,10 +66,57 @@ vec3 meadowColor(vec2 uv){
               +.15*sin(phase.x*2.0-phase.y);
  return grass+vec3(.025,.032,.018)*patches;
 }
+// Snow is baked into the existing atlas and meadow, once per season change.
+// Preserve the painting's relief: lit ridges collect snow, dark rock and the
+// forest's shadowed interiors remain visible. No random glitter or animation.
+vec3 snowMeadow(vec3 c){
+ float relief=clamp((dot(c,vec3(.2126,.7152,.0722))-.32)*.65,-.13,.10);
+ return clamp(vec3(.86,.90,.94)+relief,0.0,1.0);
+}
+vec3 snowLandscape(vec3 c,float height){
+ float light=dot(c,vec3(.2126,.7152,.0722));
+ float exposed=smoothstep(.09,.48,light);
+ float highland=1.0-smoothstep(.58,.82,height);
+ float canopy=smoothstep(.012,.115,c.g-(c.r+c.b)*.5)*(1.0-highland);
+ float cover=clamp(.25+.60*exposed+.17*highland-.13*canopy,0.0,.98);
+ float shade=clamp(.47+light*.98,.47,.97);
+ vec3 snow=clamp(vec3(.94,.99,1.04)*shade,0.0,1.0);
+ vec3 recess=c*vec3(.78,.84,.94);
+ return mix(recess,snow,cover);
+}
+// Halloween uses the painted vegetation's chroma at every elevation.
+// Neutral/cool rock retains its original relief; no height cutoff leaves
+// green foothills or a summer meadow between the forest and playable map.
+vec3 fallMeadow(vec3 c){
+ float light=dot(c,vec3(.2126,.7152,.0722));
+ vec3 dry=vec3(.48,.365,.19);
+ dry*=light/dot(dry,vec3(.2126,.7152,.0722));
+ return mix(c,dry,.90);
+}
+vec3 fallLandscape(vec3 c,float angle,float height){
+ float light=dot(c,vec3(.2126,.7152,.0722));
+ float relativeGreen=(c.g-c.r)/max(light,.035);
+ float relativeBlue=(c.g-c.b)/max(light,.035);
+ float leaves=smoothstep(.015,.13,relativeGreen)
+             *smoothstep(-.22,-.015,relativeBlue);
+ // Source highlights and hue retain each painted crown's fine detail.
+ float autumnBlend=clamp((c.r+c.g-c.b-.12)*1.12,0.0,1.0);
+ vec3 warm=mix(vec3(.46,.265,.13),vec3(.57,.225,.135),smoothstep(.10,.32,autumnBlend));
+ warm=mix(warm,vec3(.67,.39,.17),smoothstep(.33,.55,autumnBlend));
+ warm=mix(warm,vec3(.75,.55,.22),smoothstep(.56,.79,autumnBlend));
+ warm*=light/max(dot(warm,vec3(.2126,.7152,.0722)),.035);
+ // Distant slope vegetation is muted by atmospheric haze, not neon orange.
+ warm=mix(warm,vec3(light),mix(.48,.16,smoothstep(.35,.68,height)));
+ vec3 foliage=mix(c,clamp(warm,0.0,1.0),leaves*.97);
+ // The lower painted grass meets the same dry palette as the ground atlas.
+ return mix(foliage,fallMeadow(c),smoothstep(.78,.86,height));
+}
+
 vec4 effect(vec4 color,Image tex,vec2 unused,vec2 px){
  vec2 uv=px/canvasSize;
  if(artwork>.5){
-  return vec4(meadowColor(uv),1.0);
+  vec3 grass=meadowColor(uv);
+  return vec4(winter>.5?snowMeadow(grass):(autumn>.5?fallMeadow(grass):grass),1.0);
  }
  vec2 tile=floor(uv*2.0);
  float sector=tile.x+tile.y*2.0;
@@ -91,6 +141,8 @@ vec4 effect(vec4 color,Image tex,vec2 unused,vec2 px){
  // The last few texels meet the floor's average tone, so the regional yaw
  // cannot expose a hard texture cut at the cylinder's foot.
  grass=mix(grass,vec3(.252,.379,.166),smoothstep(.982,1.0,uv.y));
+ if(winter>.5){rgb=snowLandscape(rgb,uv.y);grass=snowMeadow(grass);}
+ else if(autumn>.5){rgb=fallLandscape(rgb,angle,uv.y);grass=fallMeadow(grass);}
  rgb=mix(rgb,grass,smoothstep(edge,.995,uv.y));
  return vec4(rgb,alpha);
 }
@@ -128,6 +180,8 @@ local function bake(width,height,kind)
   g.setDepthMode();g.setScissor();g.clear(0,0,0,0)
   g.setBlendMode('replace');g.setShader(sh);g.setColor(1,1,1,1)
   sh:send('canvasSize',{width,height});sh:send('artwork',kind)
+  sh:send('winter',winter and 1 or 0)
+  sh:send('autumn',autumn and 1 or 0)
   g.rectangle('fill',0,0,width,height)
  end)
  if pushed then g.pop()end
@@ -148,7 +202,7 @@ function M.panorama()
  tried.panorama=true
  local err
  panorama,err=M.bake(WIDTH,HEIGHT,0)
- M.panoramaStatus=panorama and 'four-sector atlas 4096x1024; TEST134 meadow (TEST132 peaks)'
+ M.panoramaStatus=panorama and ('four-sector atlas 4096x1024; '..(winter and 'Christmas snow' or autumn and 'Halloween autumn' or 'TEST134 meadow (TEST132 peaks)'))
    or ('atlas unavailable: '..tostring(err))
  return panorama
 end
@@ -160,5 +214,14 @@ function M.invalidate()
  for _,t in pairs({panorama,meadow})do if t and t.release then t:release()end end
  panorama,meadow=nil,nil;tried={};M.panoramaStatus="atlas not attempted"
 end
+function M.setSeason(on,fall)
+ on=not not on;fall=not on and not not fall
+ if winter==on and autumn==fall then return end
+ -- Keep a single active set of textures. Season changes never retain atlases
+ -- for previously visited towns or previous holiday choices.
+ M.invalidate()
+ winter,autumn=on,fall
+end
+function M.setWinter(on)M.setSeason(on,false)end
 M.bake=bake
 return M

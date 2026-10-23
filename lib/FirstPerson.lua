@@ -134,10 +134,19 @@ FirstPerson.fovScale = 1
 
 local wasEngaged = false
 local stick = { x = 0, y = 0 }        -- right stick, latest event values
+-- TEST149: the left stick as the controller itself reports it (mapped
+-- leftx/lefty, or raw axes 1/2 on an unmapped pad), so the walk can tell a
+-- real move from the right stick leaking into the engine's stick axis.
+local leftStick = { x = 0, y = 0, mapped = false, raw = false }
+-- ...and the pad's own d-pad buttons, so a real d-pad press still walks while
+-- the engine's copy of a right-stick push is refused.
+local dpad = {}
+local DPAD = { dpup = 'up', dpdown = 'down', dpleft = 'left', dpright = 'right' }
 local mouseDX, mouseDY = 0, 0         -- relative counts since last update
 local lookTouch = nil                 -- { id, x, y } of the claimed finger
 local touchMove = nil                 -- the touch d-pad's analog deflection
 local captured = false                -- mouse relative mode engaged by us
+local releaseMouseButtons = function() end
 
 -- the placed-camera record this module last handed to Voxel3D, so passes
 -- that key behaviour off "is the first-person rig the one drawing" (the
@@ -425,7 +434,19 @@ function FirstPerson.moveVector()
   local ok, Game = pcall(require, "src.core.Game")
   local input = ok and Game.input or nil
 
+  -- TEST149: the right stick is ONLY the look. On some controllers the
+  -- engine's stick axis also carries it, which walked the player whenever
+  -- they looked around. A mapped pad walks by its own left stick; anywhere
+  -- else a stick axis that is just the right stick showing through (right
+  -- deflected the same way, left centred) is refused, and so are the d-pad
+  -- keys the engine may have made of it.
   local ax = input and input.stickAxis or nil
+  local leaked = false
+  if leftStick.mapped then
+    ax = leftStick
+  elseif ax and FirstPerson.rightLeak(ax) then
+    ax, leaked = nil, true
+  end
   if ax then
     local mag = math.sqrt(ax.x * ax.x + ax.y * ax.y)
     if mag > FirstPerson.MOVE_DEAD then
@@ -445,10 +466,17 @@ function FirstPerson.moveVector()
   end
 
   if input then
-    local mx = (input:isDown("right") and 1 or 0)
-               - (input:isDown("left") and 1 or 0)
-    local mz = (input:isDown("up") and 1 or 0)
-               - (input:isDown("down") and 1 or 0)
+    -- While the right stick is pushed with the left centred, held directions
+    -- may be the engine's copy of that push: only the pad's real d-pad counts.
+    local refuse = leaked or FirstPerson.rightLeak(nil)
+    local function down(k)
+      if refuse then return dpad[k] == true end
+      return input:isDown(k)
+    end
+    local mx = (down("right") and 1 or 0)
+               - (down("left") and 1 or 0)
+    local mz = (down("up") and 1 or 0)
+               - (down("down") and 1 or 0)
     if mx ~= 0 or mz ~= 0 then
       local mag = math.sqrt(mx * mx + mz * mz)
       return mx / mag, mz / mag
@@ -456,6 +484,26 @@ function FirstPerson.moveVector()
   end
   return 0, 0
 end
+
+-- TEST149: is this stick-axis reading only the right stick leaking through?
+-- True when the right stick is pushed past the walk deadzone, the left stick
+-- is centred (as far as the controller has told us), and the reading points
+-- the same way as the right stick. With `ax` nil: whether a right-stick push
+-- is under way with the left centred - then held directions may be the
+-- engine's own copy of that push (moveVector then trusts only real d-pad
+-- buttons).
+function FirstPerson.rightLeak(ax)
+  local rx, ry = stick.x or 0, stick.y or 0
+  local rm = math.sqrt(rx * rx + ry * ry)
+  if rm <= FirstPerson.MOVE_DEAD then return false end
+  local lx, ly = leftStick.x, leftStick.y
+  if math.sqrt(lx * lx + ly * ly) > FirstPerson.MOVE_DEAD * .6 then return false end
+  if ax == nil then return true end
+  local am = math.sqrt(ax.x * ax.x + ax.y * ax.y)
+  if am <= FirstPerson.MOVE_DEAD * .6 then return false end
+  return (ax.x * rx + ax.y * ry) / (am * rm) > .8
+end
+FirstPerson._leftStick = leftStick     -- for validation only
 
 -- Rotate a camera-space move into world space: forward is the flat look
 -- direction, strafe-right is its right hand. (cross(forward, up) with
@@ -523,11 +571,13 @@ function FirstPerson.update(dt)
   -- part of the dive in from the orbit, which carries the eye anyway
   ThirdPerson.update(dt, FirstPerson.blend)
 
-  -- mouse capture follows engagement: captured whenever the rung is on and
-  -- the window has focus, released the moment either ends. Checked against
+  -- Mouse capture requires the free-roam rung, the overworld on top and
+  -- window focus. Menus release it immediately. Checked against
   -- the live mode rather than toggled on edges, so a capture lost to the
   -- OS (alt-tab) re-arms itself on the next focused frame.
-  local wantCapture = engagedNow
+  -- Camera placement may remain active behind a modal, but its pointer may
+  -- not. This prevents Studio/menu release and camera recapture every frame.
+  local wantCapture = engagedNow and FirstPerson.onTop()
   if wantCapture and love.window and love.window.hasFocus then
     local okF, focus = pcall(love.window.hasFocus)
     wantCapture = okF and focus or false
@@ -538,6 +588,11 @@ function FirstPerson.update(dt)
       pcall(love.mouse.setRelativeMode, wantCapture)
     end
     captured = wantCapture
+  end
+
+  if not wantCapture then
+    mouseDX, mouseDY = 0, 0
+    releaseMouseButtons()
   end
 
   local driving = FirstPerson.driving()
@@ -623,15 +678,26 @@ function FirstPerson.frame(me, cx, cy, vw, vh, posed, state)
   local surf = (Voxel.isThirdPerson() or Voxel.isFirstPerson())
     and V.require("SurfCamera").measure(me, posed, state) or nil
   ThirdPerson.surfActive = surf ~= nil
+  -- The canopy also constrains the walking camera after dismount, including
+  -- its residual Surf boom/lift and steep manual pitch.
+  local ceiling = V.require("CaveAtmosphere3D").cameraCeiling(state and state.map)
   -- Skip the diorama-to-head interpolation while mounted: its path can
   -- pass straight through the mount even when the final eye is outside it.
   if surf then e = 1 end
   local targetHeight, surfWide
-  if surf then targetHeight, surfWide = V.require("SurfCamera").framing(surf, ThirdPerson.surfZoom) end
+  if surf then targetHeight, surfWide = V.require("SurfCamera").framing(
+    surf, ThirdPerson.surfZoom, ceiling and ceiling - 8) end
   local lift = surf and math.max(0, targetHeight - head[2]) or 0
   ThirdPerson.surfLiftGoal = lift
   -- Rise immediately for safety; settle smoothly after dismount/animation.
   ThirdPerson.surfLift = math.max(ThirdPerson.surfLift or 0, lift)
+  if ceiling then
+    -- Entering a cave must clamp immediately, even if the previous frame
+    -- carried a tall outdoor mount. Smoothing down from above clips rock.
+    ThirdPerson.surfLift = math.min(ThirdPerson.surfLift,
+      math.max(0, ceiling - 8 - head[2]))
+    head[2] = math.min(head[2], ceiling - 8)
+  end
   head = {head[1], head[2] + (ThirdPerson.surfLift or 0), head[3]}
   local lx, ly, lz = lookDir()
   if surf then
@@ -654,7 +720,7 @@ function FirstPerson.frame(me, cx, cy, vw, vh, posed, state)
   -- as far as the world allows. Fully in (1ST, and every frame of the
   -- diorama) this hands back the head and the focus untouched, so the two
   -- rungs are one rig with one number between them.
-  local camEye, camFocus = ThirdPerson.place(head, lx, ly, lz, fpFocus, surf)
+  local camEye, camFocus = ThirdPerson.place(head, lx, ly, lz, fpFocus, surf, ceiling)
 
   local oEye, oFocus, oFov, oUp = orbitRig(cx, cy, vh)
   local function mix(p, q)
@@ -743,6 +809,17 @@ end
 
 local installed = false
 
+-- A staged battle reserves the right stick for its camera, including hosted
+-- Stadium scenes whose normal shot is intentionally unpublished. Its command
+-- and move menus still receive the left stick, physical d-pad and buttons.
+local function battleOwnsRightStick()
+  local ok, active = pcall(function()
+    local owner = V.require("OverworldBattle")
+    return owner.battle() ~= nil and owner.arena() ~= nil
+  end)
+  return ok and active == true
+end
+
 function FirstPerson.install()
   if installed then return end
   installed = true
@@ -752,10 +829,40 @@ function FirstPerson.install()
   -- ------- right stick
   do
     local inner = Game.gamepadaxis
+    local forwarded = setmetatable({}, {__mode="k"})
     function Game:gamepadaxis(joystick, axis, value)
       if axis == "rightx" then stick.x = value
-      elseif axis == "righty" then stick.y = value end
+      elseif axis == "righty" then stick.y = value
+      elseif axis == "leftx" then leftStick.x = value or 0; leftStick.mapped = true
+      elseif axis == "lefty" then leftStick.y = value or 0; leftStick.mapped = true end
+      if joystick and (axis == "rightx" or axis == "righty") then
+        local previous = forwarded[joystick]
+        if battleOwnsRightStick() then
+          -- Release any pre-battle menu hold before claiming this axis.
+          for _, key in ipairs({"rightx", "righty"}) do
+            if previous and previous[key] and previous[key] ~= 0 then
+              inner(self, joystick, key, 0)
+              previous[key] = 0
+            end
+          end
+          return
+        end
+        previous = previous or {}; forwarded[joystick] = previous
+        previous[axis] = value
+      end
       return inner(self, joystick, axis, value)
+    end
+  end
+  -- TEST149: the pad's physical d-pad, for moveVector's leak test
+  do
+    local pressed, released = Game.gamepadpressed, Game.gamepadreleased
+    function Game:gamepadpressed(joystick, button)
+      if DPAD[button] then dpad[DPAD[button]] = true end
+      if pressed then return pressed(self, joystick, button) end
+    end
+    function Game:gamepadreleased(joystick, button)
+      if DPAD[button] then dpad[DPAD[button]] = nil end
+      if released then return released(self, joystick, button) end
     end
   end
   -- generic (non-gamepad) sticks: axes 1/2 are the left stick by SDL
@@ -784,14 +891,32 @@ function FirstPerson.install()
   local rawCentred = {}
   do
     local inner = Game.joystickaxis
+    local forwarded = setmetatable({}, {__mode="k"})
     function Game:joystickaxis(joystick, axis, value)
       local mapped = joystick and joystick.isGamepad and joystick:isGamepad()
-      if not mapped and (axis == 3 or axis == 4)
+      if not mapped and (axis == 1 or axis == 2) and not isAccelerometer(joystick) then
+        -- TEST149: an unmapped pad's left stick, for the leak test above
+        if axis == 1 then leftStick.x = value or 0 else leftStick.y = value or 0 end
+        leftStick.raw = true
+      end
+      if joystick and not mapped and (axis == 3 or axis == 4)
          and not isAccelerometer(joystick) then
         if math.abs(value) < 0.3 then rawCentred[axis] = true end
         if rawCentred[axis] then
           if axis == 3 then stick.x = value else stick.y = value end
         end
+        if battleOwnsRightStick() then
+          local previous = forwarded[joystick]
+          for _, key in ipairs({3, 4}) do
+            if previous and previous[key] and previous[key] ~= 0 then
+              inner(self, joystick, key, 0)
+              previous[key] = 0
+            end
+          end
+          return
+        end
+        local previous = forwarded[joystick] or {}; forwarded[joystick] = previous
+        previous[axis] = value
       end
       return inner(self, joystick, axis, value)
     end
@@ -817,6 +942,12 @@ function FirstPerson.install()
   -- spent by the shot that ended the run.
   local mouseHeld = {}
   local MOUSE_BTN = { [1] = "a", [2] = "b" }
+  releaseMouseButtons = function()
+    for button, token in pairs(mouseHeld) do
+      V.mod.input:release(token)
+      mouseHeld[button] = nil
+    end
+  end
   local function hordeMouse(button, down)
     -- Horde mode is not part of this fork: skip it cleanly rather than
     -- requiring a module that is not shipped.
@@ -839,14 +970,14 @@ function FirstPerson.install()
   end
   V.mod.hooks:wrap("input.pointer", function(next, game, ev)
     if ev.source ~= "mouse" then return next(game, ev) end
-    if ev.phase == "moved" and captured then
+    if ev.phase == "moved" and captured and FirstPerson.driving() then
       mouseDX = mouseDX + (ev.dx or 0)
       mouseDY = mouseDY + (ev.dy or 0)
       return true
     end
 
     local button = ev.button
-    if ev.phase == "pressed" and captured then
+    if ev.phase == "pressed" and captured and FirstPerson.driving() then
       if hordeMouse(button, true) then return true end
       local mapped = MOUSE_BTN[button]
       if mapped then
@@ -965,7 +1096,10 @@ function FirstPerson.install()
     function Game:focus(f)
       lookTouch, touchMove = nil, nil
       stick.x, stick.y = 0, 0
+      leftStick.x, leftStick.y = 0, 0
+      dpad = {}
       mouseDX, mouseDY = 0, 0
+      if not f then releaseMouseButtons() end
       return inner(self, f)
     end
   end
@@ -976,6 +1110,8 @@ function FirstPerson.install()
     local inner = Game.joystickremoved
     function Game:joystickremoved(joystick)
       stick.x, stick.y = 0, 0
+      leftStick.x, leftStick.y, leftStick.mapped, leftStick.raw = 0, 0, false, false
+      dpad = {}
       rawCentred[3], rawCentred[4] = nil, nil
       return inner(self, joystick)
     end

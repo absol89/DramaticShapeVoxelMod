@@ -807,9 +807,13 @@ local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
     .. CommunityFlora.shadowSignature(state, arena.mid[1], arena.mid[2])
   sig = sig .. "|trainer:" .. tostring(CharacterRenderers.battleActive())
     .. ":" .. tostring(CharacterRenderers.revision())
+    .. "|stadium:" .. tostring(BattleScene.stadiumStage)
   if not ShadowMap.stale(sig) then return end
   if not ShadowMap.begin(cx, cy, vw, vh) then return end
 
+  -- (TEST198: in a League stadium only the cast throws a shadow; the stadium
+  -- itself draws nothing here, and the room's world is not there)
+  if not BattleScene.stadiumStage then
   ShadowMap.draw(terrain, atlasFor(host), nil)
   V.require("GameCorner").draw(host, ShadowMap)
   LegendaryTowerExterior.drawMap(host,nil,ShadowMap)
@@ -848,6 +852,7 @@ local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
   end
   pcall(CommunityFlora.castShadows, state, ShadowMap, Mat4,
         arena.mid[1], arena.mid[2])
+  end
 
   -- the mons themselves, as the same cards the camera will see. Their alpha
   -- is the silhouette, so what lands on the ground is the shape of the
@@ -923,6 +928,35 @@ end
 
 -- Entrance release has its own clock, independent of breakout particles.
 local sendoutOwner, sendoutSides = nil, {}
+-- TEST229: ONE BALL. A trainer who throws the Poke Ball out (the Legendary
+-- Collection's send-out throw) publishes the size of the ball it threw,
+--   battle.legendarySendoutBall[side] = { scale = n, at = love.timer time,
+--                                         battler = the Pokemon thrown }
+-- renewed every frame from the wind-up until the release takes it; the
+-- release ball that opens on the spot is then that ball, the same size,
+-- instead of a field-sized one taking its place (the throw used to grow its
+-- ball in the air to the field's size to match). Without a throw: the
+-- field's size (BALL SIZE), exactly as before. The Collection checks this
+-- flag. A size said for this very Pokemon holds for THROWN_BALL_KEEP (a
+-- long frame hitch as the release starts does not lose it); one said
+-- without a battler, for THROWN_BALL_FRESH.
+BattleScene.THROWN_BALL_SCALE = true
+BattleScene.THROWN_BALL_FRESH = 0.6
+BattleScene.THROWN_BALL_KEEP = 10
+local function thrownBallScale(battle, side, now, battler)
+  local balls = battle and battle.legendarySendoutBall
+  local b = type(balls) == "table" and balls[side] or nil
+  if type(b) ~= "table" then return nil end
+  local s, at = tonumber(b.scale), tonumber(b.at)
+  if not (s and at and s == s and s > 0.05 and s < 4) then return nil end
+  local age = now - at
+  if b.battler ~= nil and battler ~= nil and b.battler ~= battler then return nil end
+  local keep = (b.battler ~= nil and b.battler == battler) and BattleScene.THROWN_BALL_KEEP
+               or BattleScene.THROWN_BALL_FRESH
+  if age < -0.05 or age > keep then return nil end
+  return s
+end
+BattleScene._thrownBallScale = thrownBallScale
 local function updateSendout(battle)
   if not battle then return end
   if sendoutOwner ~= battle then
@@ -954,7 +988,9 @@ local function updateSendout(battle)
     if eligible and battler and fresh and not capturing then
       entry.emberClosed=nil
       entry.shell=Pokeball.new("POKE_BALL")
-      entry.shell.scale=math.max(0.85,entry.shell.scale)
+      -- TEST229: the ball the trainer threw keeps its size as it opens
+      entry.ballScale=thrownBallScale(battle,side,now,battler)
+      entry.shell.scale=entry.ballScale or math.max(0.85,entry.shell.scale)
       entry.started=start or now
       entry.cueStarted=start
       entry.age,entry.last=math.max(0,now-entry.started),now
@@ -964,6 +1000,9 @@ local function updateSendout(battle)
       local dt=math.max(0,math.min(0.08,now-(entry.last or now)))
       entry.last=now; entry.age=math.max(0,now-entry.started)
       entry.shell:update(dt)
+      -- (Pokeball:update sets the field's size every frame: a thrown ball
+      -- keeps its own)
+      if entry.ballScale then entry.shell.scale=entry.ballScale end
       if entry.age<0.44 then
         local q=math.min(1,entry.age/0.28)
         battle.legendaryReleasePose[side]={scale=0.08+0.92*q*q*(3-2*q),
@@ -1133,8 +1172,17 @@ local function tickTiles()
   pcall(require("src.render.TileRenderer").tick)
 end
 
+-- TEST194: the map this battle pass is staging, for the length of the pass:
+-- the League rooms draw their stadium instead of the room while it is set
+BattleScene.stagedHost = nil
+-- TEST198: true for the length of a pass that a League stadium stages (see
+-- render): the room's own terrain and dressing are left out of it
+BattleScene.stadiumStage = false
+
 function BattleScene.render(state, arena, textures, token, battle, drawActors,
                             externalCamera, externalModelShadow)
+  BattleScene.stagedHost = nil
+  BattleScene.stadiumStage = false
   if not (state and state.map and arena) then return nil end
   if not Voxel3D.available() then return nil end
   tickTiles()
@@ -1164,7 +1212,7 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
   -- shared rig follows the clock on an outdoor floor and stays at noon on an
   -- indoor one, and the same tint multiplies the staged shot -- with the
   -- same window glass on whatever buildings stand in the background
-  local outdoor = (host.def and Map.isOutdoor(host.def)) or V.require("SafariReserve").enabled(host) or false
+  local outdoor = (host.def and Map.isOutdoor(host.def)) or V.require("SafariReserve").enabled(host) or DayNight.isLeagueAir(host) or false
   DayNight.applyRig(outdoor)
   -- a canopy floor (Viridian Forest) fights under the hour's tint too,
   -- with the rig and the void exactly as they were
@@ -1183,7 +1231,7 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     density = atmos.fog.density * 0.5,
     start = atmos.fog.start,
     heightK = atmos.fog.heightK,
-  } or nil
+  } or (not flatFill and V.require("CaveMood").battleFog(host)) or nil
 
   -- A flat plate does not wait for or touch voxel meshes. The world arena
   -- still shares free-roam's request/evict bookkeeping and warms nothing
@@ -1192,7 +1240,10 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
   if not flatFill then
     terrain, nbMesh, water, nbWater, visuals, nbVisuals =
       prefetchArena(state, host)
-    if not terrain then return nil end
+    -- An authored room owns its meshes separately from native terrain.
+    -- Keep waiting for pending/failed rooms, but allow a completed room with
+    -- a settled empty terrain slot, just as the overworld renderer does.
+    if not terrain and not VoxelScene.authoredRoomReady(host) then return nil end
   end
 
   local lx, ly, s, pw, ph = BattleScene.letterbox()
@@ -1243,6 +1294,34 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     cam = BattleCam.rig(arena, groundY)
     cam.fov = BattleScene.letterboxFov(cam.fov, ph, s)
   end
+  -- TEST140: spring arm. Slide the eye in front of rock walls, ledges and
+  -- buildings instead of letting the orbit hide behind them.
+  do
+    local okSt, st = pcall(V.require, "LeagueStadium")
+    local stadiumReady = okSt and st and st.ROOMS[host.id]
+      and st.ready(host.id) == true
+    -- The battle stadium replaces the source room's walls and floor plan.
+    -- Its old collision map must not alter the shared actor camera.
+    if not stadiumReady then
+      local okArm, armed = pcall(V.require("BattleSightline").adjust, cam, host, groundY, arena)
+      if okArm and armed then cam = armed end
+    end
+  end
+  -- TEST218: an Elite Four / Champion win: the camera lifts to the
+  -- fireworks over the stadium (LeagueVictory). Only for this mod's own
+  -- battle camera: an external camera (another mod's) is left exactly as
+  -- it is, since its models are drawn with it.
+  do
+    local okV, LV = pcall(V.require, "LeagueVictory")
+    -- The shared provider already recorded the unlifted camera and applied
+    -- the show to every layer. Do not record that lifted output as a new base.
+    local shared = okV and LV and LV.sharedEye and LV.sharedEye(externalEye)
+    if okV and LV and LV.camera and not shared then
+      cam.aspect = pw / math.max(1,ph)
+      local okC, lifted = pcall(LV.camera, cam, host, groundY, externalEye ~= nil)
+      if okC and lifted then cam = lifted end
+    end
+  end
 
   local cx, cy = arena.mid[1], arena.mid[2]
   -- the world extents the sun frustum is fitted to; the camera itself is
@@ -1280,6 +1359,24 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     if light then Voxel3D.battleFireLight=light;break end
   end
   Voxel3D.camera = nil
+  BattleScene.stagedHost = host
+  -- TEST198: a battle staged in a League stadium is fought on the stadium's
+  -- own floor, so the ROOM's native terrain and dressing stay out of both
+  -- passes. The Champion's room keeps sixteen floor tiles of native terrain
+  -- (Lorelei's and Bruno's four each) lying exactly in the stadium floor's
+  -- plane: drawn, they fought it for the same pixels and flickered through
+  -- the marble as grey blocks; cast, they shadowed the floor they lay in.
+  if not flatFill then
+    local okSt, LS = pcall(V.require, "LeagueStadium")
+    if okSt and type(LS) == "table" and LS.drawing then
+      local okD, on = pcall(LS.drawing, host)
+      BattleScene.stadiumStage = okD and on == true
+    end
+  end
+  if BattleScene.stadiumStage then
+    terrain, water, visuals = nil, nil, {}
+    nbMesh, nbWater, nbVisuals, neighbors = {}, {}, {}, {}
+  end
   if flatFill then
     -- WHITE is a genuinely flat stage: there is no visible world receiver,
     -- and its cards must neither cast nor receive. Do not merely omit the
@@ -1373,19 +1470,23 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
       if battleUnderlay then
         WorldUnderlay.draw({ map = host }, cx, cy, battleUnderlay)
       end
-      -- TEST95: only native Legendary forest terrain needs tree-material
-      -- filtering. The current scene eye also follows external model cameras.
-      local nativeForestBattle = V.require("ForestTrees").enabled(host,
-        CommunityVisuals.customForest()) or V.require("SafariReserve").enabled(host)
-      local function drawBattleTerrain(mesh, texture, model)
-        if nativeForestBattle then
+      -- TEST45: native route/city trees also live in mixed terrain meshes.
+      -- Check each map separately: the orbit can see into a different biome.
+      local function drawBattleTerrain(mesh, texture, model, map)
+        local nativeTrees = V.require("ForestTrees").enabled(map,
+          CommunityVisuals.customForest()) or V.require("SafariReserve").enabled(map)
+          or V.require("WorldTrees").enabled(map)
+        if nativeTrees then
           Voxel3D.drawForestBattleTerrain(mesh, texture, model, arena, groundY)
         else
           Voxel3D.draw(mesh, texture, model)
         end
       end
-      drawBattleTerrain(terrain, atlasFor(host), nil)
+      -- TEST140: open a soft sightline through scenery to both Pokemon.
+      pcall(Voxel3D.battleSightline, arena, groundY)
+      drawBattleTerrain(terrain, atlasFor(host), nil, host)
       V.require("GameCorner").draw(host)
+      V.require('TowerCeiling').draw(host,atlasFor(host))
       LegendaryTowerExterior.drawMap(host)
       for _,nb in ipairs(neighbors)do V.require("LegendaryGarden").draw(nb.map,nil,Mat4.translate(nb.ox,0,nb.oy))end
       for _,nb in ipairs(neighbors)do LegendaryTowerExterior.drawMap(nb.map,Mat4.translate(nb.ox,0,nb.oy)) end
@@ -1394,9 +1495,10 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
       -- ridge. The pulled-back battle camera needs it too; without it the
       -- battle void can peek through as a bright line at the edge.
       pcall(CavePerimeter.draw, host, atlasFor(host))
+      pcall(V.require("CaveMood").drawFloorBattle, host, arena)
     for i, nb in ipairs(neighbors) do
       drawBattleTerrain(nbMesh[i], atlasFor(nb.map),
-                   Mat4.translate(nb.ox, 0, nb.oy))
+                   Mat4.translate(nb.ox, 0, nb.oy), nb.map)
     end
     for _, visual in ipairs(visuals or {}) do
       Voxel3D.draw(visual.mesh, atlasFor(host), nil)
@@ -1429,6 +1531,10 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     if waterCount > 0 then
       VoxelScene.drawWater(waterDraws, nil, Voxel3D.drawBattleWater)
     end
+    -- TEST26: settled seasonal snow stays on the ground during battles.
+    if not BattleScene.stadiumStage then
+      pcall(V.require("SeasonalDecor").drawBattle, host, neighbors, false)
+    end
     Voxel3D.glass(false)
     -- The cave fixtures are generated meshes, not atlas cards. Draw the
     -- host map's identical cached sconces in battle so their bracket, handle,
@@ -1436,12 +1542,16 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     pcall(TowerLobbyDetails.drawBattle, host)
     pcall(CaveSconces.drawBattle, host)
     pcall(CaveAtmosphere3D.drawBattle, host, arena)
+    pcall(V.require("CaveMood").drawBattle, host, arena)
+    if not BattleScene.stadiumStage then
     pcall(ForestDressing.drawBattle, host, neighbors)
     Voxel3D.battleFoliage(arena, groundY)
     pcall(CommunityFlora.battleProps, host, neighbors, arena)
     Voxel3D.battleFoliage()
+    end
     Voxel3D.glass(true)
-    if CommunityVisuals.customForest() or CommunityVisuals.customTrees() then
+    if not BattleScene.stadiumStage and
+        (CommunityVisuals.customForest() or CommunityVisuals.customTrees()) then
       pcall(CommunityFlora.battleLeaves, state, host, arena)
     end
     end
@@ -1449,6 +1559,8 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     if not flatFill then
       V.require("BattleRaft").draw(host, arena, groundY, battle)
     end
+    -- TEST140: actors are never cut; close the sightline before them.
+    pcall(Voxel3D.battleSightline)
     -- The mons, standing on their tiles. Depth-tested like everything else,
     -- so a ledge or a tree between the camera and a Pokemon really is in
     -- front of it, and the alpha discard cuts the sprite's own outline out of
@@ -1612,6 +1724,10 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
         height = ph,
       })
     end
+    -- TEST26: falling seasonal snow continues over the arena.
+    if not flatFill then
+      pcall(V.require("SeasonalDecor").drawBattle, host, neighbors, true)
+    end
     local canvas = AntiAlias.resolve(Voxel3D.endScene(), pw, ph, "battle")
     if not canvas then return end
 
@@ -1652,9 +1768,13 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
       tint = Voxel3D.tint,
     }
   end)
+  -- TEST49: also close the sightline after an interrupted scenery pass.
+  pcall(Voxel3D.battleSightline)
   -- the placed camera is ours for exactly this pass; anything else that
   -- renders (the free-roam pipeline, next frame) must find the orbit back
   Voxel3D.camera = nil
+  BattleScene.stagedHost = nil
+  BattleScene.stadiumStage = false
   Voxel3D.fog = nil
   Voxel3D.SHADOW_ALPHA = sunWas
   if not ok then

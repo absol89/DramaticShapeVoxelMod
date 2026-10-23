@@ -1,3 +1,18 @@
+# Legendary update 1.11.2 candidate integration — 2026-10-23
+
+Branched from master a07146b into legendary-update-1.11.2 in a separate
+worktree. Preserve the user's optional item-ball commit: its existing regression
+passes against the merged code. Candidate code merged without text conflicts;
+no destination-only files were removed. Manifest and runtime version stay 1.11.1.
+
+See docs/LEGENDARY-UPDATE-1.11.2-IMPORT.md for layout, import scope, archived
+notes, checks and limitations. All 344 production Lua files compile under
+LuaJIT 2.1; six focused suites pass, including 253 supplied parade checks.
+Two mocked suites have baseline failures; the unchanged full SDK test exceeds
+LuaJIT's local-variable limit. No live game, visual or Android verification.
+Media remains separately supplied and is not included in this code-only branch.
+No player saves/options or installed runtime code were modified.
+
 # Desktop Test134 integration - 2026-09-30
 
 Integrated all Test134 code from `C:/Users/User/Desktop/Test134` into this

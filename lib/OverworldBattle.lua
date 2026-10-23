@@ -827,14 +827,15 @@ function OverworldBattle.update(dt)
   -- Optional and presentation-only. The battle remains authoritative for
   -- visibility, switches and move timing; failures retain the card path.
   StadiumModels.update(session.battle, dt)
-  -- the world pass is hidden behind the battle, so mesh builds get the wide
-  -- slice: nothing visible can hitch on them
-  ChunkMesher.pump(true)
+  -- The battle is animated even when it covers the overworld. Advance the
+  -- shared queue with the visible-frame budget, then tell the pipeline that
+  -- this update has already pumped it. Existing meshes remain drawable.
+  ChunkMesher.pump(false)
 
   if session.apiHosted or stadiumOwnsFrame(session.battle) then
     session.shot = nil
     session.snapped = false
-    return
+    return true
   end
 
   -- The mons' textures are rendered HERE, with no canvas bound, for the same
@@ -856,7 +857,7 @@ function OverworldBattle.update(dt)
     session.broken = true
     V.mod.log:warn("overworld battle scene failed: %s -- this battle draws "
                    .. "on the plain battle background", tostring(shot))
-    return
+    return true
   end
   session.snapped = false
   if shot and shot.canvas then
@@ -900,6 +901,7 @@ function OverworldBattle.update(dt)
     end
   end
   session.shot = shot
+  return true -- Shared meshing was handled, including render fallbacks.
 end
 
 -- The finished shot for this frame, or nil when there is none and the battle

@@ -172,6 +172,18 @@ local function build(map)
   local coreY0 = tower and 52.55 or 19.22
   local coreTopBase, coreTopPulse = tower and 57.85 or 22.65,
                                      tower and 0.22 or 0.38
+  -- TEST191: Victory Road's walls stand at their source 16 (CaveRubble),
+  -- so its torches hang six lower, and never on the loose rocks
+  local Rubble = V.require("CaveRubble")
+  local rubble = not tower and Rubble.shelfWalls(map)   -- TEST203: + Cerulean
+  -- TEST206: Cerulean's walls stand at 22, so its torches drop only 2
+  local drop = rubble and (Rubble.applies(map) and 6 or 2) or 0
+  plateY0, plateY1 = plateY0 - drop, plateY1 - drop
+  armY0, armY1 = armY0 - drop, armY1 - drop
+  shaftY0, shaftY1 = shaftY0 - drop, shaftY1 - drop
+  rimY0, rimY1 = rimY0 - drop, rimY1 - drop
+  flameY0, coreY0 = flameY0 - drop, coreY0 - drop
+  outerTopBase, coreTopBase = outerTopBase - drop, coreTopBase - drop
   local wc, hc = map.widthCells or 0, map.heightCells or 0
   -- TEST101 splits the ironwork into separately shaded pieces. The geometry
   -- and placement stay identical to TEST100; only the material hierarchy
@@ -228,6 +240,9 @@ local function build(map)
       local k = keyOf(p[1], p[2])
       local s = S and S.shapeAt and S.shapeAt[k]
       if not s or s.class ~= "wall" or (S.skip and S.skip[k]) then
+        return false
+      end
+      if rubble and Rubble.isLow(map, S.tileAt and S.tileAt[k]) then
         return false
       end
     end
@@ -358,7 +373,7 @@ local function build(map)
             -- draws them so SUBTLE retains its original budget.
             for spark = 1, tower and 1 or 2 do
               local side = (hash01(cx+f, cy+spark, 379)-0.5)*2.0
-              local lift = (tower and 58.2 or 21.0)
+              local lift = (tower and 58.2 or 21.0 - drop)
                 + hash01(cx+spark, cy+f, 383) * (tower and 2.5 or 2.35)
               local push = hash01(cx+spark*3, cy-f, 389)*1.05
               local ex = torchX-dz*side+dx*push

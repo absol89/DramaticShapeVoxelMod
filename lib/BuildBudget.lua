@@ -14,7 +14,9 @@
 -- and does nothing, so synchronous callers keep their synchronous
 -- behavior.
 
-local B = { n = 0 }
+-- TEST145: `progress` only ever counts up while any build does work. The
+-- loading gate reads it to tell a slow-but-moving build from a stuck one.
+local B = { n = 0, progress = 0 }
 
 local clock = (love and love.timer and love.timer.getTime) or os.clock
 
@@ -46,6 +48,7 @@ end
 -- Cheap enough to sprinkle through inner loops: one modulo most calls,
 -- a clock read every 32nd (every fourth during visible world builds).
 function B.tick()
+  B.progress = B.progress + 1
   local n = B.n + 1
   B.n = n
   if n % tickEvery ~= 0 then return end
@@ -58,6 +61,7 @@ end
 -- whose single iteration already costs milliseconds (mesh upload
 -- slices), where tick()'s 1-in-32 sampling would never fire.
 function B.check()
+  B.progress = B.progress + 1
   if buildCo and coroutine.running() == buildCo and clock() > deadline then
     coroutine.yield("budget")
   end

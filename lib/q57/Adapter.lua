@@ -9,6 +9,14 @@ local Mat4=V.require('Mat4')
 local Voxel3D=V.require('Voxel3D')
 local Settings=V.require('PokeballSettings')
 local A={releaseDuration=Release.DURATION}
+-- TEST233: a sent-out Pokemon's ball opens toward the battlefield. Its
+-- front -- the button, where it opens -- faces the other side's spot, so the
+-- Pokemon comes out facing the fight; it used to face world +Z, which on
+-- most arenas is the thrower and the camera behind them (Joseph: "it lands
+-- and opens towards me"). Lance's ball opens toward you, yours toward him.
+-- The Legendary Collection's throw lands its ball turned the same way when
+-- it sees this flag.
+A.RELEASE_FACES_FOE=true
 local owner,meshes=nil,{}
 local function ease(x) x=math.max(0,math.min(1,x));return x*x*x*(x*(x*6-15)+10) end
 function A.clear()
@@ -49,6 +57,12 @@ function A.prepare(battle,arena,ground,n,entries)
       local point=arena[side]
       if point then
         e.shell.pos={point[1],ground+2.2*e.shell.scale,point[2]}
+        if A.RELEASE_FACES_FOE then
+          local foe=arena[side=='player' and 'enemy' or 'player']
+          local dx=foe and tonumber(foe[1]) and foe[1]-point[1]
+          local dz=foe and tonumber(foe[2]) and foe[2]-point[2]
+          if dx and dz and dx*dx+dz*dz>1e-6 then e.shell.yaw=math.atan2(dx,dz) end
+        end
         local opening=math.min(1,e.age/.15)
         local closing=math.max(0,math.min(1,(e.age-1.0)/.15))
         e.shell.lid=opening*(1-closing);e.shell.lidTarget=e.shell.lid

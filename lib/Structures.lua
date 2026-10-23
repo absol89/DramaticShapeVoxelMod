@@ -670,6 +670,12 @@ function Structures.buildLegendarySigns(S, map, x0, x1, y0, y1, data)
       return fallback1, "GYM"
     end
 
+    if tostring(map.id or ""):upper()=="PALLET_TOWN" then
+      if clue:find("OAK",1,true) and clue:find("LAB",1,true) then return "OAK", "LAB" end
+      if clue:find("REDSHOUSE",1,true) or clue:find("RED S HOUSE",1,true) then return "RED", "HOUSE" end
+      if clue:find("BLUESHOUSE",1,true) or clue:find("BLUE S HOUSE",1,true) then return "BLUE", "HOUSE" end
+    end
+
     local route = line and line:match("ROUTE%s*(%d+)")
     if route then return "ROUTE", tostring(tonumber(route) or route) end
 
@@ -707,71 +713,16 @@ function Structures.buildLegendarySigns(S, map, x0, x1, y0, y1, data)
     end
 
     local firstSignQuad = #quads + 1
-    -- Keep TEST84's approved broad, low footprint and single stout post.
-    box(x - 1.20, 0.0, z - 2.25, x + 1.20, 6.0, z - 0.95, true)
-    box(x - 1.70, 0.0, z - 2.50, x + 1.70, 0.75, z - 0.70, true)
-    chamferedBox(x - 6.75, 5.15, z - 2.55,
-                 x + 6.75, 12.85, z - 1.00, 0.75)
-    box(x - 7.25, 12.76, z - 2.80, x + 7.25, 13.40, z - 0.20, true)
-
-    -- The inset enamel follows the timber's clipped silhouette.  A guaranteed
-    -- blue band, block-built Poké Ball, and live location glyphs make the face
-    -- read as an authored Kanto wayfinder rather than a generic notice board.
-    local front = z - 0.96
-    chamferedPanel(x - 5.85, 6.15, x + 5.85, 11.95, 0.35,
-                   front, "paper", 1.00)
-    panel(x - 5.10, 10.75, x + 5.10, 11.42, front + 0.025,
-          "accent", 1.00)
-
-    -- Pale title ticks make the blue header visible even under dusk shading.
-    for _, tick in ipairs({
-      { -1.85, -0.68 }, { -0.34, 0.82 }, { 1.17, 2.25 },
-    }) do
-      panel(x + tick[1], 10.96, x + tick[2], 11.22,
-            front + 0.030, "paper", 1.00)
-    end
-
-    local ballX, ballY = x - 4.18, 8.70
-    panel(ballX - 0.70, ballY + 0.78, ballX + 0.70, ballY + 1.10,
-          front + 0.034, "ink", 0.92)
-    panel(ballX - 1.06, ballY - 0.78, ballX + 1.06, ballY + 0.78,
-          front + 0.034, "ink", 0.92)
-    panel(ballX - 0.70, ballY - 1.10, ballX + 0.70, ballY - 0.78,
-          front + 0.034, "ink", 0.92)
-    panel(ballX - 0.56, ballY + 0.48, ballX + 0.56, ballY + 0.78,
-          front + 0.038, "red", 1.00)
-    panel(ballX - 0.86, ballY + 0.08, ballX + 0.86, ballY + 0.48,
-          front + 0.038, "red", 1.00)
-    panel(ballX - 0.86, ballY - 0.48, ballX + 0.86, ballY - 0.08,
-          front + 0.038, "paper", 1.00)
-    panel(ballX - 0.56, ballY - 0.78, ballX + 0.56, ballY - 0.48,
-          front + 0.038, "paper", 1.00)
-    panel(ballX - 1.00, ballY - 0.11, ballX + 1.00, ballY + 0.11,
-          front + 0.042, "ink", 0.92)
-    panel(ballX - 0.29, ballY - 0.29, ballX + 0.29, ballY + 0.29,
-          front + 0.046, "ink", 0.92)
-    panel(ballX - 0.13, ballY - 0.13, ballX + 0.13, ballY + 0.13,
-          front + 0.050, "paper", 1.00)
-
-    if label2 then
-      fittedWord(label1, x - 2.70, x + 5.10, x + 0.28,
-                 9.62, 0.31, front + 0.036, "ink")
-      fittedWord(label2, x - 2.70, x + 5.10, x + 0.28,
-                 7.60, 0.24, front + 0.036, "ink")
-    else
-      fittedWord(label1, x - 2.70, x + 5.10, x + 0.28,
-                 9.18, 0.31, front + 0.036, "ink")
-    end
-
-    -- Four inset fasteners keep the plaque tactile without turning it into
-    -- another heavy frame.
-    for _, p in ipairs({
-      { -5.48, 6.50 }, { 5.13, 6.50 },
-      { -5.48, 11.48 }, { 5.13, 11.48 },
-    }) do
-      panel(x + p[1], p[2], x + p[1] + 0.28, p[2] + 0.28,
-            front + 0.035, "ink", 0.88)
-    end
+    -- TEST39: two-post framed wayfinder under a shingled roof, round Poke
+    -- Ball badge and smooth stroke lettering (lib/LegendarySignBoard.lua).
+    local Board = V.require("LegendarySignBoard").new(function(a, b, c, d, tone, shade, textured)
+      if tone == "dark" or tone == "body" or tone == "light" then
+        woodQuad(a, b, c, d, tone, shade, textured)
+      else
+        quad(a, b, c, d, face[tone] or face.paper, shade or 1.0, false)
+      end
+    end)
+    Board.sign(x, z, label1, label2)
     if mapId=='ROUTE_17' then
       -- Every original sign remains interactive at its original blocked cell.
       -- A compact information bollard replaces the broad notice board.
@@ -799,7 +750,29 @@ function Structures.buildLegendarySigns(S, map, x0, x1, y0, y1, data)
   return true
 end
 
-function Structures.forMap(map)
+-- LOADING-STUTTER: a town's furniture plan (CityStreets: garden beds, benches,
+-- lamps, bins, pond decks) on every FULL analysis, as KantoLife's habitat scan
+-- used to publish it (KantoHabitat.gardenPlan) -- in warm-cache play the only
+-- thing that put it there. The seasonal decor reads it from the cached
+-- analysis (seasonal/HostBridge.info) to keep its street displays off the
+-- furniture; lib/seasonal stays as shipped (its sources are hashed into every
+-- seasonal cache key). The terrain builder computes the very same plan under
+-- the same key (it simply finds it ready). Runs where the analysis was built
+-- (a background job's slices: CityStreets.plan ticks); towns only.
+local function publishTownPlan(map, S)
+  local ok, KH = pcall(V.require, "KantoHabitat")
+  if ok and type(KH) == "table" and type(KH.gardenPlan) == "function" then
+    pcall(KH.gardenPlan, map, S)
+  end
+end
+
+-- LOADING-STUTTER: `lightweight` (KantoLife's habitat job only) builds the
+-- analysis WITHOUT the building and League geometry -- the 3D models that are
+-- 74-89% of its cost in the phone's interpreter -- while every claim, shape,
+-- ground and plan the habitat reads comes out the same. Such an analysis is
+-- never cached and never handed to anyone else; a full one already cached is
+-- returned as is.
+function Structures.forMap(map, lightweight)
   local S = cache[map.id]
   if S then return S end
 
@@ -901,12 +874,20 @@ function Structures.forMap(map)
   S = { shapeAt = shapeAt, tileAt = tileAt, outdoor = Map.isOutdoor(def) or V.require("SafariReserve").enabled(map),
         hideBareRing = hullRingOnly or nil,
         runs = {}, skip = {}, ground = {}, doorFold = {}, objectQuads = {},
-        grassQuads = {}, flowerQuads = {}, roundStamps = {}, figures = {} }
+        grassQuads = {}, flowerQuads = {}, roundStamps = {}, figures = {},
+        lightweight = lightweight and true or nil }
   -- These source scrolls are mounted relief, not another folded wall band.
-  if map.id == "OAKS_LAB" or map.id == "FIGHTING_DOJO" then
+  -- TEST173: the Dojo and the Museum built whole by InteriorRooms bring
+  -- their own scrolls and skeletons
+  local interiorOwned = false
+  if map.id == "FIGHTING_DOJO" or map.id == "MUSEUM_1F" then
+    local okI, own = pcall(function() return V.require("InteriorRooms").accepts(map) end)
+    interiorOwned = okI and own or false
+  end
+  if (map.id == "OAKS_LAB" and not V.require("OakLabRoom").accepts(map)) or (map.id == "FIGHTING_DOJO" and not interiorOwned) then
     V.require("HangingScrolls").build(S, map)
   end
-  if map.id == "MUSEUM_1F" then V.require("MuseumFossils").build(S,map,pixels(tileset),perRow) end
+  if map.id == "MUSEUM_1F" and not interiorOwned then V.require("MuseumFossils").build(S,map,pixels(tileset),perRow) end
   V.require("SafariFoliage").build(S,map)
   V.require("SafariStatues").build(S,map)
   V.require("TowerGarden").prepare(S,map,keyOf)
@@ -923,7 +904,17 @@ function Structures.forMap(map)
     S.routeBorderTiles=V.require('RouteBorders').detect(S,map,pixels(tileset),perRow)
   end
   if tileset.id == "PLATEAU" then
-    V.require("FacadeEntrances").build(S, map, pixels(tileset), perRow)
+    -- TEST164/165: Route 23 / Indigo Plateau are rebuilt as League
+    -- architecture (objectQuads + claimed tiles, the border ring included).
+    -- Its gatehouse models the Route 22 gate's north door itself, so the
+    -- pixel-art door panel stays off when it is on.
+    local League = V.require("LeagueArchitecture")
+    local okOn, leagueOn = pcall(League.enabled, map)
+    if not (okOn and leagueOn) then
+      V.require("FacadeEntrances").build(S, map, pixels(tileset), perRow)
+    end
+    local okLeague, errLeague = pcall(League.build, S, map)
+    if not okLeague then print("[LeagueArchitecture] " .. tostring(errLeague)) end
   end
   if map.id == 'SAFARI_ZONE_CENTER' and not V.require('SafariReserve').enabled(map) then V.require('SafariGatehouse').build(S,map,pixels(tileset)) end
 
@@ -1307,7 +1298,14 @@ function Structures.forMap(map)
 
   if legendaryViridian then V.require('ForestExits').build(S,map,keyOf,data)end
 
-  cache[map.id] = S
+  if map.id=='CINNABAR_ISLAND' and tileset.id=='OVERWORLD' and CommunityVisuals.customRoads()then
+    V.require('CinnabarPalms').build(S,map)
+  end
+
+  if not S.lightweight then
+    cache[map.id] = S
+    publishTownPlan(map, S)
+  end
   return S
 end
 
@@ -2372,17 +2370,10 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
             local reg=rawget(_G,"__bav_granite_pillars"); if not reg then reg={}; _G.__bav_granite_pillars=reg end
             local mk=map.id or (map.def and map.def.id) or tostring(map); reg[mk]=reg[mk] or {}; reg[mk][cx.."|"..cy]=true
           elseif communityTree then
-            local variant = (cx * 73856093 + cy * 19349663) % 5
-            local lift = (variant < 2) and 10 or ((variant < 4) and 17 or 24)
-            stamp.lift = lift
-            stamp.hideCrown = true
-            stamp.keepTree = true
-            stamp.communityTree = true
-            local reg = rawget(_G, "__ds_round_cells")
-            if not reg then reg = {}; _G.__ds_round_cells = reg end
-            local mk = map.id or (map.def and map.def.id) or tostring(map)
-            reg[mk] = reg[mk] or {}
-            reg[mk][cx .. "|" .. cy] = lift
+            -- Native terrain owns the full tree, like Viridian Forest. The
+            -- legacy registry remains reserved for independently cut saplings.
+            stamp=V.require('WorldTrees').stamp(cx,cy,stamp.baseY,
+              CommunityVisuals.treeDetailLevel())
           end
           if enhancedSapling then
             -- TEST455's proven young-tree handoff, plus the Battle Art-only
@@ -2834,6 +2825,7 @@ function Structures.buildBookcases(S, map, x0, x1, y0, y1, data, perRow)
   -- below this loop mutates what the sweep reads, so deferring is free.
   local order, banks = {}, {}
   for tx = x0, x1 do
+    Budget.tick()   -- LOADING-STUTTER: a whole-map scan; slice it in a pumped build
     local ty = y1
     while ty >= y0 do
       local s = S.shapeAt[keyOf(tx, ty)]
@@ -4500,6 +4492,16 @@ function Structures.buildGrass(S, map, x0, x1, y0, y1, data)
   end
   local templates = {}
   local quads = S.grassQuads
+  -- TEST176: the route's own grass: the blades carry its tint id (RouteLooks)
+  local bladeTag
+  do
+    local okR, R = pcall(V.require, 'RouteLooks')
+    if okR and R and map.tileset and map.tileset.id == 'OVERWORLD'
+       and CommunityVisuals.customGrass() and not CommunityVisuals.isCityGroundMap(map) then
+      local m = R.bladeMaterial(map.id, map.tileset.id, true)
+      if m then bladeTag = 4096 + V.require('ReferenceMaterials').ids[m] * 128 end
+    end
+  end
   local function isStandingGrassTile(tx, ty)
     local s = S.shapeAt[keyOf(tx, ty)]
     return s and s.art == "grass"
@@ -4542,7 +4544,7 @@ function Structures.buildGrass(S, map, x0, x1, y0, y1, data)
           if not (q.tileBoundary == "east" and not eastContinues) then
             quads[#quads + 1] = {
               point(q[1]),point(q[2]),point(q[3]),point(q[4]),
-              uv = q.uv, shade = q.shade,
+              uv = q.uv, shade = (bladeTag and type(q.shade) == 'number') and q.shade + bladeTag or q.shade,
             }
           end
         end
@@ -4808,6 +4810,26 @@ function Structures.buildLavenderFlowerbed(S, map, data)
     end
   end
   return emitted
+end
+
+-- LOADING-STUTTER: the analysis already built for this map, or nil. Never
+-- builds. KantoLife uses it to tell whether its background job is the one
+-- that built an analysis (and so may let it go again; see release below).
+function Structures.cached(map)
+  if not (map and map.id ~= nil) then return nil end
+  return cache[map.id]
+end
+
+-- LOADING-STUTTER: forget `S` if it is still this map's cached analysis.
+-- Unlike invalidate() this touches nothing else (sapling edits, templates):
+-- it only lets a 44-176 MB analysis that one background reader built and no
+-- longer needs be collected. Anyone who asks again simply gets a fresh one.
+function Structures.release(map, S)
+  if map and map.id ~= nil and S ~= nil and cache[map.id] == S then
+    cache[map.id] = nil
+    return true
+  end
+  return false
 end
 
 -- Drop one map's analysis (Cut changed the block layer) or everything.

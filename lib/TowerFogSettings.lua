@@ -1,9 +1,8 @@
--- Live presentation controls for TEST137's Pokemon Tower atmosphere.
+-- Live presentation controls for depth-integrated Pokemon Tower atmosphere.
 --
 -- These settings deliberately stay separate from CommunityVisuals. Its
 -- settings rebuild derived world geometry, while opacity and motion can be
--- applied directly by TowerGraveMist at draw time. NORMAL preserves TEST134's
--- approved appearance exactly.
+-- applied directly by TowerGraveMist at draw time. No geometry rebuild.
 
 local V = ...
 local ModSetting = V.require("ModSetting")

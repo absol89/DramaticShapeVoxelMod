@@ -318,6 +318,11 @@ local function isOutdoor(map)
   end
   local tid = def.tileset or (map.tileset and map.tileset.id)
   if tid and OPEN_AIR_TILESETS[tid] then return true end
+  -- TEST179: a room under a glass roof
+  if okDN and DayNight and DayNight.isOpenSky then
+    local okS, open = pcall(DayNight.isOpenSky, map)
+    if okS and open then return true end
+  end
   local ok, outdoor = pcall(function()
     local Map = require("src.world.Map")
     return Map.isOutdoor and Map.isOutdoor(def)

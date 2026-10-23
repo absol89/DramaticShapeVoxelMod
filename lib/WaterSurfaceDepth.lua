@@ -39,6 +39,7 @@ function M.draw(draws)
    local custom=(V.require('CommunityVisuals').customRoads()
     and V.require('DecorAtlas').texelScale(d[2])>1)
     or V.require('SafariMaterials').texelScale(d[2])
+    or V.require('TerrainAtlas').isLeague(d[2])
    if custom and d[1] and d[2] then
     d[1]:setTexture(d[2])
     shader:send('model','row',d[3]or V.require('Mat4').identity())

@@ -1,450 +1,210 @@
--- TEST135: rolling true-3D fog banks for Pokemon Tower.
--- TEST133 fixed the motion and colour cycling, but its individual radial
--- shells still read as circles. The floor body is now made from long,
--- serpentine open height-field ribbons that flow across the grave rows.
--- Live thickness and speed controls preserve TEST134's approved NORMAL look.
+-- TEST11: mobile-compatible depth-integrated low mist. No ribbons or shells.
+-- One bounded 12-sample pass follows the actual opaque scene depth.
+local V=...
+local Assets=require('src.render.Assets')
+local R=V.require('Voxel3D')
+local Structures=V.require('Structures')
+local Settings=V.require('TowerFogSettings')
+local inverse=V.require('WaterBackdrop').inverse
+local M={status='idle'}
+local cache=setmetatable({},{__mode='k'})
+local shader,noiseImage,attempted,shaderError
+local lastTime,phase= nil,0
+local reported={}
 
-local V = ...
-local Assets = require("src.render.Assets")
-local Voxel3D = V.require("Voxel3D")
-local Mat4 = V.require("Mat4")
-local Structures = V.require("Structures")
-local TowerFogSettings = V.require("TowerFogSettings")
+local function failure(status,err)
+ M.status=status;M.error=tostring(err or status)
+ -- Keep unexpected driver/runtime failures inspectable, once per error.
+ -- The outer world/battle guards deliberately keep the game running.
+ if not reported[M.error] then
+  reported[M.error]=true
+  local log=V.mod and V.mod.log
+  if log and log.error then pcall(log.error,log,'Tower fog: %s',M.error)end
+ end
+ return false
+end
 
-local Mist = {}
-local GROUPS, TAU = 6, math.pi * 2
-local cache = setmetatable({}, { __mode = "k" })
-local texture, softShader
-local shaderTried = false
-local IDENTITY = Mat4.identity()
-local animReal, animTime
+M.SOURCE=[[
+#ifdef GL_ES
+precision highp float;
+#endif
+uniform LOVE_HIGHP_OR_MEDIUMP Image sceneDepth;
+uniform Image graveMask;
+uniform Image mistNoise;
+uniform mat4 inverseVP;
+uniform vec2 mapSize;
+uniform vec3 worldCurve;
+uniform float mistTime;
+uniform float mistStrength;
+uniform float mistHeight;
 
+// No user identifier here is named texture. Undo LOVE's GLSL1 compatibility
+// rename so the GLSL3 depth lookup below can call the native intrinsic.
+#undef texture
+
+vec3 unproject(vec2 uv,float d){
+ vec4 p=inverseVP*vec4(uv*2.0-1.0,d*2.0-1.0,1.0);
+ return p.xyz/p.w;
+}
+float insideFog(vec3 p){
+ vec2 bend=p.xz-worldCurve.xy;
+ float y=p.y+dot(bend,bend)*worldCurve.z;
+ vec2 uv=p.xz/mapSize;
+ if(uv.x<=0.0||uv.y<=0.0||uv.x>=1.0||uv.y>=1.0||y<-.5||y>mistHeight)return 0.0;
+ float mask=Texel(graveMask,uv).r;
+ // Moving banks have clear pockets; avoid a constant grey floor wash.
+ vec2 flow=vec2(mistTime*.0085,-mistTime*.0055);
+ float broad=Texel(mistNoise,p.xz/116.0+flow).r;
+ float detail=Texel(mistNoise,p.xz/43.0-flow*.8+vec2(y*.020)).r;
+ float billow=smoothstep(.30,.76,broad);
+ float height=1.0-smoothstep(1.5+billow*2.0,mistHeight*(.58+.42*billow),y);
+ float density=smoothstep(.30,.77,broad*.65+detail*.35);
+ return mask*height*(.035+1.30*density);
+
+}
+// LOVE's default GLES effect prototype is mediump. The highp default above is
+// needed for depth reconstruction, but must not change that entry signature.
+// TEST8 compiled on desktop and failed GLES validation on all three vectors.
+mediump vec4 effect(mediump vec4 color, Image tex, mediump vec2 tc, mediump vec2 sc){
+ // Keep pixel math highp too: mediump entry coordinates cause visible bands.
+ vec2 uv=love_PixelCoord/love_ScreenSize.xy;
+ // LOVE's GLSL1 Texel wrapper also returns mediump on GLES. Sample depth
+ // through the underlying intrinsic to retain its 24-bit precision; rounding
+ // it to mediump turns a smooth floor into wide horizontal fog bands.
+#if __VERSION__ >= 130
+ float depth=texture(sceneDepth,uv).r;
+#else
+ float depth=texture2D(sceneDepth,uv).r;
+#endif
+ if(depth>=.999999)discard;
+ vec3 start=unproject(uv,0.0);
+ vec3 end=unproject(uv,depth);
+ vec3 delta=end-start;
+ float distance=length(delta);
+ if(distance<.001)discard;
+ vec3 ray=delta/distance;
+ // Clip to a conservative Tower box before sampling; curves are undone in
+ // density, so mist hugs curved floors too. Safe parallel-ray slab bounds.
+ vec3 safeRay=vec3(abs(ray.x)<.00001?.00001:ray.x,
+                   abs(ray.y)<.00001?.00001:ray.y,
+                   abs(ray.z)<.00001?.00001:ray.z);
+ float maxDrop=dot(mapSize+abs(worldCurve.xy),mapSize+abs(worldCurve.xy))*worldCurve.z;
+ vec3 a=(vec3(0.0,-maxDrop-.5,0.0)-start)/safeRay;
+ vec3 b=(vec3(mapSize.x,mistHeight,mapSize.y)-start)/safeRay;
+ vec3 lo=min(a,b),hi=max(a,b);
+ float enter=max(0.0,max(lo.x,max(lo.y,lo.z)));
+ float leave=min(distance,min(hi.x,min(hi.y,hi.z)));
+ if(leave<=enter)discard;
+ // Long low sightlines have a fixed cost and a restrained opacity cap.
+ enter=max(enter,leave-180.0);
+ float stepLength=(leave-enter)/12.0;
+ float optical=0.0;
+ for(int i=0;i<12;i++){
+  vec3 p=start+ray*(enter+(float(i)+.5)*stepLength);
+  optical+=insideFog(p)*stepLength;
+ }
+ float alpha=min(.72,1.0-exp(-optical*.048*mistStrength));
+ return vec4(.68,.64,.77,alpha);
+}
+]]
+
+local function release(x)if x and x.release then pcall(x.release,x)end end
+local function key(x,z)return(z+64)*4096+x+64 end
 local function isTower(map)
-  return map and map.tileset and map.tileset.id == "CEMETERY"
-    and tostring(map.id or ""):upper():match("^POKEMON_TOWER_[1-7]F$") ~= nil
+ return map and map.tileset and map.tileset.id=='CEMETERY'
+  and tostring(map.id or ''):match('^POKEMON_TOWER_[1-7]F$')~=nil
 end
-
-local function keyOf(tx, ty) return (ty + 64) * 4096 + (tx + 64) end
-
-local function hash01(x, z, salt)
-  local n = (x * 73856093 + z * 19349663 + salt * 83492791) % 104729
-  if n < 0 then n = n + 104729 end
-  return n / 104729
+local function noise()
+ if noiseImage then return noiseImage end
+ local size=128;local data=love.image.newImageData(size,size)
+ for z=0,size-1 do for x=0,size-1 do
+  local u,v=x/size*math.pi*2,z/size*math.pi*2
+  local n=.5+.16*math.sin(u+math.sin(v*2))+.13*math.cos(v*3+math.cos(u*2))
+   +.09*math.sin(u*4-v*3)+.055*math.cos(u*7+v*5)
+  data:setPixel(x,z,n,n,n,1)
+ end end
+ local ok,result=pcall(love.graphics.newImage,data);release(data)
+ if not ok then error(result)end
+ noiseImage=result;noiseImage:setFilter('linear','linear');noiseImage:setWrap('repeat','repeat')
+ return noiseImage
 end
-
-local function mistTexture()
-  if texture then return texture end
-  local ok, img = pcall(function()
-    local w, h = 128, 64
-    local data = love.image.newImageData(w, h)
-    for y = 0, h - 1 do
-      local v = y / (h - 1)
-      local edge = math.min(1, v / .20, (1 - v) / .20)
-      edge = edge * edge * (3 - 2 * edge)
-      for x = 0, w - 1 do
-        local u = x / w
-        local noise = .72
-          + .13 * math.sin(u * TAU * 2.0 + v * 3.7)
-          + .09 * math.sin(u * TAU * 5.0 - v * 8.1)
-          + .055 * math.cos(u * TAU * 11.0 + v * 13.0)
-        local alpha = edge * math.max(.42, math.min(1, noise))
-        data:setPixel(x, y, .84, .87, .90, alpha)
-      end
-    end
-    local made = love.graphics.newImage(data)
-    made:setFilter("linear", "linear")
-    made:setWrap("repeat", "clamp")
-    return made
-  end)
-  if ok then texture = img end
-  return texture
-end
-
--- Voxel3D's shared world shader intentionally discards soft source alpha for
--- crisp sprite and atlas edges. Fog needs the opposite, so this small scoped
--- shader preserves the generated feather/noise alpha while reusing the live
--- camera, model transform, world curve and depth buffer.
-local function fogShader()
-  if shaderTried then return softShader end
-  shaderTried = true
-  local ok, made = pcall(love.graphics.newShader, [[
-    uniform mat4 vp;
-    uniform mat4 model;
-    uniform vec3 eye;
-    uniform float pull;
-    uniform vec3 curve;
-
-    vec4 position(mat4 transform_projection, vec4 vertex_position) {
-      vec4 w = model * vertex_position;
-      if (curve.z > 0.0) {
-        vec2 d = w.xz - curve.xy;
-        w.y -= dot(d, d) * curve.z;
-      }
-      if (pull > 0.0) {
-        w.xyz += normalize(eye - w.xyz) * pull;
-      }
-      return vp * w;
-    }
-
-    vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
-      vec4 p = Texel(tex, tc);
-      if (p.a < 0.01) discard;
-      return vec4(p.rgb * color.rgb, p.a * color.a);
-    }
-  ]])
-  if ok then softShader = made end
-  return softShader
-end
-
-local function group()
-  return { verts = {}, indices = {}, count = 0, sumX = 0, sumZ = 0 }
-end
-
-local function vertex(g, x, y, z, u, v)
-  g.verts[#g.verts + 1] = {
-    x, y, z, u or .5, v or .5, 1
-  }
-  return #g.verts
-end
-
-local function tri(g, a, b, c)
-  g.indices[#g.indices + 1] = a
-  g.indices[#g.indices + 1] = b
-  g.indices[#g.indices + 1] = c
-end
-
--- One irregular outer surface gives each bank a cloud-like outline without
--- exposing a stack of internal transparent spheres.
-local function cloudShell(g, cx, cy, cz, rx, ry, rz, yaw, seed)
-  local segments = 16
-  local rings = { -.82, -.54, -.20, .18, .52, .80 }
-  local ringIds = {}
-  local ca, sa = math.cos(yaw), math.sin(yaw)
-  local p0 = hash01(seed, 0, 1409) * TAU
-  local p1 = hash01(seed, 1, 1423) * TAU
-  local lean = (hash01(seed, 2, 1433) - .5) * rx * .22
-
-  local function point(a, ny, radius, ri)
-    local broad = 1 + .13 * math.sin(a * 3 + p0)
-      + .075 * math.sin(a * 5 + p1 + ri * .36)
-    local crown = 1 + .045 * math.sin(a * 2 - p1 + ny * 2.7)
-    local lx = math.cos(a) * radius * rx * broad + ny * lean
-    local lz = math.sin(a) * radius * rz * crown
-    return cx + lx * ca - lz * sa,
-           cy + ny * ry,
-           cz + lx * sa + lz * ca
+local function field(map,S)
+ local wc=map.widthCells or map.def.width*2
+ local hc=map.heightCells or map.def.height*2
+ local graves={}
+ -- TEST174: a Tower floor InteriorRooms builds has claimed its tiles; it
+ -- says where its graves are
+ local okI,own=pcall(function()return V.require('InteriorRooms').graves(map)end)
+ if okI and own then graves=own else
+ for z=0,hc*2-1 do for x=0,wc*2-1 do
+  local s=S.shapeAt[key(x,z)]
+  if s and s.art=='post' then graves[#graves+1]={x*8+4,z*8+4}end
+ end end
+ end
+ -- TEST11: lobby and all seven floors retain a light ambient mist.
+ -- Local splats into a small mask: O(graves * 64), not floor x grave scans.
+ local w,h=wc*2,hc*2;local values={}
+ for _,p in ipairs(graves)do
+  local cx,cz=math.floor(p[1]/8),math.floor(p[2]/8)
+  for z=math.max(0,cz-4),math.min(h-1,cz+4)do
+   for x=math.max(0,cx-4),math.min(w-1,cx+4)do
+    local d=math.sqrt((x*8+4-p[1])^2+(z*8+4-p[2])^2)
+    local t=math.max(0,math.min(1,(34-d)/25));t=t*t*(3-2*t)
+    local k=z*w+x;values[k]=math.max(values[k]or 0,t)
+   end
   end
-
-  local bottom = vertex(g, cx - lean, cy - ry, cz, 0, .01)
-  for ri, ny in ipairs(rings) do
-    local radius = math.sqrt(1 - ny * ny)
-    ringIds[ri] = {}
-    local stagger = (ri % 2 == 0) and math.pi / segments or 0
-    for s = 0, segments - 1 do
-      local a = TAU * s / segments + stagger
-      local x, y, z = point(a, ny, radius, ri)
-      ringIds[ri][s + 1] = vertex(
-        g, x, y, z, s / segments * 2 + seed % 7, (ny + 1) * .5)
-    end
-  end
-  local top = vertex(g, cx + lean, cy + ry, cz, 0, .99)
-
-  for s = 1, segments do
-    local n = s % segments + 1
-    tri(g, bottom, ringIds[1][s], ringIds[1][n])
-    for ri = 1, #rings - 1 do
-      local a, b = ringIds[ri][s], ringIds[ri][n]
-      local c, d = ringIds[ri + 1][n], ringIds[ri + 1][s]
-      tri(g, a, c, b)
-      tri(g, a, d, c)
-    end
-    tri(g, ringIds[#rings][s], top, ringIds[#rings][n])
-  end
-  g.count = g.count + 1
-  g.sumX, g.sumZ = g.sumX + cx, g.sumZ + cz
+ end
+ local data=love.image.newImageData(w,h)
+ for z=0,h-1 do for x=0,w-1 do local d=.62+.38*(values[z*w+x]or 0);data:setPixel(x,z,d,d,d,1)end end
+ local ok,img=pcall(love.graphics.newImage,data);release(data)
+ if not ok then error(img)end
+ img:setFilter('linear','linear');img:setWrap('clamp','clamp')
+ return {S=S,image=img,size={wc*16,hc*16},graves=#graves}
 end
-
--- One open, lumpy height-field surface stretched through a whole grave-row
--- run. There is no underside and no round end cap for the camera to reveal.
-local function ribbonSurface(g, x0, z0, x1, z1, halfWidth, crestHeight,
-                             seed, lateralOffset)
-  local vx, vz = x1 - x0, z1 - z0
-  local length = math.sqrt(vx * vx + vz * vz)
-  if length < 4 then return end
-  local nx, nz = -vz / length, vx / length
-  local steps = math.max(5, math.ceil(length / 11))
-  local lanes = { -1, -.72, -.38, -.08, .26, .61, 1 }
-  local ridge = { .08, .43, .78, 1, .84, .48, .10 }
-  local ids = {}
-  local p0 = hash01(seed, 0, 1601) * TAU
-  local p1 = hash01(seed, 1, 1607) * TAU
-  lateralOffset = lateralOffset or 0
-
-  for i = 0, steps do
-    local u = i / steps
-    local taper = .28 + .72 * math.sin(math.pi * u) ^ .38
-    local meander = math.sin(u * TAU * 1.17 + p0) * 3.0
-      + math.sin(u * TAU * 2.31 + p1) * 1.05
-    local cx = x0 + vx * u + nx * meander
-      + nx * lateralOffset
-    local cz = z0 + vz * u + nz * meander
-      + nz * lateralOffset
-    local width = halfWidth * taper
-      * (.82 + .18 * math.sin(u * TAU * 2.7 + p1))
-    local height = crestHeight
-      * (.84 + .18 * math.sin(u * TAU * 1.8 + p0))
-    local crestShift = math.sin(u * TAU * 1.43 - p1) * width * .16
-    ids[i + 1] = {}
-    for lane = 1, #lanes do
-      local side = lanes[lane] * width + crestShift * ridge[lane]
-      local edgeNoise = math.sin(u * TAU * 3.1 + lane * 1.7 + p0) * .16
-      local y = .42 + height * math.max(.045, ridge[lane] + edgeNoise)
-      ids[i + 1][lane] = vertex(g, cx + nx * side, y, cz + nz * side,
-        u * length / 44 + seed % 11, (lanes[lane] + 1) * .5)
-    end
-  end
-
-  for i = 1, steps do
-    for lane = 1, #lanes - 1 do
-      local a, b = ids[i][lane], ids[i + 1][lane]
-      local c, d = ids[i + 1][lane + 1], ids[i][lane + 1]
-      tri(g, a, b, c)
-      tri(g, a, c, d)
-    end
-  end
-end
-
-local function ribbonBank(g, x0, z0, x1, z1, halfWidth, height, seed)
-  -- A broad shallow body supplies coverage; a narrower offset ridge gives the
-  -- middle real opacity and height without stacking more floor footprints.
-  ribbonSurface(g, x0, z0, x1, z1, halfWidth, height, seed, 0)
-  ribbonSurface(g, x0, z0, x1, z1, halfWidth * .52,
-                height * 1.30, seed + 83, halfWidth * .10)
-  g.count = g.count + 1
-  g.sumX = g.sumX + (x0 + x1) * .5
-  g.sumZ = g.sumZ + (z0 + z1) * .5
-end
-
-local function build(map)
-  local banks, wisps = {}, {}
-  for i = 1, GROUPS do banks[i], wisps[i] = group(), group() end
-
-  local S = Structures.forMap(map)
-  local wc = map.widthCells or ((map.def and map.def.width or 1) * 2)
-  local hc = map.heightCells or ((map.def and map.def.height or 1) * 2)
-  local graves, graveSet = {}, {}
-  for cy = 0, hc - 1 do
-    for cx = 0, wc - 1 do
-      local found = false
-      for dy = 0, 1 do
-        for dx = 0, 1 do
-          local s = S.shapeAt[keyOf(cx * 2 + dx, cy * 2 + dy)]
-          if s and s.art == "post" then found = true end
-        end
-      end
-      if found then
-        graves[#graves + 1] = { cx, cy }
-        graveSet[cy * 4096 + cx] = true
-      end
-    end
-  end
-
-  local function walk(cx, cy)
-    local ok, result = pcall(function() return map:isWalkableCell(cx, cy) end)
-    return ok and result or false
-  end
-  local zoneSet = {}
-  for cy = 0, hc - 1 do
-    for cx = 0, wc - 1 do
-      local nearest = math.huge
-      for _, grave in ipairs(graves) do
-        local dx, dz = cx - grave[1], cy - grave[2]
-        nearest = math.min(nearest, dx * dx + dz * dz)
-      end
-      local key = cy * 4096 + cx
-      if nearest <= 4.85 and (walk(cx, cy) or graveSet[key]) then
-        zoneSet[key] = true
-      end
-    end
-  end
-
-  -- Primary east/west banks follow alternating contiguous grave-zone rows.
-  -- Their 28-36px full widths overlap at most one neighbour, producing a
-  -- connected blanket without a bright transparent lattice.
-  for cy = 0, hc - 1 do
-    local cx = 0
-    while cx < wc do
-      if zoneSet[cy * 4096 + cx] then
-        local first = cx
-        while cx + 1 < wc and zoneSet[cy * 4096 + cx + 1] do cx = cx + 1 end
-        local last = cx
-        if last - first >= 1 and cy % 2 == 0 then
-          local seed = first * 97 + cy * 193 + last * 31
-          local gi = 1 + math.floor(hash01(first, cy, 1709) * GROUPS)
-          if gi > GROUPS then gi = GROUPS end
-          local z = cy * 16 + 8 + (hash01(first, cy, 1721) - .5) * 4.5
-          ribbonBank(banks[gi], first * 16 - 3, z,
-            (last + 1) * 16 + 3, z,
-            14.2 + hash01(first, cy, 1723) * 3.8,
-            5.6 + hash01(last, cy, 1733) * 1.9, seed)
-        end
-      end
-      cx = cx + 1
-    end
-  end
-
-  -- Only a few compact upper wisps remain round; they are read in profile as
-  -- evaporating crowns rather than repeated floor footprints.
-  for _, grave in ipairs(graves) do
-    local cx, cy = grave[1], grave[2]
-    if hash01(cx, cy, 887) < .13 then
-      local gi = 1 + math.floor(hash01(cx, cy, 773) * GROUPS)
-      if gi > GROUPS then gi = GROUPS end
-      local seed = cx * 97 + cy * 193
-      local x = cx * 16 + 8 + (hash01(cx, cy, 907) - .5) * 8
-      local z = cy * 16 + 8 + (hash01(cx, cy, 911) - .5) * 8
-      cloudShell(wisps[gi], x, 6.8 + hash01(cx, cy, 919) * 3.8,
-                 z, 4.1 + hash01(cx, cy, 929) * 2.2,
-                 3.0 + hash01(cx, cy, 937) * 1.8,
-                 3.8 + hash01(cx, cy, 941) * 2.0,
-                 hash01(cx, cy, 947) * TAU, seed + 41)
-    end
-  end
-
-  local out = { banks = {}, wisps = {}, centers = {}, count = #graves }
-  for i = 1, GROUPS do
-    out.banks[i] = Voxel3D.newMesh(banks[i].verts, banks[i].indices)
-    out.wisps[i] = Voxel3D.newMesh(wisps[i].verts, wisps[i].indices)
-    local n = math.max(1, banks[i].count)
-    out.centers[i] = { banks[i].sumX / n, banks[i].sumZ / n }
-  end
-  return out
-end
-
-local function breathingModel(cx, cz, dx, dy, dz, scaleXZ, scaleY)
-  return Mat4.mul(Mat4.translate(cx + dx, dy, cz + dz),
-    Mat4.mul(Mat4.scale(scaleXZ, scaleY, scaleXZ),
-             Mat4.translate(-cx, 0, -cz)))
-end
-
-local function drawFogMesh(mesh, img, model, pull, shader)
-  if not mesh then return end
-  if not shader then
-    Voxel3D.draw(mesh, img, model, pull)
-    return
-  end
-  pcall(mesh.setTexture, mesh, img)
-  pcall(shader.send, shader, "model", "row", model or IDENTITY)
-  pcall(shader.send, shader, "pull", pull or 0)
-  love.graphics.draw(mesh)
-end
-
--- Integrating elapsed time keeps the fog phase continuous when SPEED changes.
--- Multiplying the absolute timer would make every bank jump after a menu edit.
-local function fogTime(now, speed)
-  if not animReal then
-    animReal, animTime = now, now
-    return animTime
-  end
-  local dt = math.max(0, math.min(now - animReal, .25))
-  animTime = animTime + dt * speed
-  animReal = now
-  return animTime
-end
-
 local function draw(map)
-  if not isTower(map) then return false end
-  -- OFF must allocate no image, shader or map geometry on first use.
-  if not TowerFogSettings.active() then return false end
-  local img = mistTexture()
-  if not img then return false end
-  local slot = cache[map]
-  if not slot then slot = build(map); cache[map] = slot end
-
-  local now = 0
-  pcall(function() now = love.timer.getTime() end)
-  local t = fogTime(now, TowerFogSettings.speedMultiplier())
-  local alphaMult, heightMult =
-    TowerFogSettings.thicknessMultipliers()
-  local g = love.graphics
-  local pushed = g and g.push and pcall(g.push, "all")
-  local usedFallback = false
-  pcall(function()
-    local shader = fogShader()
-    g.setDepthMode("lequal", false)
-    g.setBlendMode("alpha", "alphamultiply")
-    if g.setMeshCullMode then g.setMeshCullMode("none") end
-    if shader then
-      g.setShader(shader)
-      pcall(shader.send, shader, "vp", "row", Voxel3D.vp)
-      pcall(shader.send, shader, "eye", Voxel3D.eye)
-      pcall(shader.send, shader, "curve", {
-        Voxel3D.curveX or 0, Voxel3D.curveZ or 0, Voxel3D.curveK or 0
-      })
-    else
-      usedFallback = true
-      Voxel3D.seams(false)
-      Voxel3D.glass(false)
-      Voxel3D.lighting(false)
-    end
-
-    for i = 1, GROUPS do
-      local phase = (i - 1) * TAU / GROUPS
-      local dx = math.sin(t * .19 + phase) * 2.35
-        + math.sin(t * .071 + phase * 1.7) * .70
-      local dz = math.sin(t * .143 + phase * 1.31) * 1.85
-        + math.cos(t * .061 + phase * .73) * .62
-      local pulse = math.sin(t * .115 + phase)
-      local c = slot.centers[i]
-      local model = breathingModel(c[1], c[2], dx,
-        .12 + math.sin(t * .13 + phase * 1.4) * .22, dz,
-        1 + pulse * .038, heightMult * (1 - pulse * .025))
-      g.setColor(.94, .95, .96, .118 * alphaMult)
-      drawFogMesh(slot.banks[i], img, model, 1.45, shader)
-
-      local life = (t / 18.0 + (i - 1) / GROUPS) % 1
-      local presence = math.sin(life * math.pi)
-      presence = presence * presence
-      if presence > .015 then
-        g.setColor(.94, .95, .96, .108 * alphaMult * presence)
-        drawFogMesh(slot.wisps[i], img,
-          Mat4.translate(dx * .62, life * 8.5, dz * .62), 1.5, shader)
-      end
-    end
-    Voxel3D.lighting(true)
-    if usedFallback then
-      Voxel3D.seams(true)
-      Voxel3D.glass(true)
-    end
-    if g.setMeshCullMode then g.setMeshCullMode("none") end
-  end)
-  pcall(Voxel3D.lighting, true)
-  if usedFallback then
-    pcall(Voxel3D.seams, true)
-    pcall(Voxel3D.glass, true)
-  end
-  if g and g.setMeshCullMode then pcall(g.setMeshCullMode, "none") end
-  if pushed then pcall(g.pop) end
-  return true
+ if not isTower(map)or not Settings.active()then M.status='off';return false end
+ if not R.drawDepthOverlay then return failure('depth unavailable','No native depth overlay')end
+ if not attempted then
+  attempted=true;local ok,s=pcall(love.graphics.newShader,M.SOURCE)
+  if ok then shader=s else shaderError=tostring(s)end
+ end
+ -- Fail cleanly on unsupported hardware instead of falling back to opaque sheets.
+ if not shader then return failure('shader unavailable',shaderError)end
+ local inv=R.vp and inverse(R.vp)
+ if not inv then return failure('camera unavailable','No invertible Tower camera')end
+ local S=Structures.forMap(map);local slot=cache[map]
+ if not slot or slot.S~=S then
+  if slot then release(slot.image)end
+  slot=field(map,S);cache[map]=slot
+ end
+ local now=love.timer.getTime()
+ if lastTime then phase=phase+math.max(0,math.min(now-lastTime,.25))*Settings.speedMultiplier()end
+ lastTime=now
+ local alpha,height=Settings.thicknessMultipliers()
+ local img=noise()
+ local ok,err=R.drawDepthOverlay(shader,function(s)
+  s:send('inverseVP','row',inv);s:send('graveMask',slot.image)
+  s:send('mistNoise',img);s:send('mapSize',slot.size)
+  s:send('worldCurve',{R.curveX or 0,R.curveZ or 0,R.curveK or 0})
+  s:send('mistTime',phase);s:send('mistStrength',alpha);s:send('mistHeight',18*height)
+ end)
+ if not ok then return failure('depth unavailable',err or 'Scene has no readable depth attachment')end
+ M.status='ready';M.error=nil
+ return true
 end
-
-function Mist.draw(state) return draw(state and state.map) end
-function Mist.drawBattle(map) return draw(map) end
-
-function Mist.invalidate()
-  for _, slot in pairs(cache) do
-    for _, set in ipairs({ slot.banks or {}, slot.wisps or {} }) do
-      for _, mesh in pairs(set) do
-        if mesh and mesh.release then pcall(mesh.release, mesh) end
-      end
-    end
-  end
-  cache = setmetatable({}, { __mode = "k" })
-  if texture and texture.release then pcall(texture.release, texture) end
-  texture = nil
-  if softShader and softShader.release then pcall(softShader.release, softShader) end
-  softShader, shaderTried = nil, false
+local function guardedDraw(map)
+ local ok,result=pcall(draw,map)
+ if not ok then return failure('render error',result)end
+ return result
 end
-
-Assets.register(Mist.invalidate)
-return Mist
+function M.draw(state)return guardedDraw(state and state.map)end
+function M.drawBattle(map)return guardedDraw(map)end
+function M.invalidate()
+ for _,s in pairs(cache)do release(s.image)end
+ cache=setmetatable({},{__mode='k'})
+ release(shader);release(noiseImage);shader,noiseImage,attempted,shaderError=nil,nil,false,nil
+ lastTime,phase=nil,0;M.status='idle';M.error=nil
+ reported={}
+end
+Assets.register(M.invalidate)
+return M

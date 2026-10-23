@@ -168,14 +168,40 @@ function M.template(kind)
 end
 local function prepare(map)
  if not(map and map.tileset and configs[map.tileset.id]and configs[map.tileset.id].maps[map.id])then return end
+ -- TEST164: the League architecture models these statues itself.
+ if map.tileset.id=='PLATEAU'then
+  local ok,on=pcall(function()return V.require('LeagueArchitecture').enabled(map)end)
+  if ok and on then return end
+ end
  local legendary=V.require('SafariReserve').enabled(map)
+ -- TEST166: the League antechamber (LeagueGateRoom) builds the whole Route 22
+ -- gate itself, its eagles and braziers included.
+ if map.id=='ROUTE_22_GATE'then
+  local okR,own=pcall(function()return V.require('LeagueGateRoom').accepts(map)end)
+  if okR and own then return end
+ end
+ -- TEST172: the League's rooms model their own statues.
+ do
+  local okR,own=pcall(function()return V.require('LeagueRooms').accepts(map)end)
+  if okR and own then return end
+ end
+ -- TEST173: so do the town interiors (the gyms, the Fan Club).
+ do
+  local okI,own=pcall(function()return V.require('InteriorRooms').accepts(map)end)
+  if okI and own then return end
+ end
+ -- TEST165: the Route 22 gate's statues join the League road's bronze eagles.
+ if map.id=='ROUTE_22_GATE'then
+  local okL,on=pcall(function()return V.require('LeagueArchitecture').leagueStyle()end)
+  if okL and on then legendary='league'end
+ end
  if cache[map.id]and cache[map.id].legendary==legendary then return cache[map.id]end
  if cache[map.id]then cache[map.id].mesh:release();cache[map.id]=nil end
  local ps=M.placements(map);if #ps==0 then return end
  local ok,record=pcall(function()
   sourceData=assert(require("src.render.Assets").imageData(map.tileset.image))
   local verts,indices={},{}
-  for _,p in ipairs(ps)do for _,q in ipairs((legendary and V.require("SafariSculpture").template()or M.template(p.kind)))do local b=#verts
+  for _,p in ipairs(ps)do for _,q in ipairs((legendary=='league'and V.require("LeagueArchitecture").gateStatueTemplate()or legendary and V.require("SafariSculpture").template()or M.template(p.kind)))do local b=#verts
    for _,v in ipairs(q)do verts[#verts+1]={(p.turn and 16-v[1]or v[1])+p.x,v[2]+p.height,(p.turn and 16-v[3]or v[3])+p.z,v[4],v[5],v[6]}end
    for _,i in ipairs({1,2,3,1,3,4})do indices[#indices+1]=b+i end
   end end

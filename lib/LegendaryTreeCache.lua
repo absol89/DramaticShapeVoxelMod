@@ -34,9 +34,10 @@ function Cache.new(M)
     M.TRUNK.saplingHistory[id] = nil
     Trace.log("tree-evict", id, "GPU and unfinished sections released")
   end
-  function self:setLive(live)
+  function self:setLive(live, keepPrevious)
+    local history = keepPrevious == false and {} or self.previous
     for id in pairs(self.slots) do
-      if not live[id] and not self.previous[id] then self:evict(id) end
+      if not live[id] and not history[id] then self:evict(id) end
     end
     local cancelled = {}
     for _, job in pairs(self.pending) do
@@ -58,9 +59,9 @@ function Cache.new(M)
     local slot = owned[group]
     if not next(ctx.registry) then
       cancelGroup(id, group)
-      if group == "sapling" then
-        release(slot); owned[group] = nil; M.TRUNK.sapcache[id] = nil
-      end
+      release(slot); owned[group] = nil
+      if group == "sapling" then M.TRUNK.sapcache[id] = nil
+      else M.TRUNK.cache[id] = nil end
       return
     end
     if slot and (slot.signature == signature or (bodyOnly and slot.full)) then
@@ -92,7 +93,7 @@ function Cache.new(M)
       job.co = coroutine.running()
       M.treeContexts[job.co] = ctx
       Trace.log("tree-start", id, "recipe=" .. recipe)
-      local indexKey = "sections-v2-" .. signature:gsub(":", "-")
+      local indexKey = "sections-v3-quad22-" .. signature:gsub(":", "-")
       local cached = Disk.loadTreeParts(target, recipe, indexKey, Budget.check)
       local cacheHit = cached ~= nil
       if cached then

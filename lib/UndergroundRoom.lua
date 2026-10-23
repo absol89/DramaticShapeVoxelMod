@@ -11,6 +11,8 @@ local entries={UNDERGROUND_PATH_ROUTE_5=true,UNDERGROUND_PATH_ROUTE_6=true,
  UNDERGROUND_PATH_ROUTE_6_COPY=true,UNDERGROUND_PATH_ROUTE_7=true,
  UNDERGROUND_PATH_ROUTE_7_COPY=true,UNDERGROUND_PATH_ROUTE_8=true}
 function M.accepts(map)
+ -- TEST175: the subway InteriorRooms builds (DUNGEON INTERIORS) comes first
+ do local ok,own=pcall(function()return V.require('InteriorRooms').accepts(map)end);if ok and own then return false end end
  if V.require("CommunityVisuals").tunnels:get()~="n64memory" then return false end
  return map and map.tileset and ((entries[map.id] and map.tileset.id=='GATE') or
  (map.tileset.id=='UNDERGROUND' and (map.id=='UNDERGROUND_PATH_NORTH_SOUTH' or map.id=='UNDERGROUND_PATH_WEST_EAST')))

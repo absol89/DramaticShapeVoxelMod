@@ -36,6 +36,13 @@ local sessionOnly = false
 local retainGenerated = false
 local ramDirty, ramRejected, ramGenerated = {}, {}, {}
 local ramBytes = 0
+-- TEST213: when each RAM record was last used, and which ones belong to a
+-- geometry variant this session cannot use (see Disk.enforceRamBudget)
+local ramTouch, ramStale = {}, {}
+local function touchClock()
+  local ok, t = pcall(function() return love.timer.getTime() end)
+  return ok and t or os.clock()
+end
 local storage
 local knownSizes = {}
 local writeFailures = {}
@@ -204,7 +211,10 @@ function Disk._setCompatibilityForTests(engineVersion, osName)
   } or nil
 end
 
+local SEASONAL_DIRECTORY = "cache/seasonal-v1"
 local function legacyName(key)
+  local seasonal = key:match("^cache/seasonal%-v1/([%w_-]+)$")
+  if seasonal then return LEGACY_ROOT .. "/seasonal-" .. seasonal .. ".bin" end
   local prefix = LOGICAL_DIRECTORY .. "/"
   if key:sub(1, #prefix) ~= prefix then return nil end
   local tail = key:sub(#prefix + 1)
@@ -235,6 +245,8 @@ local function legacyName(key)
 end
 
 local function legacyKey(name)
+  local seasonal = name:match("^seasonal%-([%w_-]+)%.bin$")
+  if seasonal then return SEASONAL_DIRECTORY .. "/" .. seasonal end
   local id, variant = name:match("^(.-)%.aux%.(" .. VARIANT_PATTERN .. ")%.bavc$")
   if id and #variant == #VARIANT_PREFIX + 16 then
     return LOGICAL_DIRECTORY .. "/" .. id .. "/deco/" .. variant
@@ -457,6 +469,32 @@ function Disk.bind(game, selected)
   return false
 end
 
+-- Internal seasonal cache, sharing the already-probed installation scope and
+-- compatibility fallback. It never feeds a seasonal blob to the BAVC decoder.
+function Disk.seasonalCache()
+  local function path(slot)
+    assert(type(slot)=="string" and slot:match("^[%w_-]+$"), "invalid seasonal slot")
+    return SEASONAL_DIRECTORY .. "/" .. slot
+  end
+  return {
+    read=function(_,slot)
+      if not storage then return nil end
+      return storage:readBytes(path(slot))
+    end,
+    write=function(_,slot,bytes)
+      if not storage or Disk.cacheReadOnly() then return false,"Battle Art cache is unavailable or read-only" end
+      local ok,code,message=storage:writeBytes(path(slot),bytes)
+      return ok,message or code
+    end,
+    delete=function(_,slot)
+      if not storage or Disk.cacheReadOnly() then return false end
+      if storage.delete then return storage:delete(path(slot)) end
+      return storage:writeBytes(path(slot),"")
+    end,
+    backend=function()return backendKind or "unbound" end,
+  }
+end
+
 local function u32(n)
   n = math.floor(tonumber(n) or 0) % 4294967296
   return string.char(n % 256, math.floor(n / 256) % 256,
@@ -535,6 +573,52 @@ function Disk.fingerprint(map, slot, masks, kind)
     "row", tostring(tileset.tilesPerRow),
     "trueColor", tileset.trueColor and "1" or "0",
   }
+  if mapId:match('^POKEMON_TOWER_[1-7]F$') then
+    parts[#parts+1]='tower-native-ownership-test8'
+  end
+  if tileset.id=='OVERWORLD' and (kind=='terrain'or kind=='aux')
+      and V.require('KantoBuildingStyles').maps[mapId]
+      and V.require('CommunityVisuals').referenceBuildings()then
+    parts[#parts+1]='legendary-kanto-exterior-craft-18'
+    if mapId~='VERMILION_CITY'then parts[#parts+1]='legendary-regional-houses-18'end
+  end
+  -- TEST176: each route's own path and grass (RouteLooks)
+  if (kind=='terrain' or kind=='aux') and tileset.id=='OVERWORLD' then
+    local okR,R=pcall(V.require,'RouteLooks')
+    if okR and R then
+      local CV=V.require('CommunityVisuals')
+      local fp=R.fingerprint(mapId,tileset.id,CV.customRoads(),CV.customGrass() and not CV.isCityGroundMap(map))
+      if fp then parts[#parts+1]=fp end
+    end
+  end
+  if mapId=='OAKS_LAB' then parts[#parts+1]=V.require('OakLabRoom').REVISION end
+  if mapId=='REDS_HOUSE_1F' then parts[#parts+1]=V.require('RedsHouseRoom').REVISION end
+  if mapId=='REDS_HOUSE_2F' then parts[#parts+1]=V.require('RedsBedroomRoom').REVISION end
+  if mapId=='CELADON_MART_ROOF' then parts[#parts+1]=V.require('CeladonRoof').REVISION end
+  -- TEST166: the Route 22 gate rebuilt as the League antechamber (claims every tile)
+  if mapId=='ROUTE_22_GATE' then
+    local okG,GR=pcall(V.require,'LeagueGateRoom')
+    if okG and GR and GR.accepts(map) then parts[#parts+1]=GR.REVISION end
+  end
+  -- TEST172: the League's rooms rebuilt (each claims every tile)
+  do
+    local okR,LR=pcall(V.require,'LeagueRooms')
+    if okR and LR and LR.LAYOUT and LR.LAYOUT[mapId] and LR.accepts(map) then parts[#parts+1]=LR.REVISION end
+  end
+  -- TEST173: the town interiors rebuilt (each claims every tile)
+  do
+    local okI,IR=pcall(V.require,'InteriorRooms')
+    if okI and IR and IR.ROOMS and IR.ROOMS[mapId] and IR.accepts(map) then parts[#parts+1]=IR.REVISION end
+  end
+  if V.require('ScenicProfiles').gates[mapId]then parts[#parts+1]='scenic-binocular-fixtures-test47'end
+  if mapId=='PALLET_TOWN' and tileset.id=='OVERWORLD'
+      and (kind=='terrain'or kind=='aux') and V.require('CommunityVisuals').referenceBuildings()then
+    parts[#parts+1]=V.require('OakLab').REVISION
+  end
+  if mapId=='LAVENDER_TOWN' and tileset.id=='OVERWORLD'
+      and (kind=='terrain'or kind=='aux') and V.require('CommunityVisuals').referenceBuildings()then
+    parts[#parts+1]='legendary-lavender-architecture-18'
+  end
   if mapId=='CELADON_CITY' and tileset.id=='OVERWORLD'
       and (kind=='terrain'or kind=='aux') and V.require('CommunityVisuals').referenceBuildings()then
     parts[#parts+1]='celadon-luxury-casino-exteriors-120'
@@ -562,6 +646,9 @@ function Disk.fingerprint(map, slot, masks, kind)
       and V.require('CommunityVisuals').customRoads() and tileset.id=='OVERWORLD'then
     parts[#parts+1]='cinnabar-clear-dock-alley-92'
     parts[#parts+1]='cinnabar-natural-bed-124'
+    parts[#parts+1]='cinnabar-promenade-palms-19'
+    parts[#parts+1]='cinnabar-boundary-grass-20'
+    parts[#parts+1]='cinnabar-far-bank-palms-21'
   end
   if kind=='terrain' and V.require('CinnabarCoast').enabled(mapId,
       V.require('CommunityVisuals').customRoads(),tileset.id) then
@@ -572,6 +659,16 @@ function Disk.fingerprint(map, slot, masks, kind)
     parts[#parts+1]='vermilion-courtyard-edge-60'
   end
   if mapId=='ROUTE_24' and V.require('CommunityVisuals').customRoads() then parts[#parts+1]='cerulean-bridge-89' end
+  -- TEST191: Victory Road's loose rocks and shelf faces stand at new heights
+  do
+    local okR,CR=pcall(V.require,'CaveRubble')
+    if okR and CR and (CR.applies(map) or (CR.lowWalls and CR.lowWalls(map))) then parts[#parts+1]=CR.REVISION end
+  end
+  -- TEST164: Route 23 / Indigo Plateau League architecture claims tiles and adds geometry.
+  if (mapId=='ROUTE_23' or mapId=='INDIGO_PLATEAU') and tileset.id=='PLATEAU' then
+    local okLA,LA=pcall(V.require,'LeagueArchitecture')
+    if okLA and LA and LA.enabled(map) then parts[#parts+1]=LA.REVISION end
+  end
   if mapId=='ROUTE_17' and V.require('CommunityVisuals').customSigns() then parts[#parts+1]='cycling-information-islands-89' end
   -- Only the generic OVERWORLD road fallback changed. Bespoke city/trail
   -- builders retain their existing cache families and accepted geometry.
@@ -608,6 +705,12 @@ function Disk.fingerprint(map, slot, masks, kind)
   end
   if tileset.id=='OVERWORLD' and V.require('CommunityVisuals').customCourtyards() then
     parts[#parts+1]='community-timber-metal-fence-47'
+  end
+  -- TEST147: Safari palms/ferns and Cinnabar palms moved to the evergreen
+  -- tropicLeaf/tropicCore materials (no autumn tint).
+  if mapId:match('^SAFARI_ZONE') or mapId=='CINNABAR_ISLAND'
+      or mapId=='ROUTE_20' or mapId=='ROUTE_21' then
+    parts[#parts+1]='tropic-evergreen-147'
   end
   -- PR51 changed shrub vertices/UVs; only Safari needs its meshes rebuilt.
   if map.id=='SAFARI_ZONE_CENTER' or map.id=='SAFARI_ZONE_EAST'
@@ -649,6 +752,9 @@ function Disk.fingerprint(map, slot, masks, kind)
       parts[#parts+1]="dock-masonry-23"
     elseif kind=="aux" and grass then parts[#parts+1]="grass-variation-23" end
   end
+  if kind=='terrain' and V.require('WorldTrees').enabled(map) then
+    parts[#parts+1]=V.require('WorldTrees').REVISION..':'..CommunityVisuals.treeDetailLevel()
+  end
   -- Final contract: brick courses, bridge boards, crown-lock and the
   -- grain-mapped TEST435 fence must never reuse an older community mesh.
   parts[#parts + 1] = "legendary-visuals-final"
@@ -672,8 +778,10 @@ function Disk.fingerprint(map, slot, masks, kind)
   -- with a global cache-revision bump.
   if mapId:match("^ROCKET_HIDEOUT_B[1-4]F$") or mapId=="ROCKET_HIDEOUT_ELEVATOR" then parts[#parts+1]="rocket6-elevator-steel-cabin" end
   if CommunityVisuals.customSigns() then
+    if mapId=="PALLET_TOWN" and (kind=="terrain"or kind=="aux")then parts[#parts+1]="pallet-source-sign-subjects-18"end
     if mapId=="LAVENDER_TOWN" then parts[#parts+1]="lavender-tower-sign-north-v1" end
     parts[#parts + 1] = "kanto-wayfinder-viridian-v6"
+    parts[#parts + 1] = V.require("LegendarySignBoard").REVISION
     parts[#parts + 1] = "sign-labels"
     for _, sign in ipairs(def.signs or {}) do
       parts[#parts + 1] = tostring(sign.x)
@@ -727,7 +835,7 @@ function Disk.fingerprint(map, slot, masks, kind)
     end
   end
   if mapId:match("^POKEMON_TOWER_[1-7]F$") then
-    parts[#parts + 1] = "pokemon-tower-stone-v14-master-wall-blue-void"
+    parts[#parts + 1] = "pokemon-tower-stone-v16-cornice-vault"
     parts[#parts + 1] = CommunityVisuals.tower:get()
     parts[#parts + 1] = CommunityVisuals.towerWallStyle()
   end
@@ -847,7 +955,7 @@ end
 
 local function treeFingerprint(map, recipe, signature)
   return Disk.fingerprint(map, "body", nil, "trees")
-         .. "|tree-stream-v2-sections-lod|recipe|" .. tostring(recipe)
+         .. "|tree-stream-v3-quad22|recipe|" .. tostring(recipe)
          .. "|placement|" .. tostring(signature)
 end
 
@@ -887,6 +995,7 @@ local function discard(path, rejected)
   ramFiles[path] = nil
   ramDirty[path] = nil
   ramGenerated[path] = nil
+  ramTouch[path], ramStale[path] = nil, nil
   if rejected then ramRejected[path] = true end
 end
 
@@ -1006,6 +1115,7 @@ end
 
 function Disk.beginPrecache()
   ramFiles, ramDirty, ramRejected, ramGenerated = {}, {}, {}, {}
+  ramTouch, ramStale = {}, {}
   ramBytes = 0
   sessionActive = false
   diskGc()
@@ -1046,12 +1156,75 @@ function Disk.ramStats()
            dirty = dirty, dirtyBytes = dirtyBytes }
 end
 
+-- TEST213: THE RAM BUDGET, KEPT DURING PLAY. The RAM PRECACHE MB setting
+-- capped only the CONTINUE preload; afterwards every record read from disk
+-- and every record generated in play was added to this mirror and never let
+-- go, so a long walk (Vermilion, Route 11...) kept growing it -- hundreds of
+-- MB of Lua strings, which the collector then lets grow to twice that before
+-- it runs. On a phone that ran the game out of memory: buildings flashed as
+-- their textures were thrown out, then Android closed the game.
+--
+-- Over the cap, records are let go in this order, oldest use first:
+--   1. records of a geometry variant this session cannot use (an older cache
+--      the preload picked up, e.g. from before a patch changed the scene);
+--   2. clean records (they are on disk: a later visit reads them again);
+--   3. only if still over: generated, unsaved records (a later visit
+--      generates them again; CACHE -> SAVE keeps whatever is still held).
+-- Anything used in the last `protect` seconds is kept: that is the map
+-- you are on and the ones around it. Returns how many bytes it let go.
+function Disk.enforceRamBudget(cap, protect)
+  cap = tonumber(cap)
+  if not cap or cap <= 0 or ramBytes <= cap then return 0, 0 end
+  protect = tonumber(protect) or 30
+  local now = touchClock()
+  local target = cap * 0.9
+  local stale, clean, dirty = {}, {}, {}
+  for path in pairs(ramFiles) do
+    local t = ramTouch[path] or 0
+    if ramStale[path] or now - t >= protect then
+      local list = ramStale[path] and stale or ramDirty[path] and dirty or clean
+      list[#list + 1] = path
+    end
+  end
+  local function oldest(a, b) return (ramTouch[a] or 0) < (ramTouch[b] or 0) end
+  table.sort(stale, oldest); table.sort(clean, oldest); table.sort(dirty, oldest)
+  local freed, files = 0, 0
+  for _, list in ipairs({ stale, clean, dirty }) do
+    for _, path in ipairs(list) do
+      if ramBytes <= target then break end
+      local held = ramFiles[path]
+      if held then
+        freed, files = freed + #held, files + 1
+        discard(path)
+      end
+    end
+  end
+  if files > 0 then
+    diskLog("voxel cache: RAM budget let go of %d records (%.1f MiB), %.1f MiB held",
+      files, freed / 1048576, ramBytes / 1048576)
+  end
+  return freed, files
+end
+
+function Disk.ramBudgetStats()
+  local stale, staleBytes, dirtyBytes, files = 0, 0, 0, 0
+  for path, blob in pairs(ramFiles) do
+    files = files + 1
+    if ramStale[path] then stale, staleBytes = stale + 1, staleBytes + #blob end
+    if ramDirty[path] then dirtyBytes = dirtyBytes + #blob end
+  end
+  return { files = files, bytes = ramBytes, stale = stale, staleBytes = staleBytes,
+           dirtyBytes = dirtyBytes, sessionOnly = sessionOnly,
+           retainGenerated = retainGenerated }
+end
+
 -- DROP abandons both the whole-world preload and any unsaved generated
 -- containers. Already-uploaded current/neighbor meshes remain alive; future
 -- requests repopulate this table lazily from disk or freshly generated data.
 function Disk.dropRam()
   local stats = Disk.ramStats()
   ramFiles, ramDirty, ramRejected, ramGenerated = {}, {}, {}, {}
+  ramTouch, ramStale = {}, {}
   ramBytes = 0
   sessionActive = true
   diskGc()
@@ -1328,7 +1501,7 @@ local function readCandidate(path, fp, map, allowLegacy)
     return nil
   end
   local blob = ramFiles[path]
-  if blob then CacheTrace.log("ram-hit", map and map.id, path) end
+  if blob then CacheTrace.log("ram-hit", map and map.id, path); ramTouch[path] = touchClock() end
   if not blob then
     if (sessionActive and sessionOnly) or not storage then CacheTrace.log("cache-policy-skip", map and map.id, path); return nil end
     if sessionActive and ramRejected[path] then CacheTrace.log("cache-rejected-session", map and map.id, path); return nil end
@@ -1344,13 +1517,15 @@ local function readCandidate(path, fp, map, allowLegacy)
     reportMismatch(map, path, info, fp)
     -- A valid FORMAT 2 file with another fingerprint is another geometry
     -- variant, not corruption. Keep it available so switching back can use it.
-    if not (info and info.kind == "variant") then discard(path, true) end
+    if not (info and info.kind == "variant") then discard(path, true)
+    elseif ramFiles[path] then ramStale[path] = true end
     return nil
   end
   if sessionActive and not ramFiles[path] then
     ramFiles[path] = blob
     ramBytes = ramBytes + #blob
   end
+  if ramFiles[path] then ramTouch[path] = touchClock(); ramStale[path] = nil end
   return blob, pos, path
 end
 
@@ -1503,7 +1678,7 @@ function Disk.loadAux(map)
   return decodeAuxBlob(legacyBlob, legacyPos, map, legacyUsed or legacyPath)
 end
 
--- Load mature-tree sections as raw unindexed six-float streams.  GPU meshes
+-- Load tree sections as four-corner, six-float streams (TEST22). GPU meshes
 -- are deliberately reconstructed by CommunityFlora under its own four-ms
 -- frame budget; a cache hit therefore avoids both the procedural crown build
 -- and an unbounded upload on the render thread.
@@ -1551,7 +1726,13 @@ local function decodeTreeBlob(blob, pos, map, path, yieldFn)
       if not stream then
         return rejectBody(map, path, "malformed tree material stream " .. name)
       end
+      if stream.n % 4 ~= 0 or stream.n > 43680 then
+        return rejectBody(map, path, "malformed tree quad stream " .. name)
+      end
       part[name] = stream
+    end
+    if farCount % 6 ~= 0 or (part.detail.n > 0 and farCount > part.detail.n / 4 * 6) then
+      return rejectBody(map, path, "malformed tree detail range")
     end
     parts[#parts + 1] = part
     if yieldFn then yieldFn() end
@@ -1652,6 +1833,8 @@ local function remember(path, blob, dirty)
   ramDirty[path] = dirty and true or nil
   ramGenerated[path] = true
   ramRejected[path] = nil
+  ramTouch[path] = touchClock()
+  ramStale[path] = nil
 end
 
 local function encoded(fp, writer)
@@ -1871,6 +2054,17 @@ function Disk.purge()
       end
     end
   end
+  if storage and storage.list and not Disk.cacheReadOnly() then
+    local ok,names=pcall(storage.list,storage,SEASONAL_DIRECTORY)
+    if ok then for _,key in ipairs(names or {})do
+      if key:sub(1,#SEASONAL_DIRECTORY+1)==SEASONAL_DIRECTORY.."/" then
+        local called,did
+        if storage.delete then called,did=pcall(storage.delete,storage,key)
+        else called,did=pcall(storage.writeBytes,storage,key,"") end
+        if called and did==true then removed=removed+1 end
+      end
+    end end
+  end
   if fs and fs.getDirectoryItems then
     for _, root in ipairs({ LEGACY_ROOT, LOGICAL_DIRECTORY }) do
       local ok, names = pcall(fs.getDirectoryItems, root)
@@ -1885,6 +2079,7 @@ function Disk.purge()
     end
   end
   ramFiles, ramDirty, ramBytes, ramRejected, ramGenerated = {}, {}, 0, {}, {}
+  ramTouch, ramStale = {}, {}
   return removed
 end
 

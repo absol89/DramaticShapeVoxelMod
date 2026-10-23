@@ -43,7 +43,7 @@ CommunityVisuals.tower = ModSetting.new(
 -- The original dark material remains first so existing saves keep their look;
 -- the two reference-matched white granites are opt-in finishes.
 CommunityVisuals.towerWall = ModSetting.new(
-  "communityTowerWall", "TOWER WALL",
+  "communityTowerWall", "TOWER STONE",
   { "smoke_black", "storm_white", "pearl_white" },
   { "SMOKE BLACK", "STORM WHITE", "PEARL WHITE" }
 )
@@ -161,6 +161,20 @@ CommunityVisuals.rocket = ModSetting.new("communityRocket", "ROCKET HIDEOUT",
   { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }, 1)
 CommunityVisuals.elevator = ModSetting.new("communityElevator", "ROCKET ELEVATOR",
   { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }, 1)
+-- TEST173: the towns' rooms (Centers, Marts, houses, gyms, gates, the rest).
+CommunityVisuals.interiors = ModSetting.new("communityInteriors", "TOWN INTERIORS",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }, 2)
+-- TEST174: the dungeons' rooms (Pokemon Tower, Pokemon Mansion, Silph Co.,
+-- the S.S. Anne, the Power Plant). The Tower also follows TOWER VISUALS.
+CommunityVisuals.dungeons = ModSetting.new("communityDungeons", "DUNGEON INTERIORS",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }, 2)
+-- TEST175: Vermilion Dock's lamps, festoons, floating lanterns and glows.
+CommunityVisuals.dockLights = ModSetting.new("communityDockLights", "DOCK LIGHTS",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }, 2)
+-- TEST176: each route's own path and grass (RouteLooks). The paths also
+-- need ROADS & BRIDGES on Legendary, the grass GRASS on Legendary.
+CommunityVisuals.routeStyles = ModSetting.new("communityRouteStyles", "ROUTE STYLES",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }, 2)
 
 -- Independent of the Legendary preset. This release enables Legendary by
 -- default; Installed restores the exact upstream building meshes.
@@ -179,6 +193,10 @@ CommunityVisuals.settings = {
   CommunityVisuals.tunnels,
   CommunityVisuals.rocket,
   CommunityVisuals.elevator,
+  CommunityVisuals.interiors,
+  CommunityVisuals.dungeons,
+  CommunityVisuals.dockLights,
+  CommunityVisuals.routeStyles,
 
   CommunityVisuals.pillars,
   CommunityVisuals.masonry,
@@ -256,9 +274,9 @@ function CommunityVisuals.customTrees()
   return CommunityVisuals.trees:get() ~= "default"
 end
 
--- Preserve the existing saved Legendary selection as the approved full mode.
--- Players can still select the untouched maximum-detail tree recipe for an
--- immediate visual/performance comparison.
+-- Preserve the independently saved detail choice. Both historical Legendary
+-- tree selections now use the bounded native family; default-detail migration
+-- above still respects old FULL/FAST saves.
 function CommunityVisuals.treeDetailLevel()
   return CommunityVisuals.treeDetail:get()
 end
@@ -331,6 +349,7 @@ function CommunityVisuals.invalidate()
   pcall(function() V.require("CaveSconces").invalidate() end)
   pcall(function() V.require("CaveAtmosphere3D").invalidate() end)
   pcall(function() V.require("TowerGraveMist").invalidate() end)
+  pcall(function() V.require("TowerCeiling").invalidate() end)
   pcall(function() V.require("TowerLobbyDetails").invalidate() end)
   pcall(function() V.require("LegendaryTowerExterior").invalidate() end)
   pcall(function() V.require("Backdrop").invalidate() end)

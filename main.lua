@@ -140,6 +140,8 @@ local uninstallCompanion = CompanionLifecycle.install(mod, Companion)
 V.require("CeladonParkAudio").install(mod)
 V.require("ForestLifeAudio").install(mod)
 V.require("KantoLifeAudio").install(mod)
+V.require("LeagueFireworksAudio").install(mod)  -- TEST171
+V.require("LeagueAmbience").install(mod)  -- TEST172
 local uninstallOptionsMenu
 
 -- `core.quit_to_launcher` is the engine's native mod-unload boundary. Retain
@@ -150,6 +152,9 @@ mod.hooks:wrap("core.quit_to_launcher", function(next)
   V.require("CeladonParkAudio").dispose()
   V.require("ForestLifeAudio").dispose()
   V.require("KantoLifeAudio").dispose()
+  V.require("ParadeReplay").dispose()  -- TEST258: return before parade teardown
+  V.require("LeagueFireworksAudio").dispose()  -- TEST171
+  V.require("LeagueAmbience").dispose()  -- TEST172
   V.require("KantoLife").invalidate()
   V.require("ForestLife").invalidate()
   uninstallCompanion()
@@ -357,6 +362,7 @@ mod.content.render_pipelines:register("voxel", {
     Voxel.update(dt, level)
     local transitionGame = require("src.core.Game")
     local transitionWorld = transitionGame and transitionGame.overworld
+    VoxelLoadingVeil.update(dt)
     VoxelTransitionGate.update(dt, Voxel.active() and Voxel3D.available(),
       transitionWorld and transitionWorld.map)
     -- the first-person head, on the same tick: its blend in and out of the
@@ -380,7 +386,7 @@ mod.content.render_pipelines:register("voxel", {
     -- Pipelines.update unconditionally, so it survives the transition wipe
     -- and the whole battle. Ahead of the active() gate below, because a 3D
     -- battle does not require the free-roam mode to be switched on.
-    OverworldBattle.update(dt)
+    local battlePumped = OverworldBattle.update(dt)
     -- VOID FILL picks the block the border ring is made of, and in this
     -- mode that ring is BAKED INTO THE MESH rather than drawn each frame.
     -- So the option has to reach the cache or nothing happens on screen
@@ -407,8 +413,24 @@ mod.content.render_pipelines:register("voxel", {
       -- no prebuild button, startup pause or whole-world resident cache.
       pcall(V.require("LoadTimings").call, "prefetch", VoxelPrecache.update, Game)
     end
-    ChunkMesher.pump(Game and Game.stack
-                     and Game.stack:top() ~= ow)
+    -- A staged battle already advanced the shared queue before rendering.
+    -- Do not spend a second meshing slice in the same pipeline update.
+    if not battlePumped then
+      -- TEST50: our loading card covers the world too. Use the existing
+      -- covered-build budget instead of starving the build behind its card.
+      -- TEST145: while the engine's 2D world stands in for an area that is
+      -- still building, nothing 3D is on screen to hitch, so the build gets
+      -- the covered budget too (before, only opening a menu did that).
+      local fallback = ow and ow.map and V.voxelFallback2D == ow.map
+      local blocking = VoxelTransitionGate.blocking(ow and ow.map)
+      ChunkMesher.pump((blocking and (V.voxelCardShown == (ow and ow.map) and "card" or true))
+                       or (Game and Game.stack and Game.stack:top() ~= ow)
+                       or fallback)
+      -- TEST184: the culling index, a few ms a frame (more behind a cover)
+      if ChunkMesher.indexPump then
+        pcall(ChunkMesher.indexPump, (blocking or fallback) and 0.03 or 0.002)
+      end
+    end
   end,
 
   drawWorld = function(ctx)
@@ -449,30 +471,35 @@ mod.content.render_pipelines:register("voxel", {
                                             ctx.vw, ctx.vh, ctx.paletteFor)
     local map = state.map
     if not okRender then
-      VoxelTransitionGate.cancel(map)
+      VoxelLoadingVeil.observe(map, false)
+      VoxelTransitionGate.fail(map, "world render error: " .. tostring(canvas))
       if not V.worldStateCompatWarned and mod.log and mod.log.error then
         V.worldStateCompatWarned = true
         mod.log:error("Voxel world pass failed open: %s", tostring(canvas))
       end
       return nil
     end
+    VoxelLoadingVeil.observe(map, waiting or not canvas)
+    V.voxelFallback2D = nil
+    V.voxelCardShown = nil
     if not canvas then
       local generating = map and not ChunkMesher.slotKnown(map, false)
+                         and not ChunkMesher.slotKnown(map, true)
       if waiting or generating then
         VoxelTransitionGate.observe(map, false)
-        -- Only an explicitly qualified Continue/travel gate may cover the
-        -- world. Ordinary doors and first-time route loads fail open to the
-        -- engine renderer while their voxels build instead of inventing an
-        -- unrelated black transition. The gate itself also has a hard ceiling,
-        -- so a failed neighbour/cache record cannot soft-lock a save here.
+        -- TEST50: a cold door/route has no safe held frame. Cover its build
+        -- too, while retaining the bounded failure/timeout fallback.
+        VoxelTransitionGate.coverCold(map)
         if VoxelTransitionGate.blocking(map) then
-          return VoxelLoadingVeil.get(sw, sh)
+          V.voxelCardShown = map
+          return VoxelLoadingVeil.get(sw, sh, map, VoxelTransitionGate.status())
         end
+        V.voxelFallback2D = map  -- 2D stands in while this area builds
         return nil
       end
       -- A genuine renderer failure must fail open instead of trapping the
       -- player behind an eternal modal cover.
-      VoxelTransitionGate.cancel(map)
+      VoxelTransitionGate.fail(map, "settled mesh or driver failure")
       return nil                    -- genuine build/driver failure: safe 2D
     end
     if waiting then
@@ -481,16 +508,19 @@ mod.content.render_pipelines:register("voxel", {
       -- all connected BODY meshes are ready.
       VoxelTransitionGate.observe(map, false)
       if VoxelTransitionGate.blocking(map) then
-        return VoxelLoadingVeil.get(sw, sh)
+        V.voxelCardShown = map
+        return VoxelLoadingVeil.get(sw, sh, map, VoxelTransitionGate.status())
       end
       -- Seamless route/city connections are intentionally not modal: retain
       -- their last complete voxel frame instead of flashing a black cover.
-      return AntiAlias.resolve(canvas, sw, sh, "world")
+      return VoxelLoadingVeil.decorate(AntiAlias.resolve(canvas, sw, sh, "world"), sw, sh, map)
     end
     VoxelTransitionGate.observe(map, true)
     if VoxelTransitionGate.blocking(map) then
-      return VoxelLoadingVeil.get(sw, sh)
+      V.voxelCardShown = map
+      return VoxelLoadingVeil.get(sw, sh, map, VoxelTransitionGate.status())
     end
+    VoxelScene.section("fx_overlay_resolve")
     if Voxel3D.beginOverlay() then
       -- the FX closures are ordinary 2D draws sized in DISPLAY pixels, and
       -- they are drawing into the supersampled canvas alongside everything
@@ -530,7 +560,9 @@ mod.content.render_pipelines:register("voxel", {
     end
     -- and back to the window's own size, which is what the engine composites
     -- one canvas pixel to one display pixel.  A pass-through when AA is off.
-    return AntiAlias.resolve(canvas, sw, sh, "world")
+    local resolved = AntiAlias.resolve(canvas, sw, sh, "world")
+    VoxelScene.section(nil)
+    return resolved
   end,
 
   invalidate = function()
@@ -677,12 +709,16 @@ local SETTINGS = {
   { CommunityVisuals.tunnels, "Choose Battle Art or Legendary Visuals for tunnels. Rebuilds the room when changed.", full = true },
   { CommunityVisuals.rocket, "Choose Battle Art or Legendary Visuals for rocket hideout. Rebuilds the room when changed.", full = true },
   { CommunityVisuals.elevator, "Choose Battle Art or Legendary Visuals for rocket elevator. Rebuilds the room when changed.", full = true },
+  { CommunityVisuals.interiors, "Choose Battle Art or Legendary Visuals for the towns' rooms: Pokemon Centers, Marts, houses, gyms, gates and more. Rebuilds the room when changed.", full = true },
+  { CommunityVisuals.dungeons, "Choose Battle Art or Legendary Visuals for the dungeons' rooms: Pokemon Tower (with TOWER VISUALS on Legendary), Pokemon Mansion, Silph Co., the S.S. Anne, the Power Plant, the Rocket Hideout and the Underground Paths. Rebuilds the room when changed.", full = true },
+  { CommunityVisuals.dockLights, "Vermilion Dock after dark: lamp posts and festoon lights along the quay, a lit arch over the gangway, the S.S. Anne dressed in lights, paper lanterns floating on the harbour and their light on the water.", full = true },
+  { CommunityVisuals.routeStyles, "Each route in its own country's colours: a country lane, a forest track, mountain scree, red earth, flagstones, slate, beach sand, a boardwalk, a prairie track or crushed shell underfoot, and the grass recoloured to match with its own wild flowers. Paths need ROADS & BRIDGES on Legendary, the grass needs GRASS on Legendary.", full = true },
 
   { CommunityVisuals.pillars,
-    "Choose the original Battle Art pillars or the community granite design: "
-    .. "standalone, joined by the approved low wall, or interlocked across "
-    .. "the crown. Changing this rebuilds derived map geometry in the normal "
-    .. "background queue; collision and map data never change.",
+    "BOTTOM LINK is the main layout in AUTO and FULL. With ROADS & BRIDGES "
+    .. "set to LEGENDARY VISUALS, it uses regional fence designs where available "
+    .. "and a low connecting wall elsewhere. SEPARATE uses standalone granite "
+    .. "pillars; TOP INTERLOCK joins the crowns; BATTLE ART restores the original pillars.",
     full = true },
   { CommunityVisuals.masonry,
     "Color TEST435's synchronized retaining walls and authored ledges as "
@@ -717,11 +753,11 @@ local SETTINGS = {
     .. "fog speed choices below.",
     full = true },
   { CommunityVisuals.towerWall,
-    "Choose the Pokemon Tower wall slab while Legendary Visuals is active. "
+    "Choose the shared Pokemon Tower wall and ceiling stone while Legendary Visuals is active. "
     .. "SMOKE BLACK keeps the approved dark smoky granite; STORM WHITE adds "
     .. "broad charcoal ribbons over cool white stone; PEARL WHITE is brighter "
     .. "and calmer with restrained silver-grey movement. All three use the "
-    .. "same continuous 2048px wall projection.",
+    .. "same amethyst-purple and black family: veined walls, stepped stone cornices and a quieter ribbed vault.",
     full = true },
   { TowerFogSettings.details,
     "Choose the Pokemon Tower detail layer independently of its materials "
@@ -730,32 +766,31 @@ local SETTINGS = {
     .. "embers and the reception counter's brass edge.",
     full = true },
   { TowerFogSettings.enabled,
-    "Show or hide the connected white-grey fog banks on Pokemon Tower's "
-    .. "grave floors. Reception stays clear. OFF skips the fog texture, "
-    .. "shader and grave-zone mesh entirely when they have not been built.",
+    "Show or hide drifting lavender-grey mist throughout Pokemon Tower, "
+    .. "including reception. OFF skips the fog texture, "
+    .. "shader and floor mask entirely when they have not been built.",
     full = true },
   { TowerFogSettings.thickness,
     "Set the visible body of Pokemon Tower fog. LIGHT, NORMAL, THICK and "
-    .. "HEAVY change its opacity and bank height without spreading it into "
-    .. "reception; NORMAL is TEST134's approved look.",
+    .. "HEAVY change its opacity and bank height across all seven floors. "
+    .. "Mist is denser around gravestones.",
     full = true },
   { TowerFogSettings.speed,
     "Set the continuous drift, breathing and evaporation speed of Pokemon "
     .. "Tower fog. Changing this live preserves the current cloud phase; "
-    .. "NORMAL is TEST134's approved motion.",
+    .. "NORMAL uses steady rolling wisps.",
     full = true },
   { CommunityVisuals.treeDetail,
-    "FULL retains the approved foliage. BALANCED and HANDHELD remove decorative "
-    .. "shells, keep near crossed-card silhouettes, and thin distant bunches. "
-    .. "The same detail setting thins the new Legendary forest leaves. "
+    "FULL adds the most leaf detail. BALANCED reduces leaf sprigs, and "
+    .. "HANDHELD uses the lightest crowns while keeping all four tree sizes. "
+    .. "This setting also controls Legendary forest leaf detail. "
     .. "Tree positions stay fixed; R.DIST bounds neighbor work.", full = true },
   { CommunityVisuals.trees,
-    "Choose Battle Art's authored round trees or the finalized Legendary Visuals "
-    .. "small, medium, large and mature XL tree family. LEGENDARY FAST uses "
-    .. "a visibly lighter crown with fewer leaf clumps/cards and no decorative "
-    .. "diamond shells; LEGENDARY FULL preserves the dense original canopy. "
-    .. "Tree generation and terrain transfer are budgeted for mobile frames; "
-    .. "Cut saplings never enter or rebuild mature groves.",
+    "Choose Battle Art's authored round trees or the new Legendary small, "
+    .. "medium, large and XL family, with thick trunks and textured crowns. "
+    .. "Both Legendary choices use these lighter trees. TREE DETAIL controls "
+    .. "their leaf density; FULL and FAST retain your saved detail preference. "
+    .. "Regular trees load with the terrain. Cut saplings remain separate.",
     full = true },
   { CommunityVisuals.cutTrees,
     "Choose Battle Art's original cuttable bush or the super-skinny Legendary "
@@ -853,6 +888,25 @@ local SETTINGS = {
     .. "shoreline, the trees and the buildings behind it; SKY is the sky, "
     .. "the sun and the moon alone, which is most of the look for a "
     .. "fraction of the cost." },
+  { V.require("Voxel3D").precisionSetting,
+    "How exactly the phone works out the world's procedural surfaces (paths, "
+    .. "lawns, rock, the rooms' floors). FULL: clean everywhere. FAST: cheaper "
+    .. "on some phones, but far from the map's corner the paths can fall into "
+    .. "grids and planks. Takes effect on the next frame.",
+    full = true },
+  { AntiAlias.scaleSetting,
+    "Render the 3D world at a fraction of the screen's resolution and scale "
+    .. "it up. Menus, text and the HUD stay sharp. 75% draws a little over "
+    .. "half the pixels, which is most of the frame's cost out of doors on a "
+    .. "phone. 100% is the full resolution.",
+    full = true },
+  { V.require("PerfProbe").setting,
+    "Measure what the outdoor picture costs on this device: set RUN, close "
+    .. "the menu and stand still outdoors for about a minute. The frame rate "
+    .. "is taken as it is, then with one thing switched off at a time; the "
+    .. "table stays on screen and is saved as perfprobe.txt. Nothing is "
+    .. "changed for good.",
+    full = true },
   { Shadows.setting,
     "Enable shadows. OFF removes both the real cast-shadow map and its flat "
     .. "fallback from free roam and staged battles; UNLIT battle cards also "
@@ -1107,6 +1161,15 @@ local SETTINGS = {
     full = true },
 }
 
+local Seasonal = V.require("SeasonalDecor")
+for _,entry in ipairs(Seasonal.Settings.entries)do SETTINGS[#SETTINGS+1]=entry end
+local ScenicViews = V.require("ScenicViews")
+SETTINGS[#SETTINGS+1]={ScenicViews.setting,"Rooftop scenery, upstairs windows and observation binoculars."}
+local ParadeReplay = V.require("ParadeReplay")
+SETTINGS[#SETTINGS+1]={ParadeReplay.setting,
+  "Choose a float ride, then close all menus to play it. Returns you here afterward. OFF cancels.",full=true}
+SETTINGS[#SETTINGS+1]={V.require('ParadeDiagnostics').setting,
+  "Show frame rate and timing details during the Champion parade.",full=true}
 local schema = {}
 for _, entry in ipairs(SETTINGS) do
   -- Provider-only settings should not leave a dead row when the optional
@@ -1174,14 +1237,15 @@ local LEGENDARY_ROOT = {
 }
 
 local LEGENDARY_CATEGORIES = {
+  {id="legendary_seasonal",label="SEASONAL DECOR",settings=Seasonal.Settings.settings},
   { id = "legendary_game_corner", label = "GAME CORNER", settings = {
     CommunityVisuals.casino, CommunityVisuals.prizeRoom,
   } },
   { id = "legendary_lavender", label = "LAVENDER & CITIES", settings = {
-    CommunityVisuals.cityGround,
+    CommunityVisuals.cityGround, CommunityVisuals.dockLights,
   } },
   { id = "legendary_interiors", label = "INTERIORS", settings = {
-    CommunityVisuals.tunnels, CommunityVisuals.rocket, CommunityVisuals.elevator,
+    CommunityVisuals.tunnels, CommunityVisuals.rocket, CommunityVisuals.elevator, CommunityVisuals.interiors, CommunityVisuals.dungeons, ScenicViews.setting,
   } },
   { id = "legendary_tower", label = "POKEMON TOWER", settings = {
     CommunityVisuals.tower, CommunityVisuals.towerWall,
@@ -1205,8 +1269,8 @@ local LEGENDARY_CATEGORIES = {
     CommunityVisuals.forest, CommunityVisuals.safari, ForestAtmos.setting, CommunityVisuals.kantoLife,
   } },
   { id = "legendary_structures", label = "ROADS & STRUCTURES", settings = {
-    CommunityVisuals.buildings, CommunityVisuals.roads, CommunityVisuals.walls,
-    CommunityVisuals.courtyards,
+    CommunityVisuals.buildings, CommunityVisuals.roads, CommunityVisuals.routeStyles,
+    CommunityVisuals.walls, CommunityVisuals.courtyards,
   } },
   { id = "legendary_sky", label = "SKY & BACKGROUND", settings = {
     CommunityVisuals.sky,
@@ -1228,10 +1292,13 @@ local OPTION_CATEGORIES = {
   { id = "world", label = "WORLD", settings = {
     VoxelGrid.setting, WorldCurve.setting, WorldUnderlay.setting,
     Water.setting, DayNight.setting, FirstPerson.invertYSetting,
+    ParadeReplay.setting,
   } },
   { id = "performance", label = "PERFORMANCE", settings = {
     RenderDistance.setting, RamPrecache.setting,
-    Shadows.setting, AntiAlias.setting,
+    Shadows.setting, AntiAlias.setting, V.require("Voxel3D").precisionSetting,
+    AntiAlias.scaleSetting, V.require("PerfProbe").setting,
+    V.require('ParadeDiagnostics').setting,
   } },
   { id = "pokemon", label = "POKEMON ART", settings = {
     InterfaceSprites.setting, InterfaceSprites.scalingSetting,
@@ -1579,6 +1646,7 @@ mod.hooks:wrap("ui.options.rows", function(next, game, rows)
       extra[#extra + 1] = row
     end
   end
+  extra[#extra+1]=Seasonal.statusRow()
   return insertGrouped(out, extra)
 end)
 
@@ -2210,6 +2278,8 @@ mod.hooks:wrap("world.tod", function(next, tod, ctx)
   return DayNight.tod()
 end)
 
+Seasonal.install()
+mod.exports.seasonal = {version="test26-integrated",status=Seasonal.status}
 mod.exports.version = "1.11.1"
 mod.exports.battlePresentation = BattlePresentation.export()
 mod.exports.battleStage = BattleStage.export(OverworldBattle)
@@ -2225,3 +2295,11 @@ mod.exports.lib = V
 -- TEST103 measures the live scene at its call sites: Stadium's later source
 -- rebuild cannot detach the probes, and actor-provider upvalues stay visible.
 V.require("LoadTimings").install(mod)
+
+-- TEST46: observation screens and native binocular interaction.
+ScenicViews.install()
+ParadeReplay.install(mod)
+
+-- TEST179: a notice when a town room is not ours (why), on entering it.
+pcall(function() V.require("InteriorNotice").install() end)
+pcall(function() V.require("PerfProbe").install() end)

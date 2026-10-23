@@ -79,12 +79,15 @@ local function variedUV(atlas, tileset, segment, band, salt)
   return u0, u1, v0, v1
 end
 
+-- TEST206: Cerulean Cave's enclosure wears its slate (rkBlue) as well
+local slateTag = false
 local function push(verts, indices, corners, u0, u1, v0, v1, shade)
   local n = #verts / 4
   local uv = { { u0, v1 }, { u1, v1 }, { u1, v0 }, { u0, v0 } }
   for i = 1, 4 do
     local p = corners[i]
     local s = type(shade) == "table" and shade[i] or shade
+    if slateTag then s = V.require("ReferenceMaterials").encode("rkBlue", s) end
     verts[#verts + 1] = { p[1], p[2], p[3], uv[i][1], uv[i][2], s }
   end
   Voxel3D.pushQuad(indices, n)
@@ -140,6 +143,8 @@ local function build(map, atlas)
   local w = (map.widthCells or ((map.def and map.def.width or 0) * 2)) * 16
   local h = (map.heightCells or ((map.def and map.def.height or 0) * 2)) * 16
   if w <= 0 or h <= 0 then return nil end
+  local okR, R = pcall(V.require, "CaveRubble")
+  slateTag = okR and R and R.lowWalls and R.lowWalls(map) and true or false
 
   local verts, indices = {}, {}
 
@@ -210,6 +215,7 @@ local function build(map, atlas)
   eastWest(-OUTSET, -DEPTH, 31, Voxel3D.FACE_SHADE[1])
   eastWest(w + OUTSET, DEPTH, 43, Voxel3D.FACE_SHADE[2])
 
+  slateTag = false
   return Voxel3D.newMesh(verts, indices)
 end
 

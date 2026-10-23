@@ -8,6 +8,8 @@ local palette={{.10,.12,.14},{.23,.26,.28},{.48,.34,.16},{.77,.60,.30},
  {.27,.29,.32},{.28,.30,.33},{.35,.37,.38},{.28,.13,.10}}
 local function key(x,y)return (y+64)*4096+x+64 end
 function M.accepts(map)
+ -- TEST175: the lair InteriorRooms builds (DUNGEON INTERIORS) comes first
+ do local ok,own=pcall(function()return V.require('InteriorRooms').accepts(map)end);if ok and own then return false end end
  local choice=map and map.id=="ROCKET_HIDEOUT_ELEVATOR" and "elevator" or "rocket"
  if V.require("CommunityVisuals")[choice]:get()~="n64memory" then return false end
  return map and map.tileset and ((map.tileset.id=='FACILITY'

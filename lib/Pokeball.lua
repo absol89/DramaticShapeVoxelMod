@@ -415,6 +415,19 @@ function Pokeball.invalidate()
   palette = nil
 end
 
+-- TEST232: the tier's meshes and the palette, for a caller that poses the
+-- ball with a matrix of its own -- the Pokemon Center machine's balls
+-- (HealBalls3D) sit in its slots, which is no part of the capture flow
+-- above. Memoised with everything else here, so asking every frame costs a
+-- lookup and never a build; asking AGAIN every frame (rather than keeping
+-- the answer) is what follows invalidate() to the rebuilt set. nil while
+-- nothing can be built (headless, or a refused upload).
+function Pokeball.shellParts(ball)
+  local m, pal = meshesFor(ball or "POKE_BALL"), paletteTexture()
+  if not (m and pal) then return nil end
+  return m, pal
+end
+
 -- ------- an instance: one ball with a pose
 --
 -- Loads and runs without graphics; only draw() and cast() want a GPU.

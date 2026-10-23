@@ -636,8 +636,25 @@ local TALL_GRASS = {
   [3]={.21,.41,.14}, [4]={.15,.32,.10},
 }
 
+-- TEST135: fall turf. Only these grass palettes change; forest moss, paths,
+-- stone, wood and every other material keep their colors. One module-level
+-- helper keeps the large atlas closure's upvalue count unchanged in practice.
+local AUTUMN_GRASS = { [GRASS] = true, [ROUTE10_GRASS] = true, [TALL_GRASS] = true }
+local function autumnOn()
+  local ok, A = pcall(V.require, "AutumnGround")
+  return ok and A.active() and A or nil
+end
+local function seasonalGrass(palette, single)
+  local A = autumnOn()
+  if not A then return palette end
+  if single then return A.color(palette) end
+  if not AUTUMN_GRASS[palette] then return palette end
+  return A.palette(palette)
+end
+
 local function communityKey()
-  return table.concat({
+  local A = autumnOn()
+  return (A and "autumn135:" or "") .. table.concat({
     CommunityVisuals.rocket:get(), CommunityVisuals.cityGround:get(), CommunityVisuals.grass:get(),
     CommunityVisuals.roads:get(),
     CommunityVisuals.walls:get(), CommunityVisuals.courtyards:get(),
@@ -743,6 +760,13 @@ local function communityAtlas(map, colors, base, baked)
   local forestEnabled = tilesetId == "FOREST"
     and tostring(map.id or "") == "VIRIDIAN_FOREST"
     and CommunityVisuals.customForest()
+  -- TEST163: the road to the League (ROUTE_23 + INDIGO_PLATEAU) wears its
+  -- Game Boy greys raw. Recolor the PLATEAU tileset into its architecture:
+  -- warm granite rock, ivory/gold/crimson gate walls, white marble pillars,
+  -- bronze bird statues, pale paving and lush turf. Art preserved pixel for
+  -- pixel (recolor maps the four GB shades), so every analysis is unchanged.
+  local plateau = tilesetId == "PLATEAU" and (CommunityVisuals.customWalls()
+    or CommunityVisuals.customRoads() or CommunityVisuals.customGrass())
   -- Cave materials used to bypass every community-visual switch. Keep the
   -- original atlas untouched unless the dedicated CAVES row is opted in.
   if cave and not CommunityVisuals.customCaves() then return base, baked end
@@ -750,7 +774,7 @@ local function communityAtlas(map, colors, base, baked)
     return base, baked
   end
   if not cave and tilesetId ~= "OVERWORLD"
-      and not forestEnabled and not towerInterior and not rocket then
+      and not forestEnabled and not towerInterior and not rocket and not plateau then
     return base, baked
   end
   if not (love.image and love.image.newImageData and love.graphics
@@ -762,7 +786,7 @@ local function communityAtlas(map, colors, base, baked)
   local perMap = (V.require("CityStreets").enabled(mapId,CommunityVisuals.customRoads(),tilesetId) or rocket or cityGroundMap or mapId == "ROUTE_10" or towerInterior
       or (map.renderer and map.renderer.gbcAtlas))
     and tostring(map.id or "") or ""
-  local key = map.tileset.image .. "#ember107-rocket2-materials#" .. communityKey()
+  local key = map.tileset.image .. "#ember107-rocket2-materials#" .. (plateau and "plateau163#" or "") .. communityKey()
     .. "#" .. paletteKey(colors or {}) .. perMap
   local held = community[key]
   if held then return held.image, held.data end
@@ -786,6 +810,7 @@ local function communityAtlas(map, colors, base, baked)
 
     local function paint(tile, art, palette)
       if type(tile) ~= "number" or tile < 0 or tile >= total then return end
+      palette = seasonalGrass(palette)
       local ox, oy = (tile % perRow) * 8, math.floor(tile / perRow) * 8
       for py = 0, 7 do
         local row = art[py + 1]
@@ -826,6 +851,31 @@ local function communityAtlas(map, colors, base, baked)
       -- Spin arrows / stop pads (32/33/48/49/94) retain their original art.
     end
     if cave then applyCaveCommunityMaterials(map, total, paint, recolor) end
+    if plateau then
+      local okRaw, raw = pcall(Assets.imageData, map.tileset.image)
+      if okRaw and raw then
+        local function each(list, pal) for _, t in ipairs(list) do recolor(t, pal, raw) end end
+        -- light -> dark, the four GB shades
+        local GRANITE = {{.86,.78,.64},{.66,.57,.46},{.45,.38,.31},{.20,.16,.14}}
+        local REGAL   = {{.97,.94,.86},{.84,.66,.28},{.56,.15,.17},{.17,.09,.08}}
+        local MARBLE  = {{.98,.97,.94},{.84,.82,.78},{.80,.62,.26},{.22,.19,.19}}
+        local BRONZE  = {{1.0,.88,.52},{.86,.63,.25},{.54,.35,.13},{.15,.09,.05}}
+        local PAVING  = {{.92,.90,.84},{.80,.77,.70},{.64,.60,.54},{.36,.33,.31}}
+        local TURF    = {{.46,.68,.30},{.33,.55,.22},{.23,.41,.16},{.12,.24,.09}}
+        local DEEP    = {{.38,.60,.26},{.27,.47,.18},{.18,.33,.12},{.09,.18,.06}}
+        local CANOPY  = {{.52,.74,.36},{.33,.56,.24},{.20,.39,.15},{.08,.17,.06}}
+        local STONE   = {{.78,.76,.72},{.60,.58,.55},{.42,.40,.38},{.18,.17,.17}}
+        each({3}, GRANITE)                       -- striated rock face
+        each({13, 14, 15}, REGAL)                -- League / gate walls
+        each({46, 47, 32, 33, 5, 6, 21, 22, 48, 49}, MARBLE) -- pillars, pilasters, plinths
+        each({16, 18, 40, 41, 37, 38}, BRONZE)   -- bird statues
+        each({35}, PAVING)                       -- pale paving
+        each({44, 45}, TURF)                     -- walkable turf
+        if type(map.tileset.grassTile) == "number" then each({map.tileset.grassTile}, DEEP) end
+        each({7, 8, 23, 24}, CANOPY)             -- pillar-top canopies
+        each({29, 34, 42, 43}, STONE)            -- boulders
+      end
+    end
 
     if tilesetId == "OVERWORLD" and CommunityVisuals.customWalls() then
       local shapes = V.require("TileShape").forMap(map)
@@ -892,6 +942,7 @@ local function communityAtlas(map, colors, base, baked)
                 or shade == 2 and ROUTE10_GRASS.body
                 or shade == 3 and ROUTE10_GRASS.shadow
                 or ROUTE10_GRASS.dark) or TALL_GRASS[shade]
+              c = seasonalGrass(c, true)
               data:setPixel(ox + px, oy + py, c[1], c[2], c[3], alpha)
             end
           end
@@ -1054,6 +1105,7 @@ local function communityAtlas(map, colors, base, baked)
 
     local image = love.graphics.newImage(data)
     image:setFilter("nearest", "nearest")
+    if towerInterior then V.require('TowerStone').register(image,w,outW,outH)end
     return { image=image, data=data, mapId=perMap ~= "" and perMap or nil }
   end)
   if not ok or not entry then return base, baked end
@@ -1414,8 +1466,20 @@ function TerrainAtlas.forMap(map, colors)
   base, baked = communityAtlas(map, colors, base, baked)
   base, baked = safariGround(map, base, baked)
   local animatedBase=TerrainAtlas.animate(map, colors, base, baked) or base
+  V.require("TowerStone").inherit(base,animatedBase)
   if V.require("SafariReserve").enabled(map)then return V.require("SafariMaterials").apply(map,animatedBase)end
-  return V.require("DecorAtlas").apply(map,animatedBase)
+  local result=V.require("DecorAtlas").apply(map,animatedBase)
+  -- TEST166: remember the atlas the League maps draw with, so the water
+  -- pass can give their canal the clear League water (TerrainAtlas.isLeague).
+  if result and map and map.tileset and map.tileset.id=="PLATEAU" then
+    local ok,on=pcall(function()return V.require("LeagueArchitecture").enabled(map)end)
+    if ok and on then TerrainAtlas._league[result]=true end
+  end
+  return result
+end
+TerrainAtlas._league=setmetatable({},{__mode="k"})
+function TerrainAtlas.isLeague(texture)
+  return texture~=nil and TerrainAtlas._league[texture]==true
 end
 
 -- Representative colour of one 4x4 border metatile AFTER the map's palette

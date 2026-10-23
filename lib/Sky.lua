@@ -476,7 +476,7 @@ local MOON_CRATERS = Sky.MOON_CRATERS
 -- Shared with the reflection pass, so the sun on the water is the same sun
 -- that is in the sky, in the same mode's palette.
 function Sky.discShades(moon)
-  local src = moon and DayNight.MOON_COLORS or DayNight.SUN_COLORS
+  local src = moon and (DayNight.MOON_OVERRIDE or DayNight.MOON_COLORS) or DayNight.SUN_COLORS
   return PaletteFX.effectiveColors(src) or src
 end
 
@@ -724,6 +724,9 @@ function Sky.paint(w, h, sky, horizonY, cell, body, top, axis, ray)
   -- drawn under the pass's own ("lequal", true) stamps itself across the depth
   -- buffer at the near plane and hides the entire world behind the sky.
   local prevShader = g.getShader and g.getShader() or nil
+  -- TEST53: fallback strips and celestial art are screen-space draws, even
+  -- when a scenic capture has already bound the native world shader.
+  if g.setShader then g.setShader() end
   local cmp, write
   if g.getDepthMode then cmp, write = g.getDepthMode() end
   if g.setDepthMode then g.setDepthMode("always", false) end
@@ -755,10 +758,9 @@ function Sky.paint(w, h, sky, horizonY, cell, body, top, axis, ray)
   local weather = V.companion and V.companion.atmosphereSnapshot and V.companion:atmosphereSnapshot() or {}
   local sh = getShader()
   local function send(name,...)
-    -- Release shaders optimized out legacy dither uniforms. Preserve the stock
-    -- no-provider path; an active atmosphere must not silently fall back before
-    -- its live uniforms are sent.
-    if weather.sky and sh.hasUniform and not sh:hasUniform(name)then return end
+    -- Optimized-out legacy uniforms are absent with or without weather.
+    -- Do not abandon a working sky shader just because the driver removed one.
+    if sh.hasUniform and not sh:hasUniform(name)then return end
     return sh:send(name,...)
   end
   local ramp = sh and rampFor(bands)

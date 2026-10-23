@@ -2,9 +2,12 @@ local V=...
 local M={}
 local Rules=V.require('CityBuildingRules')
 local Inventory=V.require('BuildingInventory')
+-- LOADING-STUTTER: yield points for a pumped (background) Structures build; outside
+-- one, BuildBudget's tick/check return at once and nothing changes.
+local Budget=V.require('BuildBudget')
 local function bounds(qs,first,last)
  local a,b={1e9,1e9,1e9},{-1e9,-1e9,-1e9}
- for i=first,last do local q=qs[i];if q then for j=1,4 do for k=1,3 do a[k]=math.min(a[k],q[j][k]);b[k]=math.max(b[k],q[j][k])end end end end
+ for i=first,last do Budget.tick();local q=qs[i];if q then for j=1,4 do for k=1,3 do a[k]=math.min(a[k],q[j][k]);b[k]=math.max(b[k],q[j][k])end end end end
  return a,b
 end
 local function donor(map,data)
@@ -78,7 +81,13 @@ function M.spec(map,b,qs,uv)
  end
  return {x0=x0,x1=x1,z0=z0,z1=z1,kind=kind,map=map.id,doors=doors,destination=dest,uv=uv,template=b.id}
 end
-function M.model(s)
+local function buildingModel(s)
+ local kanto=V.require('KantoArchitecture').model(s)
+ if kanto then return kanto end
+ if s.map=='LAVENDER_TOWN' then
+  local lavender=V.require('LavenderArchitecture').model(s)
+  if lavender then return lavender end
+ end
  local ordinary={house=true,scenery_house=true,player_house=true,rival_house=true,rest_house=true,club=true}
  local frontOnly=true;for _,d in ipairs(s.doors)do if d.side~='front' then frontOnly=false end end
  if ((ordinary[s.kind] and frontOnly) or s.kind=='center' or s.kind=='mart') and frontOnly then
@@ -92,8 +101,13 @@ function M.model(s)
  end
  return V.require('CityArchitecture').model(s)
 end
-local function league(S,map,uv)
+function M.model(s)
+ return V.require('KantoExteriorMaterials').apply(buildingModel(s),s)
+end
+local function league(S,map,uv,claimsOnly)
  if map.id~='INDIGO_PLATEAU' or map.tileset.id~='PLATEAU' then return end
+ -- TEST164: LeagueArchitecture owns the hall when it is on.
+ do local ok,on=pcall(function()return V.require('LeagueArchitecture').enabled(map)end);if ok and on then return end end
  local rows=V.require('LeagueProfile');local key=function(x,z)return (z+64)*4096+x+64 end
  local tw,th=map.def.width*4,map.def.height*4
  for tz=0,th-#rows do for tx=0,tw-#rows[1] do
@@ -104,7 +118,7 @@ local function league(S,map,uv)
    local doors=M.doors(map,b)
    if #doors==0 then return end
    local spec={x0=b.tileX,x1=b.tileX+b.tileW,z0=b.tileZ,z1=b.tileZ+b.tileH,kind='league',map=map.id,doors=doors,uv=uv}
-   for _,q in ipairs(M.model(spec))do S.objectQuads[#S.objectQuads+1]=q end
+   if not claimsOnly then for _,q in ipairs(M.model(spec))do S.objectQuads[#S.objectQuads+1]=q end end
    for r,row in ipairs(rows)do for c in ipairs(row)do
     local k=key(tx+c-1,tz+r-1);S.skip[k]=true;S.ground[k]=35;S.shapeAt[k]={class='building',h=0,art='building',flat=false,authored=true}
    end end
@@ -117,10 +131,22 @@ function M.build(S,map,data)
  if not S.outdoor or not map or not map.tileset or map.id=='VERMILION_CITY' then return false end
  if map.tileset.id~='OVERWORLD' and map.tileset.id~='FOREST' and map.tileset.id~='PLATEAU' then return false end
  local uv=donor(map,data);if not uv then return false end
+ -- LOADING-STUTTER: a claims-only analysis (KantoLife's habitat) needs only
+ -- the claims below (the League hall's), not the replacement models
+ if S.lightweight then S.legendaryBuildingAudit={};league(S,map,uv,true);return false end
  local replace={};local extra={};local n=0;S.legendaryBuildingAudit={}
  for _,b in ipairs(S.cityBuildings or {})do
+  Budget.check()
   local kind=Rules.classify(map.id,'',b.id)
   if b.bbTower then
+   -- Keep Better Buildings' tower mesh, UV art, height and door exactly.
+   -- Tag its high stone courses for fine grain without recoloring windows.
+   for i=b.first,b.last do local q=S.objectQuads[i]
+    if q and not q.referenceMaterial then
+     local low=math.min(q[1][2],q[2][2],q[3][2],q[4][2])
+     if low>=28 then q.referenceMaterial='exTowerAtlas'end
+    end
+   end
    local q=V.require('CityArchitecture').towerDetail({x0=b.tileX,z0=b.tileZ,depth=b.towerDepth or b.tileH,uv=uv})
    for _,p in ipairs(q)do extra[#extra+1]=p end
    S.legendaryBuildingAudit[#S.legendaryBuildingAudit+1]={kind='tower',template=b.id,status='original tower enhanced'}

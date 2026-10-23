@@ -201,6 +201,14 @@ DayNight.SUN_COLORS = { { 248, 240, 200 }, { 248, 208, 96 },
                         { 248, 144, 80 }, { 216, 96, 64 } }
 DayNight.MOON_COLORS = { { 240, 244, 248 }, { 224, 232, 240 },
                          { 168, 184, 208 }, { 120, 136, 168 } }
+-- TEST156: the Halloween (and optional Harvest) moon -- a pale pumpkin
+-- orange, light at the core so it still reads as moonlight. Seasonal Decor
+-- sets MOON_OVERRIDE to this while the HALLOWEEN MOON option applies, and
+-- clears it otherwise; Sky.discShades picks it up for the sky disc and the
+-- water's reflection alike.
+DayNight.HARVEST_MOON_COLORS = { { 255, 236, 204 }, { 252, 212, 158 },
+                                 { 226, 164, 110 }, { 176, 118, 86 } }
+DayNight.MOON_OVERRIDE = nil
 
 -- The dial as keyframes: a repeated name is a plateau, a change is a
 -- BLEND-wide ramp. Laid out so DUSK and DAWN proper land exactly on their
@@ -440,6 +448,33 @@ function DayNight.isOpenForest(map)
   local id = map and (map.id or (map.def and map.def.id))
   return (id == "VIRIDIAN_FOREST" and V.require("CommunityVisuals").customForest())
     or V.require("SafariReserve").enabled(map) or false
+end
+
+-- TEST165: the League road is OPEN AIR. Route 23 and the Indigo Plateau use
+-- the PLATEAU tileset, which the engine does not count as outdoor (that test
+-- also drives door sounds), so they were lit at a fixed noon under a black
+-- void. They get the full sky, the hour's light and lit lamps instead.
+DayNight.LEAGUE_AIR = { ROUTE_23 = true, INDIGO_PLATEAU = true }
+function DayNight.isLeagueAir(map)
+  local id = map and (map.id or (map.def and map.def.id))
+  local ts = map and ((map.tileset and map.tileset.id) or (map.def and map.def.tileset))
+  return (id and DayNight.LEAGUE_AIR[id] and ts == "PLATEAU") and true or false
+end
+function DayNight.isOpenAir(map)
+  return DayNight.isOpenForest(map) or DayNight.isLeagueAir(map)
+end
+
+-- TEST179: a room under a GLASS ROOF (the Celadon gym's greenhouse) stands
+-- under the real sky -- the hour's colour, the stars, the horizon -- while
+-- its own light stays the room's (the rig and the tint are not the clock's:
+-- a lit greenhouse at night is lit). Only what is painted BEHIND the room
+-- asks this; the room must be ours (InteriorRooms) and declare openSky.
+function DayNight.isOpenSky(map)
+  local ok, open = pcall(function()
+    local Rooms = V.require("InteriorRooms")
+    return Rooms.openSky and Rooms.openSky(map)
+  end)
+  return ok and open or false
 end
 
 function DayNight.isCanopy(map)

@@ -21,6 +21,29 @@ local RamPrecache = V.require("RamPrecache")
 
 local Precache = {}
 
+-- TEST213 streaming fix: finite RAM-precache settings also enabled eager
+-- destination meshes and atlases. The compressed-record budget does not
+-- cover those CPU/GPU resources. On mobile, build only what VoxelScene
+-- actually requests; explicit title-screen cache generation remains intact.
+local mobileCached
+local function mobile()
+  if mobileCached == nil then
+    local okOS, osName = pcall(function() return love.system.getOS() end)
+    local okCaps, caps = pcall(function()
+      return require("src.core.Platform").detect()
+    end)
+    mobileCached = (okOS and (osName == "Android" or osName == "iOS"))
+      or (okCaps and type(caps) == "table" and
+          (caps.mobile == true or caps.os == "Android" or caps.os == "iOS"))
+      or false
+  end
+  return mobileCached
+end
+
+function Precache.backgroundAllowed()
+  return not RamPrecache.off() and not mobile()
+end
+
 local rootId = nil
 local candidates = {}
 local nextCandidate = 1
@@ -163,7 +186,7 @@ end
 -- existing ChunkMesher.pump call remains the single place CPU/GPU work runs,
 -- under the same 5 ms idle slice as neighbour streaming.
 function Precache.update(game)
-  if RamPrecache.off() then
+  if not Precache.backgroundAllowed() then
     Precache.reset()
     return
   end

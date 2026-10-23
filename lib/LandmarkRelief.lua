@@ -30,30 +30,10 @@ function M.elevation(s,side,low,high,H,openings,block,panel)
   return
  end
  if s.map~='CINNABAR_ISLAND' or s.kind~='ruined_mansion'then return end
- -- Individually weathered wall courses: exclude the complete window/door
- -- rectangle including trim, and keep the joints above the ground plane.
- local function clear(a,b,c,d)
-  for _,o in ipairs(openings)do
-   if a<o.u+o.w/2+1.2 and c>o.u-o.w/2-1.2 and b<o.t+1.4 and d>o.b-1 then return false end
-  end
-  return true
- end
- for row=0,math.floor((H-8)/4)do
-  local y=6+row*4
-  for col=0,math.floor((high-low-7)/6)do
-   local a=low+2+col*6;local n=(col*17+row*23+#side*11)%19
-   local w=2.2+(n%4)*.6;local b=y+.4+(n%3)*.3
-   if n<11 and clear(a,b,a+w,b+1.5)then
-    panel(a,b,a+w,b+1.3,.025,'stone',.62+(n%5)*.035)
-    block(a+.15,b+.15,a+w-.3,b+.24,.04,.13,'dark',.61)
-    if n%3==0 then block(a+.4,b+.25,a+.53,b+.93,.04,.10,'dark',.65)end
-   end
-  end
- end
- -- Subtle damp courses at the foot of the walls, with real door gaps.
- for u=low+2,high-4,3.5 do if clear(u,.9,u+2.8,3.8)then
-  panel(u,.9,u+2.8,2.7+(math.floor(u)%3)*.35,.03,'stone',.68)
- end end
+ -- TEST18: the building-scoped exruin finish supplies bonded stone,
+ -- irregular staining and hairline faults continuously around apertures.
+ -- Removing the old inset rectangles also reduces this facade's geometry.
+
 end
 function M.roof(s,G,H)
  if s.map~='PEWTER_CITY'then return end

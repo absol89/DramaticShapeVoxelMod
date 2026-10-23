@@ -1462,6 +1462,13 @@ function Buildings.build(S, map, data, perRow)
             end
           end
           if free and matches(S, t, tx, ty) then
+            if not built and S.lightweight then
+              -- LOADING-STUTTER: a claims-only analysis (KantoLife's
+              -- habitat) stamps the footprint with no model at all, and
+              -- never builds or caches one: `models` stays exactly as a
+              -- normal build would leave it.
+              built = {}
+            end
             if not built then
               local key = tileset.id .. ":" .. index
               if not models[key] then

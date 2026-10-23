@@ -99,6 +99,11 @@ end
 
 local function drawMap(map)
   if not isLobby(map) then return false end
+  -- TEST174: the authored lobby (InteriorRooms) has its own counter trim
+  do
+    local okI, own = pcall(function() return V.require("InteriorRooms").accepts(map) end)
+    if okI and own then return false end
+  end
   -- The brass reception accent belongs to FULL; SUBTLE is the restrained
   -- high-sconce treatment and OFF draws no added Tower detail pass.
   if TowerFogSettings.detailsLevel() ~= "full" then return false end

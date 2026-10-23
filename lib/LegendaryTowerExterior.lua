@@ -82,7 +82,9 @@ function M.geometry()
   local N = 8
   local function vertex(p, slot, shade)
     local t = uv(slot, N)
-    vertices[#vertices + 1] = { p[1], p[2], p[3], t[1], t[2], shade or 1 }
+    local finish=shade or 1
+    if slot<=4 then finish=V.require('ReferenceMaterials').encode('exTowerAtlas',finish)end
+    vertices[#vertices + 1] = { p[1], p[2], p[3], t[1], t[2], finish }
     return #vertices
   end
   local function quad(a,b,c,d,slot,shade)

@@ -59,6 +59,34 @@ end
 function M.enabled(id,roads,tileset)
  return id=='CINNABAR_ISLAND' and roads and tileset=='OVERWORLD'
 end
+-- Source pillar cells at the island's outer boundary are landscape, not
+-- promenade. Never use their inferred floor donor: it can be city paving.
+function M.boundaryGroundAt(map,S,key,tx,tz)
+ if map.id~='CINNABAR_ISLAND' or map.tileset.id~='OVERWORLD' then return false end
+ local w,h=map.def.width*4,map.def.height*4
+ if tx>=2 and tz>=2 and tx<w-2 and tz<h-2 then return false end
+ local x,z=math.floor(tx/2)*2,math.floor(tz/2)*2
+ return S.tileAt[key(x,z)]==42 and S.tileAt[key(x+1,z)]==43
+   and S.tileAt[key(x,z+1)]==58 and S.tileAt[key(x+1,z+1)]==59
+end
+-- TEST21: the strip BEHIND the source pillars is outside the map body.
+-- Follow only the west/south wall runs, including their shared corner.
+-- Require existing dry border ground; BLACK/WATER fills never acquire land.
+function M.outerStripAt(map,S,key,tx,tz)
+ if map.id~='CINNABAR_ISLAND' or map.tileset.id~='OVERWORLD' then return false end
+ local w,h=map.def.width*4,map.def.height*4
+ local west=tx>=-4 and tx<0 and tz>=0 and tz<h
+ local south=tz>=h and tz<h+4 and tx>=0 and tx<w
+ local corner=tx>=-4 and tx<0 and tz>=h and tz<h+4
+ if not (west or south or corner)then return false end
+ local backed=west and M.boundaryGroundAt(map,S,key,0,tz)
+   or south and M.boundaryGroundAt(map,S,key,tx,h-1)
+   or corner and M.boundaryGroundAt(map,S,key,0,h-1)
+ if not backed then return false end
+ local s=S.shapeAt[key(tx,tz)]
+ return s and (s.class=='ground' and s.flat and s.art~='grass'
+   or s.class=='cylinder' and S.skip[key(tx,tz)]) or false
+end
 -- Continuous coastal runs; entrances and docks are excluded by the caller.
 -- Only real water edges receive timber; buildings never receive rails.
 function M.frontage(x,z,edges)

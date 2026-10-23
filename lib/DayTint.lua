@@ -73,7 +73,7 @@ local function outdoorNow()
   local outdoor = map.def and Map.isOutdoor(map.def) or false
   -- a canopy floor takes the hour's colour and nothing else of it, exactly as
   -- it does in the 3D pass (BattleScene, VoxelScene)
-  return outdoor or DayNight.isCanopy(map)
+  return outdoor or DayNight.isCanopy(map) or DayNight.isLeagueAir(map)
 end
 
 -- The colour this frame's world should be multiplied by, or nil to leave the

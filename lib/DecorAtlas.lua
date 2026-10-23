@@ -6,13 +6,21 @@ local M={}
 local entries, patches, failed={},{},{}
 local scales=setmetatable({},{__mode='k'})
 function M.texelScale(texture)return scales[texture] or 1 end
+local mobileCached
+function M.mobileLimit()
+ if mobileCached==nil then
+  local ok,os_=pcall(function()return love.system.getOS()end)
+  mobileCached=(ok and(os_=='Android'or os_=='iOS'))and 8192 or math.huge
+ end
+ return mobileCached
+end
 local function release(object)if object and object.release then pcall(object.release,object)end end
 local function discard(id)
  local e=entries[id]
  if e then scales[e.image]=nil;release(e.image);entries[id]=nil end
 end
-local function patch(lavender,courtyard,roads,coast,harbor,trail,celadon,city)
- local key=(lavender and 'lavender' or 'ordinary')..tostring(courtyard)..tostring(roads)..tostring(coast)..tostring(harbor)..tostring(trail)..tostring(celadon)..tostring(city)
+local function patch(lavender,courtyard,roads,coast,harbor,trail,celadon,city,autumn)
+ local key=(lavender and 'lavender' or 'ordinary')..tostring(courtyard)..tostring(roads)..tostring(coast)..tostring(harbor)..tostring(trail)..tostring(celadon)..tostring(city)..(autumn and ':autumn' or '')
  if patches[key] then return patches[key] end
  local g=love.graphics;local image;local previous=g.getCanvas();local pushed=false
  local ok,result=pcall(function()
@@ -28,10 +36,17 @@ local function patch(lavender,courtyard,roads,coast,harbor,trail,celadon,city)
     lavender and {.235,.355,.20} or {.22,.40,.24},{.95,.77,.39}}
   if city then palette[2]=V.require('CityStreets').themes[city].flower end
   if coast then palette[2]={.94,.65,.42};palette[3]={.34,.47,.29} end
+  if autumn then
+   -- TEST135: garden moss/leaf swatches and default pink flowers turn to
+   -- fall. Lavender's purple asters, coast and city flower themes stay.
+   local A=V.require('AutumnGround')
+   palette[1]=A.color(palette[1],.55);palette[3]=A.color(palette[3],.30)
+   if not lavender and not coast and not city then palette[2]=A.FLOWER end
+  end
   for i,c in ipairs(palette)do
    g.setColor(c[1],c[2],c[3],1);g.rectangle('fill',(i+3)*16,0,16,16)
   end
-  V.require('LawnMaterial').draw(g,0,128,128,lavender and 'LAVENDER_TOWN' or '')
+  V.require('LawnMaterial').draw(g,0,128,128,lavender and 'LAVENDER_TOWN' or '',autumn)
   if courtyard then
    V.require('SurfaceMaterials').stone(g,0,272,128,112,'lavender')
    local stone=V.require('LavenderCourtyard').palette('LAVENDER_TOWN')
@@ -88,14 +103,22 @@ function M.apply(map,base)
  local lavender=id=='LAVENDER_TOWN'
  local courtyard=lavender and CV.customCityGround()
  local w,h=base:getDimensions();local perRow=map.tileset.tilesPerRow or 16
- local key=tostring(roads)..':'..tostring(lawn)..':'..tostring(lavender)..':'..tostring(courtyard)..':'..w..':'..h..':'..perRow..':'..tostring(coast)..tostring(harbor)..tostring(trail)..tostring(celadon)..tostring(city)
+ local autumn=V.require('AutumnGround').active()
+ local key=(autumn and 'autumn:' or '')..tostring(roads)..':'..tostring(lawn)..':'..tostring(lavender)..':'..tostring(courtyard)..':'..w..':'..h..':'..perRow..':'..tostring(coast)..tostring(harbor)..tostring(trail)..tostring(celadon)..tostring(city)
  if failed[id]==key then return base end
  local e=entries[id]
  if e and e.key==key and e.base==base then return e.image end
  local g=love.graphics;local previous=g.getCanvas();local pushed=false;local canvas
  local ok,result=pcall(function()
-  local p=patch(lavender,courtyard,roads,coast,harbor,trail,celadon,city)
+  local p=patch(lavender,courtyard,roads,coast,harbor,trail,celadon,city,autumn)
   local scale=celadon and 32 or 16;local limit=g.getSystemLimits().texturesize or 4096
+  -- TEST216: on a phone, at most 8192px a side. The Overworld atlas is
+  -- 128x1992, so the GPU's own 16384 limit let this canvas be 1024x15936:
+  -- 62 MB of texture PER MAP in view (the map you're on and its
+  -- neighbours), redrawn whole at every water animation step. At 8192 it's
+  -- 512x7968: 16 MB, a quarter of the memory and the redraw, at half the
+  -- decoration detail (still 4x the tile art).
+  limit=math.min(limit,M.mobileLimit())
   while scale>1 and (w*scale>limit or h*scale>limit)do scale=scale/2 end
   assert(w*scale<=limit and h*scale<=limit,'decoration atlas exceeds GPU limit')
   -- Returning the source is safer than advertising scaled UV metadata at 1x.

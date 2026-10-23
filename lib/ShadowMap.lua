@@ -120,27 +120,55 @@ ShadowMap.slack = ShadowMap.BIAS
 local SHADER = [[
   varying float vDepth;
   varying float vForestOpaque;
+  varying float vNoCast;
+#ifdef CAST_OVER
+  varying vec2 vMapUV;
+#endif
 #ifdef VERTEX
   attribute float VertexShade;
   uniform mat4 lightVP;
   uniform mat4 model;
+#ifdef CAST_OVER
+  uniform float mapVSign;
+#endif
   vec4 position(mat4 transform_projection, vec4 vertex_position) {
     // The native forest materials use leaf-local UVs and solid geometry.
     vForestOpaque=step(6528.0,VertexShade)*(1.0-step(7040.0,VertexShade));
+    vForestOpaque=max(vForestOpaque,step(16128.0,VertexShade)*(1.0-step(16768.0,VertexShade)));
+    // TEST165: League surface DETAIL (ReferenceMaterials ids 110..121) is
+    // drawn in the scene but never casts: facade relief under a grazing sun
+    // otherwise printed stair-stepped shadow down every wall.
+    vNoCast=step(18176.0,VertexShade)*(1.0-step(19712.0,VertexShade));
     vec4 c = lightVP * (model * vertex_position);
     // the projection is orthographic (w is 1) and fit() maps clip z onto
     // [0,1] directly (see Z01 there), so clip z IS the stored depth,
     // linear in world units along the sun line -- under every clip-range
     // convention a backend can bring
     vDepth = c.z;
+#ifdef CAST_OVER
+    // TEST184: this fragment's texel in the world layer, by the same
+    // light-space -> uv mapping the scene reads the map with (toUnit)
+    vMapUV = vec2(0.5 * c.x + 0.5, 0.5 * mapVSign * c.y + 0.5);
+#endif
     return c;
   }
 #endif
 #ifdef PIXEL
   uniform float sprite;   // 1 while the CAST is being drawn; see ShadowMap.sprites
+#ifdef CAST_OVER
+  // TEST184: the cast is drawn over a COPY of the world layer, whose depth
+  // buffer is not copied with it -- so each fragment asks the world layer
+  // itself whether the world is already nearer the sun here.
+  uniform Image worldMap;
+#endif
   vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+#ifdef CAST_OVER
+    vec4 wl = Texel(worldMap, vMapUV);
+    if (wl.r + wl.g * (1.0 / 255.0) < clamp(vDepth, 0.0, 1.0)) discard;
+#endif
     // the same alpha discard the main pass uses: a sprite card casts its
     // silhouette, not its 16x16 bounding box
+    if (vNoCast > 0.5) discard;
     if (vForestOpaque < 0.5 && Texel(tex, tc).a < 0.5) discard;
     // pack into two channels: the high byte in red, the low in green.
     // Blue says WHAT cast this, which costs a channel that was zero anyway
@@ -221,12 +249,22 @@ ShadowMap.uvVP = IDENTITY
 -- ShadowMap.BIAS expressed in the [0,1] depth the map stores
 ShadowMap.bias = 0
 
+local castShader = nil        -- TEST184: CAST_OVER variant; nil untried
+local active = nil            -- the shader the open pass draws with
 local function getShader()
+  if active then return active end
   if shader == nil then
     local ok, sh = pcall(love.graphics.newShader, SHADER)
     shader = (ok and sh) or false
   end
   return shader or nil
+end
+local function getCastShader()
+  if castShader == nil then
+    local ok, sh = pcall(love.graphics.newShader, "#define CAST_OVER 1\n" .. SHADER)
+    castShader = (ok and sh) or false
+  end
+  return castShader or nil
 end
 
 -- The map canvas at edge `res`, rebuilt when the rung changes (a zoom
@@ -409,7 +447,8 @@ end
 -- continuously with the camera reprojects every shadow edge a fraction of a
 -- texel every frame and the whole world's shadows crawl and shimmer while
 -- you walk.
-local function fit(cx, cy, vw, vh)
+local function fit(cx, cy, vw, vh, margin)
+  margin = margin or 0
   local f = sunDir()
   local view = Mat4.lookAt({ 0, 0, 0 }, f, { 0, 0, -1 })
 
@@ -420,9 +459,9 @@ local function fit(cx, cy, vw, vh)
   -- near ground does; half the depth is a serviceable stand-in for the
   -- frustum's true spread and costs a good deal less resolution
   local spread = north * 0.5
-  local xs = { cx - vw / 2 - spread, cx + vw / 2 + spread + reach }
+  local xs = { cx - vw / 2 - spread - margin, cx + vw / 2 + spread + reach + margin }
   local ys = { -32, ShadowMap.HEIGHT }         -- -32 covers recessed water
-  local zs = { cy - north, cy + vh / 2 + reach }
+  local zs = { cy - north - margin, cy + vh / 2 + reach + margin }
 
   local l, r, b, t, zn, zf
   for _, x in ipairs(xs) do
@@ -545,6 +584,7 @@ end
 -- Begin the sun pass. Returns false when it could not start, in which case
 -- the caller must not draw into it or call finish.
 function ShadowMap.begin(cx, cy, vw, vh)
+  active = nil
   local sh = getShader()
   if not sh then return false end
   -- the runtime's storage orientation, measured once before the first map
@@ -615,6 +655,7 @@ end
 function ShadowMap.finish(sig)
   if not drawing then return end
   drawing = false
+  active = nil
   love.graphics.setShader()
   love.graphics.setDepthMode()
   love.graphics.setCanvas()
@@ -624,10 +665,156 @@ function ShadowMap.finish(sig)
   ready = true
 end
 
+-- ------- TEST184: the WORLD LAYER
+--
+-- Free roam used to redraw the whole map -- terrain, every neighbour, the
+-- trees, the props -- whenever the camera moved a quarter pixel or anybody
+-- changed frame, which out of doors is every frame: the scene's geometry
+-- went through the GPU twice a frame. Now the world casters are drawn into
+-- their own layer, fitted around an ANCHOR with a margin of MARGIN world
+-- pixels on every side, and redrawn only when the camera strays past
+-- RECENTER of the margin (a few steps), the sun moves, or a mesh changes.
+-- The map the scene reads is that layer copied (one texture copy) with the
+-- characters drawn over it, and that is all a moving character costs.
+ShadowMap.MARGIN = 64
+ShadowMap.RECENTER = 48
+ShadowMap.worldCasts = 0      -- counters for PerfProbe
+ShadowMap.castCasts = 0
+
+local world = nil             -- { canvas, res, fit = {...}, sig, ready }
+local anchorX, anchorY = nil, nil
+
+-- Where the world layer is centred: the camera, until it strays.
+function ShadowMap.anchor(cx, cy)
+  if not anchorX or math.abs(cx - anchorX) > ShadowMap.RECENTER
+      or math.abs(cy - anchorY) > ShadowMap.RECENTER then
+    anchorX, anchorY = math.floor(cx + 0.5), math.floor(cy + 0.5)
+  end
+  return anchorX, anchorY
+end
+
+local function saveFit()
+  return { res = ShadowMap.res, clipVP = ShadowMap.clipVP, uvVP = ShadowMap.uvVP,
+           extent = ShadowMap.extent, slack = ShadowMap.slack, bias = ShadowMap.bias }
+end
+local function loadFit(f)
+  ShadowMap.res, ShadowMap.clipVP, ShadowMap.uvVP = f.res, f.clipVP, f.uvVP
+  ShadowMap.extent, ShadowMap.slack, ShadowMap.bias = f.extent, f.slack, f.bias
+end
+
+function ShadowMap.worldStale(sig)
+  return not (world and world.ready and world.sig == sig)
+end
+
+-- Open the world layer, fitted round the anchor. Draw with ShadowMap.draw
+-- and close with ShadowMap.finishWorld(sig).
+function ShadowMap.beginWorld(cx, cy, vw, vh)
+  local sh = getShader()
+  if not sh then return false end
+  if vSign == nil then
+    vSign = probeVSign()
+    ShadowMap.vSign = vSign
+  end
+  fit(cx, cy, vw, vh, ShadowMap.MARGIN)
+  local res = ShadowMap.res
+  if not (world and world.canvas and world.res == res) then
+    if world and world.canvas and world.canvas.release then pcall(world.canvas.release, world.canvas) end
+    local ok, c = V.require("PixelCanvas").new(res, res)
+    if not (ok and c) then world = nil; return false end
+    c:setFilter("nearest", "nearest")
+    pcall(c.setWrap, c, "clamp", "clamp")
+    world = { canvas = c, res = res }
+  end
+  world.ready = false
+  local ok = pcall(love.graphics.setCanvas, { world.canvas, depth = true })
+  if not ok then pcall(love.graphics.setCanvas); return false end
+  prevBlend, prevAlphaMode = love.graphics.getBlendMode()
+  love.graphics.clear(1, 1, 0, 1, true, true)
+  love.graphics.setDepthMode("lequal", true)
+  love.graphics.setMeshCullMode("none")
+  love.graphics.setBlendMode("replace", "premultiplied")
+  active = nil
+  love.graphics.setShader(sh)
+  love.graphics.setColor(1, 1, 1, 1)
+  pcall(sh.send, sh, "lightVP", "row", ShadowMap.clipVP)
+  pcall(sh.send, sh, "sprite", 0)
+  drawing = true
+  return true
+end
+
+function ShadowMap.finishWorld(sig)
+  if not drawing then return end
+  drawing = false
+  active = nil
+  love.graphics.setShader()
+  love.graphics.setDepthMode()
+  love.graphics.setCanvas()
+  love.graphics.setBlendMode(prevBlend or "alpha", prevAlphaMode)
+  love.graphics.setColor(1, 1, 1, 1)
+  world.fit = saveFit()
+  world.sig = sig
+  world.ready = true
+  ShadowMap.worldCasts = ShadowMap.worldCasts + 1
+end
+
+-- Open the map the scene reads: the world layer copied in, then the cast
+-- drawn over it (ShadowMap.draw / sprites as usual), closed by
+-- ShadowMap.finish(sig). False when there is no world layer or the copy
+-- could not be made (the caller falls back to the one-pass map).
+function ShadowMap.beginCast()
+  if not (world and world.ready and world.fit) then return false end
+  local cs = getCastShader()
+  if not cs then return false end
+  loadFit(world.fit)
+  local c = getCanvas(world.res)
+  if not c then return false end
+  local ok = pcall(love.graphics.setCanvas, { c, depth = true })
+  if not ok then pcall(love.graphics.setCanvas); return false end
+  prevBlend, prevAlphaMode = love.graphics.getBlendMode()
+  love.graphics.push("all")
+  love.graphics.origin()
+  love.graphics.clear(false, false, true)
+  love.graphics.setShader()
+  love.graphics.setDepthMode("always", false)
+  love.graphics.setBlendMode("replace", "premultiplied")
+  love.graphics.setColor(1, 1, 1, 1)
+  local drew = pcall(love.graphics.draw, world.canvas, 0, 0)
+  love.graphics.pop()
+  if not drew then
+    pcall(love.graphics.setCanvas)
+    return false
+  end
+  love.graphics.setDepthMode("lequal", true)
+  love.graphics.setMeshCullMode("none")
+  love.graphics.setBlendMode("replace", "premultiplied")
+  active = cs
+  love.graphics.setShader(cs)
+  love.graphics.setColor(1, 1, 1, 1)
+  pcall(cs.send, cs, "lightVP", "row", ShadowMap.clipVP)
+  pcall(cs.send, cs, "worldMap", world.canvas)
+  pcall(cs.send, cs, "mapVSign", vSign or 1)
+  pcall(cs.send, cs, "sprite", 1)
+  drawing = true
+  ready = false
+  ShadowMap.castCasts = ShadowMap.castCasts + 1
+  return true
+end
+
+function ShadowMap.dropWorld()
+  if world and world.canvas and world.canvas.release then pcall(world.canvas.release, world.canvas) end
+  world = nil
+  anchorX, anchorY = nil, nil
+end
+
 -- Drop the GPU objects (window resize, hot reload).
 function ShadowMap.invalidate()
+  for _, obj in pairs({canvas, blank}) do
+    if obj and obj.release then pcall(obj.release, obj) end
+  end
+  active = nil
   canvas, canvasRes, blank = nil, 0, nil
   drawing, ready, lastSig = false, false, nil
+  ShadowMap.dropWorld()
 end
 
 return ShadowMap

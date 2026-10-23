@@ -273,7 +273,20 @@ local function occupied(ow, wx, y, wz)
   if y < gh + ThirdPerson.PAD then return true end
   local okW, walkable = pcall(function() return map:isWalkableCell(cx, cy) end)
   if okW and not walkable then
+    -- Water rejects walking, not the camera above its surface. In caves
+    -- the old indoor rule made even the rider's own water cell a tall wall.
+    local okWater, water = pcall(function() return map:isWaterCell(cx, cy) end)
+    if okWater and water == true then return false end
     local def = map.def
+    if def and def.tileset == "CAVERN" then
+      local rubble = V.require("CaveRubble")
+      if rubble.lowWalls(map) then
+        -- Use the same wall height as the mesher (TEST206 raises it to 22).
+        -- Keep the solid lower part and the outer map boundary collidable.
+        local top = rubble.wallTop and rubble.wallTop(map) or rubble.SHELF_H
+        return y < math.max(gh, top) + ThirdPerson.PAD
+      end
+    end
     -- Outdoor unwalkable cells include low fences, kerbs and props which the
     -- boom may legitimately clear.  Indoor unwalkable cells are the room's
     -- walls: Gen 1 interiors have no ceiling or world beyond them, so letting
@@ -391,7 +404,7 @@ end
 -- With the boom fully in this is exactly the first-person answer, to the
 -- pixel -- which is what makes 1ST and 3RD one rig with a number between
 -- them rather than two cameras to keep in sync.
-function ThirdPerson.place(pivot, lx, ly, lz, focus, surf)
+function ThirdPerson.place(pivot, lx, ly, lz, focus, surf, ceiling)
   local e = surf and 1 or ThirdPerson.extension()
   if e <= 0 then
     ThirdPerson.want, ThirdPerson.len = 0, 0
@@ -400,6 +413,7 @@ function ThirdPerson.place(pivot, lx, ly, lz, focus, surf)
 
   local up = ThirdPerson.PIVOT_LIFT * e
   local orbit = { pivot[1], pivot[2] + up, pivot[3] }
+  if ceiling then orbit[2] = math.min(orbit[2], ceiling) end
 
   if surf then
     ThirdPerson.surfDistance = math.max(surf.minDistance or 90, surf.distance * ThirdPerson.surfZoom)
@@ -408,7 +422,23 @@ function ThirdPerson.place(pivot, lx, ly, lz, focus, surf)
     or math.max(ThirdPerson.reachFor() * e, (ThirdPerson.surfDistance or 0) * e)
   ThirdPerson.want = want
   local world = overworld()
-  local room = ThirdPerson.reach(world, orbit, -lx, -ly, -lz, want)
+  -- Fit the boom under the cave canopy by flattening its rise, not by
+  -- collapsing it into the mount. The requested yaw, pitch and focus stay
+  -- intact; only the camera's physical travel has less vertical room.
+  local function boomDirection()
+    local bx, by, bz = -lx, -ly, -lz
+    if ceiling and by > 0 and want > 0 then
+      by = math.min(by, math.max(0, (ceiling - orbit[2]) / want))
+      local flat = math.sqrt(lx*lx + lz*lz)
+      if flat > 1e-6 then
+        local horizontal = math.sqrt(math.max(0, 1 - by*by))
+        bx, bz = -lx/flat*horizontal, -lz/flat*horizontal
+      end
+    end
+    return bx, by, bz
+  end
+  local bx, by, bz = boomDirection()
+  local room = ThirdPerson.reach(world, orbit, bx, by, bz, want)
   -- in instantly, out only as fast as update() allows
   ThirdPerson.len = surf and room or math.min(ThirdPerson.len, room)
   local len = ThirdPerson.len
@@ -434,15 +464,15 @@ function ThirdPerson.place(pivot, lx, ly, lz, focus, surf)
   -- the lens through a side wall even though the centre line was clear.  Give
   -- up the cosmetic shoulder before accepting an occupied final position.
   if (sx ~= 0 or sz ~= 0) and world
-     and occupied(world, orbit[1] - lx * len + sx,
-                          orbit[2] - ly * len,
-                          orbit[3] - lz * len + sz) then
+     and occupied(world, orbit[1] + bx * len + sx,
+                          orbit[2] + by * len,
+                          orbit[3] + bz * len + sz) then
     sx, sz = 0, 0
   end
 
-  local eye = { orbit[1] - lx * len + sx,
-                orbit[2] - ly * len,
-                orbit[3] - lz * len + sz }
+  local eye = { orbit[1] + bx * len + sx,
+                orbit[2] + by * len,
+                orbit[3] + bz * len + sz }
   if surf then
     local radius=(surf.radius or 66)+8
     local dx,dz=eye[1]-pivot[1],eye[3]-pivot[3]
@@ -450,17 +480,21 @@ function ThirdPerson.place(pivot, lx, ly, lz, focus, surf)
       -- A wall can collapse the low boom into the mount. Rebuild from an
       -- elevated pivot so the fallback still goes through world collision.
       orbit[2]=math.max(orbit[2],surf.top+8)
-      room=ThirdPerson.reach(world,orbit,-lx,-ly,-lz,want)
+      if ceiling then orbit[2]=math.min(orbit[2],ceiling) end
+      bx,by,bz=boomDirection()
+      room=ThirdPerson.reach(world,orbit,bx,by,bz,want)
       ThirdPerson.len=room
-      eye={orbit[1]-lx*room,orbit[2]-ly*room,orbit[3]-lz*room}
+      eye={orbit[1]+bx*room,orbit[2]+by*room,orbit[3]+bz*room}
     end
   end
   local aim = focus and { focus[1] + sx, focus[2] + up, focus[3] + sz }
               or nil
   if surf and aim then
     local wide=surf.wide or 1
+    local shoulderY=surf.seat+9
+    if ceiling then shoulderY=math.min(shoulderY,ceiling-8) end
     aim={pivot[1]+(aim[1]-pivot[1])*wide,
-         surf.seat+9+(aim[2]-(surf.seat+9))*wide,
+         shoulderY+(aim[2]-shoulderY)*wide,
          pivot[3]+(aim[3]-pivot[3])*wide}
   end
   return eye, aim

@@ -38,6 +38,16 @@ local function isCave(map)
   return tid == "CAVERN" and CommunityVisuals.customCaves()
 end
 
+-- Surf camera clearance below both the roof and its longest hanging tooth.
+-- The lowest possible tooth is 66 - 3.25 - 1.2 - 1.4 - 18.5 = 41.65.
+-- Leave more than the boom's five-pixel collision pad below that geometry.
+-- SUBTLE/OFF and the original cave style do not draw this canopy.
+function CaveAtmosphere3D.cameraCeiling(map)
+  if isCave(map) and CommunityVisuals.caveDetailLevel() == "full" then
+    return 36
+  end
+end
+
 local function white()
   if whiteImg then return whiteImg end
   local ok, img = pcall(function()
@@ -364,6 +374,17 @@ local function build(map)
     return true
   end
 
+  -- TEST192: on Victory Road (CaveRubble) the loose rocks stand 3 high
+  -- under their heaps and the other walls 16, not the usual 30: nothing
+  -- there may hang from a 30-high crown, and on a loose rock nothing is
+  -- mounted on the face at all
+  local Rubble = V.require("CaveRubble")
+  local rubbleMap = Rubble.shelfWalls(map)   -- TEST203: + Cerulean (isLow stays Victory Road)
+  local function lowRock(cx, cy)
+    return rubbleMap and S and S.tileAt
+      and Rubble.isLow(map, S.tileAt[keyOf(cx * 2, cy * 2)]) or false
+  end
+
   local function supported(cx, cy, dx, dz)
     if not wallFace(cx, cy, dx, dz) then return false end
     local lx, lz = -dz, dx
@@ -390,7 +411,8 @@ local function build(map)
             -- patches overlap around the source and a bead forms at their
             -- lowest point. There is no long vertical stroke to resemble a
             -- cable, and nothing begins at the artificial wall crown.
-            if not torchClear
+            local low = lowRock(cx, cy)
+            if not torchClear and not low
                and math.floor(hash01(cx, cy, 751) * 5) == 0 then
               local tx, tz = -dz, dx
               local sourceY = fy + 10.7 + hash01(cx, cy, 757)*3.0
@@ -459,7 +481,8 @@ local function build(map)
             -- Tall layered columns remain tucked against the wall. Their
             -- bases never enter the centre of a 16-pixel walking cell, so the
             -- engine's collision, encounters and battle staging stay clear.
-            if not torchClear
+            local colK = rubbleMap and ((Rubble.wallTop(map) or 16) / 26) or 1.0
+            if not torchClear and not low
                and math.floor(hash01(cx, cy, 831) * 6) == 0 then
               local side = (hash01(cx,cy,833)<0.5) and -1 or 1
               local bx = sx+dx*2.25-dz*side*1.1
@@ -468,11 +491,11 @@ local function build(map)
                                  and litPillars or pillars
               layeredSpire(pillarGroup, bx, fy, bz,
                            2.35+hash01(cx,cy,835)*1.10,
-                           9.5+hash01(cx,cy,837)*7.2, false, seed+17)
+                           (9.5+hash01(cx,cy,837)*7.2)*colK, false, seed+17)
               layeredSpire(pillarGroup, bx-dz*side*2.7, fy,
                            bz+dx*side*2.7,
                            1.10+hash01(cx,cy,838)*0.75,
-                           4.5+hash01(cx,cy,840)*4.7, false, seed+19)
+                           (4.5+hash01(cx,cy,840)*4.7)*colK, false, seed+19)
               if hash01(cx,cy,841)>0.56 then
                 layeredSpire(pillarGroup, bx+dz*side*2.35, fy,
                              bz-dx*side*2.35,
@@ -485,7 +508,7 @@ local function build(map)
             -- behind the wall face and their roots begin inside the crown, so
             -- they break up the black opening as solid rock silhouettes rather
             -- than transparent bands or camera-crossing ceiling shelves.
-            if not torchClear
+            if not torchClear and not rubbleMap
                and math.floor(hash01(cx, cy, 856) * 3) == 0 then
               local anchorY = fy+24.4
               local hx, hz = sx+dx*0.42, sz+dz*0.42
@@ -514,7 +537,7 @@ local function build(map)
 
             -- Rare fused columns broaden at both ends and meet the upper wall
             -- mass directly. No added slab is needed to explain the join.
-            if not torchClear
+            if not torchClear and not rubbleMap
                and math.floor(hash01(cx, cy, 850) * 37) == 0 then
               local anchorY = fy+21.5
               local bx, bz = sx+dx*2.5, sz+dz*2.5

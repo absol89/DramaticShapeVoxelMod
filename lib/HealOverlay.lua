@@ -38,6 +38,24 @@ local V = ...
 
 local HealOverlay = {}
 
+-- TEST232: the machine as geometry (HealBalls3D): real Poke Balls in its
+-- slots and a lit screen, drawn inside the world pass. Its hook goes into
+-- the late seam NOW, as this module loads (main.lua requires it ahead of the
+-- modules that wrap the same seam), so the very first heal frame is 3D.
+-- `false` once it would not load: this file then behaves exactly as before.
+local balls3D
+local function threeD()
+  if balls3D == nil then
+    local ok, B = pcall(V.require, "HealBalls3D")
+    balls3D = ok and type(B) == "table" and B or false
+  end
+  return balls3D or nil
+end
+do
+  local B = threeD()
+  if B and B.install then pcall(B.install) end
+end
+
 -- The plot, relative to the cell the player healed on.  Not a guess: the
 -- engine paints the monitor tile at flat world (px - 20, py - 44), and that
 -- tile's lit rectangle is the console inset at grid (13, 6) -- so the tile's
@@ -290,6 +308,12 @@ end
 -- a piece keeps its authored proportions and only its anchor and its size
 -- on the machine move.
 function HealOverlay.draw(ha, project, scale, ctx)
+  -- TEST232: this frame's world pass already stood the balls and the screen
+  -- on the machine as geometry: nothing is left to composite. Anything that
+  -- stopped it (no Voxel3D, a draw error, the hook lost) leaves the claim
+  -- unmade, and everything below draws exactly as it always has.
+  local B = threeD()
+  if B and B.claimed and B.claimed(ha) then return true end
   local state = ctx and ctx.state
   if not (ha and state and project and scale) then return false end
   local img, quads = sheet(state)

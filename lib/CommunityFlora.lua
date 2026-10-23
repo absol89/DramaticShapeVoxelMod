@@ -613,7 +613,10 @@ MOUND.Timings = V.require("LoadTimings")
 -- TEST97 mature-tree persistence. Keep these helpers on MOUND rather than
 -- adding module locals: this donor file sits at LuaJIT's chunk-local ceiling.
 MOUND.MeshDisk = V.require("VoxelMeshDisk")
-MOUND.TREE_RAW_FORMAT = "<" .. string.rep("f", 36)
+-- TEST22: store four unique corners per face; reconstruct the same triangle
+-- order through a compact vertex map at upload. No tree art is removed.
+MOUND.TreeVertexMap = V.require("TreeVertexMap")
+MOUND.TREE_RAW_FORMAT = "<" .. string.rep("f", 24)
 MOUND.TREE_VERTEX_BYTES = 6 * 4
 -- TEST101 keeps TEST100's stable eight-cell draw/cache sections, but limits
 -- each graphics-driver write to a small flat triangle-stream slice. The old
@@ -626,12 +629,17 @@ MOUND.TREE_SECTION_VERTEX_BUDGET = 65520 -- multiple of a three-card bunch (18 v
 
 function MOUND.packTreeStream(vertices, indices)
   if not indices or #indices == 0 then return { n = 0 } end
+  if #indices % 6 ~= 0 then return nil end
   local chunks, parts, values = {}, {}, {}
   local quads = 0
   for at = 1, #indices, 6 do
+    -- All tree emitters use pushQuad. Reject an incompatible face instead of
+    -- silently changing triangle winding or dropping a corner.
+    if indices[at] ~= indices[at + 3]
+       or indices[at + 2] ~= indices[at + 4] then return nil end
     local valueAt = 1
-    for k = 0, 5 do
-      local vertex = vertices[indices[at + k]]
+    for k = 0, 3 do
+      local vertex = vertices[indices[at + (k == 3 and 5 or k)]]
       if not vertex then return nil end
       for field = 1, 6 do
         values[valueAt] = vertex[field]
@@ -639,7 +647,7 @@ function MOUND.packTreeStream(vertices, indices)
       end
     end
     parts[#parts + 1] = love.data.pack(
-      "string", MOUND.TREE_RAW_FORMAT, unpack(values, 1, 36))
+      "string", MOUND.TREE_RAW_FORMAT, unpack(values, 1, 24))
     quads = quads + 1
     if quads % MOUND.TREE_RAW_QUADS == 0 then
       chunks[#chunks + 1] = table.concat(parts)
@@ -650,10 +658,10 @@ function MOUND.packTreeStream(vertices, indices)
     end
   end
   if #parts > 0 then chunks[#chunks + 1] = table.concat(parts) end
-  return { chunks = chunks, n = #indices }
+  return { chunks = chunks, n = #indices / 6 * 4 }
 end
 
-function MOUND.meshFromTreeStream(record, keepChunks)
+function MOUND.meshFromTriangleStream(record, keepChunks)
   if not (record and record.n and record.n > 0 and record.chunks) then
     return nil
   end
@@ -706,6 +714,25 @@ function MOUND.meshFromTreeStream(record, keepChunks)
   end
   if not keepChunks then record.chunks = nil end
   return ok and mesh or nil
+end
+
+-- The driver-facing uploader remains sliced and cancellation-owned. Drivers
+-- without vertex-map support receive the exact old six-vertex triangle stream.
+function MOUND.meshFromTreeStream(record, keepChunks)
+  if not (record and record.n and record.n > 0 and record.chunks) then return nil end
+  if record.n % 4 ~= 0 or record.n > 43680 then return nil end
+  local mesh = MOUND.meshFromTriangleStream(record, true)
+  if mesh and not MOUND.TreeVertexMap.bind(mesh, record.n, MOUND) then
+    pcall(mesh.release, mesh)
+    local ctx = MOUND.treeContext()
+    if ctx.resources then ctx.resources[mesh] = nil end
+    mesh = nil
+    MOUND.Timings.fallback()
+    local expanded = MOUND.TreeVertexMap.expand(record, MOUND.treeBuildYield)
+    if expanded then mesh = MOUND.meshFromTriangleStream(expanded, false) end
+  end
+  if not keepChunks then record.chunks = nil end
+  return mesh
 end
 
 function MOUND.uploadTreeCache(record, publishedParts, focusX, focusZ)
@@ -813,9 +840,9 @@ function MOUND.publishTreePart(p, rawParts, parts)
     end
     p.dI = ordered
   end
-  -- Build the same proven unindexed stream used by cache hits even when the
-  -- host cannot persist it. This gives every fresh mature section bounded
-  -- setVertices writes instead of one large immutable constructor call.
+  -- Fresh and cached trees share the same four-corner stream and sliced
+  -- uploader. Triangle order, UVs, shading and distant draw ranges are exact.
+  -- Each section carries fewer bytes even when persistence is unavailable.
   local canStream = love and love.data and love.data.pack
                     and love.graphics and love.graphics.newMesh
   local rawPart
@@ -839,7 +866,9 @@ function MOUND.publishTreePart(p, rawParts, parts)
   end
   local keepChunks = rawParts ~= nil or ctx.sectionWriter ~= nil
   local function upload(vertices, indices, stream)
-    if #vertices == 0 then return nil end
+    -- Split pieces share source arrays but may own no faces of a material.
+    -- Uploading those arrays without indices draws the whole source again.
+    if #vertices == 0 or #indices == 0 then return nil end
     if stream and stream.n and stream.n > 0 then
       local mesh = MOUND.meshFromTreeStream(stream, keepChunks)
       if mesh then return mesh end
@@ -7369,6 +7398,8 @@ function MOUND.treeInputs(map, group)
   MOUND.TRUNK.saplingHistory[id] = history
   for cell in pairs(saplings) do history[cell] = true end
   local input = { registry = {}, saplings = {}, bases = {}, resources = {} }
+  -- TEST23: terrain already owns native mature trees; ignore stale legacy cells.
+  if group == "mature" and V.require("WorldTrees").enabled(map) then return input end
   local bases = rawget(_G, "__ds_round_base") or {}
   for cell, lift in pairs(all) do
     if (group == "sapling" and saplings[cell]) or (group == "mature" and not history[cell]) then
@@ -7393,7 +7424,7 @@ end
 function Flora.ensureCommunityTrees(map, masks, priority, bodyOnly)
   if map and isOutdoor(map) then MOUND.TreeCache:ensure(map, masks, priority, bodyOnly) end
 end
-function Flora.setLive(live) MOUND.TreeCache:setLive(live) end
+function Flora.setLive(live, keepPrevious) MOUND.TreeCache:setLive(live, keepPrevious) end
 function Flora.evictTrees(id) MOUND.TreeCache:evict(id) end
 function Flora.treeChanged(map) MOUND.TreeCache:changed(map) end
 function Flora.treeStats() return MOUND.TreeCache:stats() end
