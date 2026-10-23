@@ -59,3 +59,8 @@ TEST69-NOTES.txt
 TEST75-NOTES.txt
 TEST77-CAPTURE-FACING.txt
 THIS-TEST-NOTES.txt
+
+# Raster artwork stays local; distribute it separately from source.
+*.[pP][nN][gG]
+*.[jJ][pP][gG]
+*.[jJ][pP][eE][gG]

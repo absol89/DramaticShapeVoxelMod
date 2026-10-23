@@ -1162,6 +1162,7 @@ local SETTINGS = {
 }
 
 local Seasonal = V.require("SeasonalDecor")
+LegendaryVisualsPreset.registerSeasonal(Seasonal.Settings.settings)
 for _,entry in ipairs(Seasonal.Settings.entries)do SETTINGS[#SETTINGS+1]=entry end
 local ScenicViews = V.require("ScenicViews")
 SETTINGS[#SETTINGS+1]={ScenicViews.setting,"Rooftop scenery, upstairs windows and observation binoculars."}
@@ -2280,7 +2281,7 @@ end)
 
 Seasonal.install()
 mod.exports.seasonal = {version="test26-integrated",status=Seasonal.status}
-mod.exports.version = "1.11.1"
+mod.exports.version = "1.11.2"
 mod.exports.battlePresentation = BattlePresentation.export()
 mod.exports.battleStage = BattleStage.export(OverworldBattle)
 mod.exports.voxel_companion = Companion.provider

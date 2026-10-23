@@ -32,8 +32,9 @@ end
 local function add(setting, off, auto, full)
   assert(setting and setting.key, "Legendary preset member must be a ModSetting")
   assert(hasValue(setting, off), "invalid OFF value for " .. setting.key)
-  assert(hasValue(setting, auto), "invalid AUTO value for " .. setting.key)
-  assert(hasValue(setting, full), "invalid FULL value for " .. setting.key)
+  -- nil leaves a seasonal choice under its own control in AUTO/FULL.
+  assert(auto == nil or hasValue(setting, auto), "invalid AUTO value for " .. setting.key)
+  assert(full == nil or hasValue(setting, full), "invalid FULL value for " .. setting.key)
   members[#members + 1] = setting
   memberKeys[setting.key] = setting
   profiles[setting] = { off = off, auto = auto, full = full }
@@ -42,6 +43,7 @@ end
 -- World/interior families. AUTO is the complete Legendary presentation with
 -- lighter detail recipes; FULL changes only actual quality tiers. Style/audio
 -- choices stay independent so presets never overwrite artistic preferences.
+add(CommunityVisuals.buildings,   "installed", "reference",   "reference")
 add(CommunityVisuals.casino,      "default", "n64memory",      "n64memory")
 add(CommunityVisuals.prizeRoom,   "default", "n64memory",      "n64memory")
 add(CommunityVisuals.tunnels,     "default", "n64memory",      "n64memory")
@@ -133,7 +135,7 @@ end
 
 function P.profileValue(setting, mode)
   local profile = profiles[setting]
-  return profile and profile[mode or P.mode()] or nil
+  if profile then return profile[mode or P.mode()] end
 end
 
 function P.members()
@@ -150,6 +152,9 @@ end
 
 function P.invalidate()
   CommunityVisuals.invalidate()
+  -- Seasonal settings cache effective values until their next update. Drop
+  -- that snapshot now so world/battle draws see OFF in the same frame.
+  pcall(function() V.require("SeasonalDecor").Settings.tick() end)
 end
 
 function P.migrate(game, save)
@@ -176,7 +181,7 @@ end
 
 -- Install lightweight effective-value overlays after every module has created
 -- its settings. read()/setIndex() stay raw/persistent; only get() is profiled.
-for _, setting in ipairs(members) do
+local function overlay(setting)
   rawGet[setting] = setting.get
   setting.get = function(self)
     return effective(self, rawGet[self](self))
@@ -200,6 +205,29 @@ for _, setting in ipairs(members) do
       return result
     end
     return row
+  end
+end
+
+for _, setting in ipairs(members) do overlay(setting) end
+
+-- SeasonalDecor loads after this preset (it needs the mesher and renderer).
+-- Join its real settings once they exist, using the same non-persistent
+-- overlays and CUSTOM-on-child-edit behavior as every other Legendary row.
+function P.registerSeasonal(settings)
+  local off = {
+    seasonalHoliday = "off", seasonalSnowfall = "off",
+    seasonalGroundSnow = "off", seasonalSnowSteps = "off",
+    seasonalMoon = "off", seasonalSpiders = "off",
+    seasonalFootprints = false, seasonalInteriors = false,
+    seasonalEffects = false,
+  }
+  for _, setting in ipairs(settings) do
+    if off[setting.key] ~= nil and not profiles[setting] then
+      -- AUTO/FULL retain the selected season (including seasonal OFF),
+      -- density, snow and effect choices. Only master OFF suppresses them.
+      add(setting, off[setting.key])
+      overlay(setting)
+    end
   end
 end
 

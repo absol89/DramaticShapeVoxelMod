@@ -176,8 +176,9 @@ CommunityVisuals.dockLights = ModSetting.new("communityDockLights", "DOCK LIGHTS
 CommunityVisuals.routeStyles = ModSetting.new("communityRouteStyles", "ROUTE STYLES",
   { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }, 2)
 
--- Independent of the Legendary preset. This release enables Legendary by
--- default; Installed restores the exact upstream building meshes.
+-- The master preset overlays INSTALLED for OFF and LEGENDARY for AUTO/FULL.
+-- CUSTOM retains this independently saved choice; installed restores the
+-- upstream building meshes, including houses, Centers, Marts and Oak's Lab.
 CommunityVisuals.buildings = ModSetting.new(
   "vermilionBuildings", "BUILDING STYLE",
   { "installed", "reference" }, { "INSTALLED", "LEGENDARY" }, 2

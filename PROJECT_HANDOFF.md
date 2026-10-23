@@ -1,3 +1,42 @@
+# Release 1.11.2 — 2026-10-23
+
+User confirmed the staged Legendary OFF fix worked after playtesting. This is
+user-reported visual acceptance; agent-native capture still timed out.
+Version bumped to 1.11.2 in main.lua and manifest.json only; all other manifest
+fields, including the repository's name, description and provenance, preserved.
+No PNG/JPG/JPEG files were added by the Legendary import. Two pre-existing
+tracked raster files are now untracked but retained locally, and case-insensitive
+ignore rules keep all PNG/JPG/JPEG files out of future ordinary staging.
+Historical Git objects are unchanged. Release prepared for master with tag 1.11.2.
+
+# Legendary OFF: buildings and seasonal decor — 2026-10-23
+
+User Red screenshots show Viridian City's Center/Mart/houses and Pallet's
+houses/Oak's Lab replaced, with Halloween trees/decor, while the master is OFF.
+The building style was independent of the preset; seasonal settings loaded
+later and never joined its overlays. The preset now selects installed buildings
+under OFF, reference buildings under AUTO/FULL, and registers seasonal effect
+settings after SeasonalDecor loads. Master OFF suppresses seasonal effects;
+AUTO/FULL retain the chosen season (including seasonal OFF). CUSTOM values are
+preserved, child edits enter CUSTOM, and mode changes clear the seasonal settings
+snapshot immediately. Existing terrain invalidation and building-style cache
+fingerprints handle the geometry switch without deleting caches.
+
+The new production-settings regression failed before the fix on OFF building
+replacement, then passed all 30 checks. The optional item-ball regression still
+passes; all 344 production Lua files compile with Lupa's LuaJIT 2.1 backend.
+Whitespace checks passed. A full SDK load attempt did not expose the expected
+mod export and is inconclusive; it is not counted as a successful load check.
+Windows Computer Use identified the running packaged game, but two capture
+attempts timed out. No post-fix rendering or GPU/gameplay result is claimed.
+
+At the user's request, copied main.lua, lib/LegendaryVisualsPreset.lua and
+lib/CommunityVisuals.lua into the supplied staging mod folder, backing up each
+original under the task's staging-backup-20261023 directory and verifying hashes.
+The existing game was left running. Restart and recheck OFF/AUTO/FULL/CUSTOM in
+Viridian and Pallet, including seasonal OFF, before considering visuals verified.
+No save, options or manifest changes. Fix and regression remain uncommitted.
+
 # Legendary update 1.11.2 candidate integration — 2026-10-23
 
 Branched from master a07146b into legendary-update-1.11.2 in a separate
