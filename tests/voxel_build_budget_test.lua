@@ -84,12 +84,14 @@ local function scenario(body, priority, covered, expected, every)
   check(begun[1][2] == every, 'correct polling class')
   check(now > expected and now <= expected + every * 0.001,
     'overshoot bounded by synthetic polling interval')
-  check(m.pending() == 1, 'yield keeps build queued')
+  check(m.pending() == (body and 1 or 2),
+    'yield keeps BODY and requested RING queued')
   for _ = 1, 100 do m.pump(covered) end
   check(m.pending() == 0, 'yielded work eventually completes')
 end
 scenario(true, true, false, 0.0065, 4)
-scenario(false, true, false, 0.00475, 4)
+-- A current FULL request now schedules shared BODY first, then RING.
+scenario(false, true, false, 0.0065, 4)
 scenario(true, 1.5, false, 0.00475, 4)
 scenario(true, nil, false, 0.005, 4)
 scenario(true, true, true, 0.030, 32)
@@ -113,8 +115,8 @@ local completed = 0
 m = mesher(function() completed = completed + 1; now = now + 0.001 end)
 for i = 1, 12 do m.request({ id = tostring(i) }, false, nil, true) end
 m.pump(false)
-check(completed == 5 and m.pending() == 7,
-  'many short jobs cannot each receive a fresh foreground slice')
+check(completed == 7 and m.pending() == 17 and now < .008,
+  '24 BODY/RING jobs share one bootstrap deadline, not one slice each')
 
 m = mesher(function() error('intentional budget test failure') end)
 m.request(map, false, nil, true)

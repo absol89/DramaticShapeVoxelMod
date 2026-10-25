@@ -61,6 +61,7 @@ T.same(priority,
   "the saved map leads a deterministic two-hop connection neighborhood")
 
 local DiskV = { require = function(name)
+  if name == "LoadTimings" then return {wrap = function(_, fn) return fn end} end
   if name == "BuildBudget" or name == "StaticGeometry" then return {} end
   error("unexpected module " .. tostring(name))
 end }
@@ -74,15 +75,19 @@ local names = {
   prefix .. "ROUTE_2/full-terrain",
   prefix .. "PEWTER_CITY/body-terrain",
   prefix .. "ROUTE_2/deco",
+  prefix .. "ROUTE_2/ring-terrain",
+  prefix .. "PEWTER_CITY/ring-terrain",
 }
 Disk.orderRamNames(names, { "ROUTE_2", "PEWTER_CITY" })
 T.same(names, {
   prefix .. "ROUTE_2/deco",
-  prefix .. "ROUTE_2/full-terrain",
+  prefix .. "ROUTE_2/body-terrain",
   prefix .. "PEWTER_CITY/body-terrain",
   prefix .. "PEWTER_CITY/deco",
-  prefix .. "ROUTE_2/body-terrain",
+  prefix .. "ROUTE_2/ring-terrain",
+  prefix .. "ROUTE_2/full-terrain",
   prefix .. "PEWTER_CITY/full-terrain",
+  prefix .. "PEWTER_CITY/ring-terrain",
   prefix .. "OTHER/full-terrain",
 }, "RAM reads current-map boot records, then neighbor bodies, before the rest")
 

@@ -21,7 +21,7 @@
 -- M.drawCulled). Any error: that call, and from then on every call, goes to
 -- the original drawCulled unchanged.
 local V = ...
-local M = { REVISION = 'parade-cull-perf1' }
+local M = { REVISION = 'parade-cull-test267' }
 M.K = 128         -- at most this many spans per mesh (one draw call each)
 M.MINGAP = 256    -- gaps of fewer vertices than this are drawn through
 M.broken = false
@@ -151,6 +151,11 @@ local function cull(R, original, mesh, texture, model, pull, sunModel, ox, oz)
         R.cullStats.drawn=R.cullStats.drawn+drawn
         R.cullStats.total=R.cullStats.total+count
         if #ranges==0 then return end
+        -- TEST267: the fast path needs the same scoped handoff as the native
+        -- culler. Going straight to draw loses runs through legacy wrappers.
+        if R.CULL_HANDOFF~=false and type(R.drawRanges)=='function' then
+          return R.drawRanges(mesh,texture,model,pull,sunModel,ranges)
+        end
         return R.draw(mesh,texture,model,pull,sunModel,ranges)
       end
       M.fastBroken=true;M.fastError=tostring(ranges)
@@ -228,6 +233,18 @@ function M.wrap(V3, origCulled, active)
   return function(mesh, texture, model, pull, sunModel, ox, oz)
     if M.broken or not (active and active()) then
       return origCulled(mesh, texture, model, pull, sunModel, ox, oz)
+    end
+    -- TEST267: the shared handoff already survives a five-argument wrapper.
+    -- Its full range list must NOT sit around a loop of fallback span draws:
+    -- each span would replay that full list. Use one scope, including on
+    -- subsequent frames when the fast plane culler supplies the ranges.
+    if V3.CULL_HANDOFF~=false then
+      if type(V3.drawRanges)=='function' then
+        return cull(V3,origCulled,mesh,texture,model,pull,sunModel,ox,oz)
+      elseif type(V3.cullHandoffStats)=='table' then
+        -- Safe when this file alone is merged into the older handoff build.
+        return origCulled(mesh,texture,model,pull,sunModel,ox,oz)
+      end
     end
     local real = V3.draw
     if type(real) ~= 'function' or real == rangedDraw then

@@ -2678,6 +2678,13 @@ local canvas, canvasW, canvasH = nil, 0, 0   -- the slot this pass bound
 local held = nil                             -- and the whole record for it
 local active = false
 
+-- TEST266 ISOLATION BUILD: keep an owned depth attachment for ordinary
+-- occlusion, but do not make it a sampled texture. Water OFF in earlier
+-- builds still used a readable depth texture; it did not test this path.
+-- Set true before the next beginScene to restore TEST265's depth policy.
+-- This is a diagnostic switch, not a confirmed fix for the handheld crash.
+Voxel3D.SAMPLED_DEPTH = false
+
 -- A READABLE depth canvas, so a later pass in the same frame can ask the
 -- buffer questions rather than only write to it -- which is the whole of
 -- what makes screen-space reflections possible (see Water).
@@ -2698,15 +2705,20 @@ local DEPTH_FORMATS = { "depth24", "depth24stencil8", "depth32f", "depth16" }
 
 local function newDepth(w, h)
   if not (love.graphics and love.graphics.newCanvas) then return nil end
+  local readable = Voxel3D.SAMPLED_DEPTH ~= false
   local c = nil
   for _, format in ipairs(DEPTH_FORMATS) do
     -- This is attached to the scene canvas and sampled by Water. Both are
     -- created through PixelCanvas so Android gives them the same low DPI.
     local ok, made = PixelCanvas.new(w, h,
-                                     { format = format, readable = true })
+                                     { format = format, readable = readable })
     if ok and made then c = made break end
   end
   if not c then return nil end
+  -- A non-readable Canvas is a depth renderbuffer. Keep it explicitly owned
+  -- (rather than a temporary depth=true attachment) across canvas switches,
+  -- and never call texture filtering/sampling methods on it.
+  if not readable then return c end
   -- nearest: a depth is a distance, and a blend of two of them is a
   -- distance to nothing. The march wants the texel it landed on.
   pcall(c.setFilter, c, "nearest", "nearest")
@@ -2724,6 +2736,10 @@ local function depthTarget()
     return { held.canvas, depthstencil = held.depth }
   end
   return { canvas, depth = true }
+end
+
+local function sampledSceneDepth()
+  if held and held.sampledDepth ~= false then return held.depth end
 end
 
 -- Every GPU object one slot owns. The mirror is the copy of the frame the
@@ -3322,6 +3338,16 @@ end
 -- `slot` names which cached canvas to render into (see `slots` above);
 -- omitted is the free-roam world pass.
 function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow, borrowed)
+  -- PARADE SWITCHES (diagnostic): SCENE DEPTH and CULL HANDOFF rows
+  do
+    local okPS, PS = pcall(V.require, "ParadeSwitches")
+    if okPS and type(PS) == "table" and PS.apply then pcall(PS.apply, Voxel3D) end
+  end
+  -- the overworld is the one caller with neither a slot nor a borrowed target
+  -- (through the table: the beacon is defined further down this file)
+  if slot == nil and borrowed == nil and Voxel3D._cullBeaconTick then
+    pcall(Voxel3D._cullBeaconTick)
+  end
   Voxel3D.atmosphereCameraCandidate=nil
   if not (borrowed and borrowed.scenic) then
     Sky.resetDeferredBody()
@@ -3342,14 +3368,17 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow, borrow
   else
     local name = slot or "world"
     local slotHeld = slots[name]
-    if not (slotHeld and slotHeld.w == w and slotHeld.h == h) then
+    local sampledDepth = Voxel3D.SAMPLED_DEPTH ~= false
+    if not (slotHeld and slotHeld.w == w and slotHeld.h == h
+        and slotHeld.sampledDepth == sampledDepth) then
       local ok, c = PixelCanvas.new(w, h)
       if not ok then return false end
       c:setFilter("nearest", "nearest")
       if slotHeld then releaseSlot(slotHeld) end
       -- the depth canvas is sized with its colour, so a window resize
       -- reallocates the pair together and they can never disagree
-      slotHeld = { canvas = c, w = w, h = h, depth = newDepth(w, h) }
+      slotHeld = { canvas = c, w = w, h = h, depth = newDepth(w, h),
+                   sampledDepth = sampledDepth }
       slots[name] = slotHeld
     end
     held = slotHeld
@@ -3660,7 +3689,7 @@ end
 -- MUST be paired with endWater, which puts the frame back together.
 -- TEST7 capture must precede curved water's depth prepass and all cast copies.
 function Voxel3D.captureUnderwater()
-  if not (active and canvas and held and held.depth) then return nil end
+  if not (active and canvas and sampledSceneDepth()) then return nil end
   -- The caller selects planted water (town or Safari atlas). Safari's native
   -- ponds own this independently of the unrelated road option.
   return V.require('WaterBackdrop').capture(held,canvas,depthTarget())
@@ -3669,7 +3698,7 @@ end
 -- A full-screen atmosphere pass can read opaque depth only while it is
 -- detached. The caller never receives the private render targets.
 function Voxel3D.drawDepthOverlay(shader, configure)
-  if not (active and canvas and held and held.depth and held.canvas==canvas) then return false end
+  if not (active and canvas and sampledSceneDepth() and held.canvas==canvas) then return false end
   local g=love.graphics
   g.push("all")
   local ok,err=pcall(function()
@@ -3687,7 +3716,7 @@ function Voxel3D.drawDepthOverlay(shader, configure)
 end
 
 function Voxel3D.beginWater(paint)
-  if not (active and canvas and held and held.depth) then return nil end
+  if not (active and canvas and sampledSceneDepth()) then return nil end
   if not held.mirror then
     -- Must match both the scene colour canvas and its readable depth target
     -- in physical pixels; see PixelCanvas and newDepth above.
@@ -3827,7 +3856,7 @@ end
 -- a depth texture to read. Callers use it to choose between the water
 -- shader and an ordinary terrain draw before they start moving canvases.
 function Voxel3D.depthReadable()
-  return (active and held and held.depth) and true or false
+  return (active and sampledSceneDepth()) and true or false
 end
 
 -- Whether what is drawn next carries the voxel wireframe. false for the
@@ -4047,6 +4076,97 @@ function Voxel3D.seasonalFoliage(region)
 end
 
 -- TEST184: `ranges` (from drawCulled) draws only those vertex runs
+--
+-- CULL HANDOFF (independent renderer review, after TEST266). drawCulled
+-- passes its runs as Voxel3D.draw's sixth argument, but a wrapper of
+-- Voxel3D.draw that forwards only five (the Legendary Collection's grass and
+-- flower modules before their TEST81 patch, which are installed in front of
+-- every draw) dropped them -- and every map, route and neighbour was then
+-- drawn WHOLE each frame, culling off. drawCulled now also leaves its runs
+-- here for the duration of the call; the draw underneath takes them when the
+-- argument went missing on the way, for the same mesh only.
+local cullHandoff = { mesh = nil, ranges = nil }
+Voxel3D.cullHandoffStats = { recovered = 0, draws = 0 }
+-- PARADE SWITCHES (diagnostic): false = TEST264's drawCulled exactly -- the
+-- runs go only as Voxel3D.draw's sixth argument, and a five-argument wrapper
+-- drops them (that map is then drawn whole). Set by ParadeSwitches.
+Voxel3D.CULL_HANDOFF = true
+
+-- CULL HANDOFF 2: a marker in the device log, so a bug report can show which
+-- build ran. Log lines only; nothing here changes what is drawn.
+--   loaded  once, when this file loads
+--   alive   on the first overworld frame, then every 10 s of overworld:
+--           culled draws in that time, how many arrived without their runs
+--           and were rescued, and whether something wraps Voxel3D.draw
+--           (the Collection's grass/flower module does, while it is active)
+--   gap     any overworld frame-to-frame gap of 0.25-5 s, with the camera
+--           of the frame before it (a GPU hang stalls the game ~0.3-0.45 s)
+Voxel3D.CULL_HANDOFF_BUILD = "test267cull1"
+local beacon = { last = nil, alive = nil, recovered = 0, draws = 0 }
+local baseDraw -- Voxel3D.draw as this file defines it, set just below it
+local function beaconLog(msg)
+  msg = (tostring(msg):gsub("%%", ""))
+  local ok, L = pcall(require, "src.core.Logger")
+  if ok and type(L) == "table" and type(L.info) == "function"
+      and pcall(L.info, msg) then
+    return
+  end
+  pcall(print, msg)
+end
+local function drawOwner()
+  if baseDraw == nil or Voxel3D.draw == baseDraw then return "not wrapped" end
+  local where = "source unknown"
+  local dbg = rawget(_G, "debug")
+  if type(dbg) == "table" and type(dbg.getinfo) == "function" then
+    local ok, info = pcall(dbg.getinfo, Voxel3D.draw, "S")
+    if ok and type(info) == "table" then
+      where = tostring(info.short_src or "?") .. ":" .. tostring(info.linedefined or "?")
+    end
+  end
+  return "wrapped by " .. where
+end
+local function cameraNote()
+  local mode = "orbit"
+  pcall(function()
+    if Voxel.isFirstPerson() then mode = "1ST"
+    elseif Voxel.isThirdPerson() then mode = "3RD" end
+  end)
+  local e, f = Voxel3D.eye, Voxel3D.focus
+  if type(e) == "table" and type(f) == "table"
+      and tonumber(e[1]) and tonumber(e[2]) and tonumber(e[3])
+      and tonumber(f[1]) and tonumber(f[2]) and tonumber(f[3]) then
+    local dx, dy, dz = e[1] - f[1], e[2] - f[2], e[3] - f[3]
+    return string.format("%s, eye-to-focus %.0f px, eye (%.0f, %.0f, %.0f)",
+      mode, math.sqrt(dx * dx + dy * dy + dz * dz), e[1], e[2], e[3])
+  end
+  return mode
+end
+local function beaconTick()
+  local okT, now = pcall(love.timer.getTime)
+  if not okT or type(now) ~= "number" then return end
+  local st, B = Voxel3D.cullHandoffStats, Voxel3D.CULL_HANDOFF_BUILD
+  if beacon.last then
+    local gap = now - beacon.last
+    if gap >= 0.25 and gap <= 5 then
+      beaconLog(string.format("[CULL-HANDOFF] %s frame gap %.2f s; camera %s",
+        B, gap, cameraNote()))
+    end
+  end
+  beacon.last = now
+  if beacon.alive == nil or now - beacon.alive >= 10 then
+    local span = beacon.alive and string.format("%.1f s", now - beacon.alive)
+      or "first overworld frame"
+    beaconLog(string.format(
+      "[CULL-HANDOFF] %s alive (%s): %d culled draws, %d rescued (total rescued %d); Voxel3D.draw %s",
+      B, span, st.draws - beacon.draws, st.recovered - beacon.recovered,
+      st.recovered, drawOwner()))
+    beacon.alive, beacon.recovered, beacon.draws = now, st.recovered, st.draws
+  end
+end
+Voxel3D._cullBeaconTick = beaconTick -- beginScene calls it through here
+beaconLog("[CULL-HANDOFF] " .. Voxel3D.CULL_HANDOFF_BUILD
+  .. " loaded: Voxel3D culling handoff on")
+
 local function submit(mesh, ranges)
   if not ranges then return love.graphics.draw(mesh) end
   local ok, err = pcall(function()
@@ -4059,7 +4179,16 @@ local function submit(mesh, ranges)
   if not ok then error(err, 0) end
 end
 function Voxel3D.draw(mesh, texture, model, pull, sunModel, ranges)
+  local parts = V.require("MeshParts").parts(mesh)
+  if parts then
+    for _, part in ipairs(parts) do Voxel3D.draw(part, texture, model, pull, sunModel) end
+    return
+  end
   if not (active and mesh) then return end
+  if ranges == nil and cullHandoff.mesh ~= nil and cullHandoff.mesh == mesh then
+    ranges = cullHandoff.ranges
+    Voxel3D.cullHandoffStats.recovered = Voxel3D.cullHandoffStats.recovered + 1
+  end
   -- the variant beginScene actually bound, not whichever one is default:
   -- sending a uniform to the other shader would go nowhere
   local sh = activeShader
@@ -4075,6 +4204,7 @@ function Voxel3D.draw(mesh, texture, model, pull, sunModel, ranges)
     if not ok then error(err)end
   else submit(mesh,ranges)end
 end
+baseDraw = Voxel3D.draw
 
 -- ------- TEST184: drawing only the part of a big mesh the camera can see
 --
@@ -4231,9 +4361,31 @@ function Voxel3D.meshVisible(mesh, ox, oz)
   return #ranges > 0
 end
 
+-- TEST267: one range scope shared by the native culler and ParadeCull's
+-- faster plane culler. A five-argument Collection wrapper can drop `ranges`,
+-- but the draw underneath recovers these exact runs once. Do not also split
+-- the mesh into ParadeCull spans: a span draw would recover the ENTIRE set
+-- again, multiplying the GPU work by the number of spans.
+function Voxel3D.drawRanges(mesh, texture, model, pull, sunModel, ranges)
+  if Voxel3D.CULL_HANDOFF == false then
+    return Voxel3D.draw(mesh, texture, model, pull, sunModel, ranges)
+  end
+  local prevMesh, prevRanges = cullHandoff.mesh, cullHandoff.ranges
+  cullHandoff.mesh, cullHandoff.ranges = mesh, ranges
+  Voxel3D.cullHandoffStats.draws = Voxel3D.cullHandoffStats.draws + 1
+  local ok, err = pcall(Voxel3D.draw, mesh, texture, model, pull, sunModel, ranges)
+  cullHandoff.mesh, cullHandoff.ranges = prevMesh, prevRanges
+  if not ok then error(err, 0) end
+end
+
 -- Voxel3D.draw for a big indexed mesh: only its runs in view. ox, oz is
 -- the model's translation (the neighbours'); model is passed on unchanged.
 function Voxel3D.drawCulled(mesh, texture, model, pull, sunModel, ox, oz)
+  local parts = V.require("MeshParts").parts(mesh)
+  if parts then
+    for _, part in ipairs(parts) do Voxel3D.drawCulled(part, texture, model, pull, sunModel, ox, oz) end
+    return
+  end
   local idx = mesh and Voxel3D.meshIndex[mesh]
   local probe = V.perfProbe
   local okCount, vertexCount = pcall(function() return mesh:getVertexCount() end)
@@ -4258,7 +4410,7 @@ function Voxel3D.drawCulled(mesh, texture, model, pull, sunModel, ox, oz)
   Voxel3D.cullStats.drawn = Voxel3D.cullStats.drawn + (drawn or 0)
   Voxel3D.cullStats.total = Voxel3D.cullStats.total + ((c and c.total) or 0)
   if #ranges == 0 then return end
-  return Voxel3D.draw(mesh, texture, model, pull, sunModel, ranges)
+  return Voxel3D.drawRanges(mesh, texture, model, pull, sunModel, ranges)
 end
 
 -- BattleScene owns this short-lived scope; overworld calls have no target.
@@ -4516,7 +4668,7 @@ end
 -- makes the texture readable at all -- a target cannot be sampled while it is
 -- attached, which is the same constraint beginWater takes the frame apart for.
 function Voxel3D.depthTexture()
-  return held and held.depth or nil
+  return sampledSceneDepth()
 end
 
 -- Re-bind the scene canvas for ordinary 2D drawing (no depth test), so

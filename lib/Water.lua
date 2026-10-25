@@ -1702,6 +1702,11 @@ end
 -- camera-ward pull (a flat sheet has nothing to lean over) and the separate
 -- sun transform (water is terrain: the sun saw the same matrix).
 function Water.draw(mesh, texture, model, indoorPool)
+  local parts = V.require("MeshParts").parts(mesh)
+  if parts then
+    for _, part in ipairs(parts) do Water.draw(part, texture, model, indoorPool) end
+    return
+  end
   if not (active and mesh) then return end
   if texture then mesh:setTexture(texture) end
   local safariScale=V.require("SafariMaterials").texelScale(texture)

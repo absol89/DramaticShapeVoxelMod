@@ -47,7 +47,7 @@ local function generic(C,St)
  end
  local inner=function(cx,cy)return C.is(cx,cy,innerSet)and cy>0 end
  local blocked=function(cx,cy)local c=C.at(cx,cy);return c~=nil and not walkSet:find(c,1,true)end
- local S=K.shell(C,{H=H,solid=solid,inner=inner,innerH=St.innerH or 40,blocked=blocked,door=Town.doorFn(C,'md'),
+ local S=K.shell(C,{H=H,solid=solid,inner=inner,innerH=St.innerH or 40,blocked=blocked,door=St.door or Town.doorFn(C,'md'),
   paint=St.paint or'ktPlaster',upper=St.upper,wainscot=St.wainscot,wainscotH=St.wainscotH or 13,beadboard=St.bead,
   rail=St.rail or'white',skirting=St.skirt or St.rail or'white',cornice=St.cornice or'white',cap=St.cap or'ktLime',
   floor=St.floor or'inOak',ceiling=St.ceiling or'white',innerPaint=St.innerPaint,picture=St.picture,
@@ -453,6 +453,13 @@ function M.deptStore(C)
  local St={H=56,paint='ktPlaster',upper='white',wainscot='inWalnut',wainscotH=12,rail='lgGold',cornice='white',cap='ktLime',
   floor=fl==1 and'lgMarble'or'inTerrazzo',ceiling='white',wood='inOak',counter='inWalnut',counterTop='lgMarble',
   walls='WVp',band='ZN',seat='modern',skip={T=true},ambience={shop=.3,hall=.15},scenic=true,view=3}
+ -- TEST265: E is a recessed elevator entrance. Its back wall must leave
+ -- the door leaves visible, including below the wainscot rail. Keep the
+ -- recess's side walls intact; they are not additional door openings.
+ local exitDoor=Town.doorFn(C,'md')
+ St.door=function(cx,cy,ox,oy)
+  return exitDoor(cx,cy,ox,oy)or(ox==cx and oy==cy+1 and C.is(ox,oy,'E'))
+ end
  local F,S=generic(C,St)
  local W,D=C.cw*CS,C.ch*CS
  -- the two-row wall band: the elevator (E), the signs (p), the machines'
@@ -571,9 +578,11 @@ function M.elevator(C)
  local F,S=generic(C,St)
  local Ln=K.onWall(C,'N',0,0)
  for _,c in ipairs(cellsOf(C,'K'))do
-  local x=c[1]*CS+8
-  Ln.box(x-6,12,16,x+6,36,17,'lgGold',1.05)
-  for k=0,4 do Ln.disc(x,16+k*4,17.1,1.3,'dark',10);Ln.disc(x,16+k*4,17.2,.9,'inLamp',8)end
+  -- onWall already includes the north wall's position. Adding another
+  -- tile of depth put the plate halfway into the cabin (Celadon/Silph).
+  local x=c[1]*CS+8-S.w
+  Ln.box(x-6,12,.12,x+6,36,1.12,'lgGold',1.05)
+  for k=0,4 do Ln.disc(x,16+k*4,1.22,1.3,'dark',10);Ln.disc(x,16+k*4,1.32,.9,'inLamp',8)end
  end
  Ln.box(4,40,0,40,46,.6,'dark',.8);Ln.raw({5,41,.65},{39,41,.65},{39,45,.65},{5,45,.65},'inScreen',3)
  C.addLight(16,40,24,60,.3)

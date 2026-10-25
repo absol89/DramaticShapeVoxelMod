@@ -377,11 +377,127 @@ function ShadowMap.stats()
            active = ready and canvas ~= nil and canvas ~= false }
 end
 
+-- ------- SHADOW COPY: the scene reads a plain copy of the finished map
+--
+-- The GPU-hang fix found by the Hang Hunts (4 to 8b) on the AYANEO / KONKR
+-- Pocket FIT (Snapdragon G3 Gen 3, Adreno, OpenGL ES V@0762.24): the game
+-- froze for ~0.3 s with a blue flash, again and again, and the driver
+-- killed it after 3 GPU faults in 2 s -- with shadows ON only.
+-- When a shadow pass is finished, the map it drew is copied once -- a plain
+-- draw, no shader, no depth -- into a READ map, and the scene and the water
+-- sample that copy, never the texture the caster shader has just drawn 3D
+-- shapes into. On that handheld every mode whose scene sampled such a
+-- texture hung (as is; the world layer read directly); with the copy, two
+-- clean 90 s hunt steps at the worst spot while the unchanged map hung in
+-- both control steps, then a 10-minute run across towns, Cycling Road and
+-- map changes with no GPU hang in the kernel log.
+-- WHY it works is not established: texture use, command order and timing
+-- all change together. Cost: one more map-sized RGBA8 canvas (16 MiB at
+-- 2048) and one full-map draw per shadow redraw.
+-- ShadowMap.READ_COPY = false gives TEST266's behaviour exactly.
+ShadowMap.READ_COPY = true
+ShadowMap.readCopies = 0      -- copies drawn into the read map
+ShadowMap.readCopyFails = 0   -- allocation / bind / draw failed: that frame reads the map itself
+ShadowMap.LOG_EVERY = 60      -- seconds between [SHADOW-COPY] summary lines
+ShadowMap.COPY_TAG = "shadowcopy1"
+local readCanvas, readRes, readOk = nil, 0, false
+
+local function clock()
+  local ok, t = pcall(function() return love.timer.getTime() end)
+  return ok and type(t) == "number" and t or nil
+end
+local function log(msg)
+  msg = (tostring(msg):gsub("%%", ""))
+  local ok, L = pcall(require, "src.core.Logger")
+  if ok and type(L) == "table" and type(L.info) == "function" and pcall(L.info, msg) then return end
+  pcall(print, msg)
+end
+
+-- one summary line per LOG_EVERY seconds of shadow redraws, and the first
+-- failure at once, so a bug report shows the copy was on
+local logT0, logCopies0, logFails0, failLogged = nil, 0, 0, false
+local function heartbeat(failed, why)
+  if failed and not failLogged then
+    failLogged = true
+    log(("[SHADOW-COPY] %s copy failed (%s): that frame reads the map itself")
+      :format(ShadowMap.COPY_TAG, tostring(why or "?"):sub(1, 80)))
+  end
+  local t = clock()
+  if not t then return end
+  if not logT0 then
+    logT0, logCopies0, logFails0 = t, ShadowMap.readCopies, ShadowMap.readCopyFails
+    log(("[SHADOW-COPY] %s on: the scene reads a plain copy of the shadow map"):format(ShadowMap.COPY_TAG))
+    return
+  end
+  if t - logT0 >= ShadowMap.LOG_EVERY then
+    log(("[SHADOW-COPY] %s %d copies, %d failed in the last %.0f s")
+      :format(ShadowMap.COPY_TAG, ShadowMap.readCopies - logCopies0,
+              ShadowMap.readCopyFails - logFails0, t - logT0))
+    logT0, logCopies0, logFails0 = t, ShadowMap.readCopies, ShadowMap.readCopyFails
+  end
+end
+
+function ShadowMap.releaseRead()
+  if readCanvas and readCanvas.release then pcall(readCanvas.release, readCanvas) end
+  readCanvas, readRes, readOk = nil, 0, false
+end
+
+-- the finished map -> the read map (from finish)
+local function copyForRead()
+  readOk = false
+  if not ShadowMap.READ_COPY then
+    if readCanvas then ShadowMap.releaseRead() end
+    return
+  end
+  if not canvas then return end
+  local res = canvasRes
+  if not (readCanvas and readRes == res) then
+    ShadowMap.releaseRead()
+    local ok, c = V.require("PixelCanvas").new(res, res)
+    if not (ok and c) then
+      ShadowMap.readCopyFails = ShadowMap.readCopyFails + 1
+      heartbeat(true, ok and "no canvas" or c)
+      return
+    end
+    c:setFilter("nearest", "nearest")
+    pcall(c.setWrap, c, "clamp", "clamp")
+    readCanvas, readRes = c, res
+    canvasAllocations = canvasAllocations + 1
+  end
+  local g = love.graphics
+  local src = canvas
+  -- push first, so the pop puts the canvas back to what it was (none)
+  g.push("all")
+  local drew, err = pcall(function()
+    g.setCanvas(readCanvas)
+    g.origin()
+    g.setShader()
+    g.setDepthMode("always", false)
+    g.setBlendMode("replace", "premultiplied")
+    g.setColor(1, 1, 1, 1)
+    g.draw(src, 0, 0)
+  end)
+  pcall(g.pop)
+  if not drew then
+    pcall(g.setCanvas)
+    ShadowMap.readCopyFails = ShadowMap.readCopyFails + 1
+    heartbeat(true, err)
+    return
+  end
+  readOk = true
+  ShadowMap.readCopies = ShadowMap.readCopies + 1
+  heartbeat(false)
+end
+
 -- The map to sample, or the blank stand-in. Never nil once the main pass
 -- has a shader at all, because an unbound sampler is a driver-dependent
 -- crash rather than a driver-dependent fallback.
 function ShadowMap.texture()
-  if ready and canvas then return canvas end
+  if ready and canvas then
+    -- SHADOW COPY: the plain copy of the finished map, when one was made
+    if ShadowMap.READ_COPY and readOk and readCanvas then return readCanvas end
+    return canvas
+  end
   return getBlank()
 end
 
@@ -397,6 +513,7 @@ end
 -- scene sees no signature and recasts normally into the retained canvas.
 function ShadowMap.discard()
   ready, lastSig = false, nil
+  readOk = false
 end
 
 -- The direction the light TRAVELS, normalized. The shear is the shadow a
@@ -585,6 +702,7 @@ end
 -- the caller must not draw into it or call finish.
 function ShadowMap.begin(cx, cy, vw, vh)
   active = nil
+  readOk = false
   local sh = getShader()
   if not sh then return false end
   -- the runtime's storage orientation, measured once before the first map
@@ -644,6 +762,11 @@ function ShadowMap.sprites(on)
 end
 
 function ShadowMap.draw(mesh, texture, model)
+  local parts = V.require("MeshParts").parts(mesh)
+  if parts then
+    for _, part in ipairs(parts) do ShadowMap.draw(part, texture, model) end
+    return
+  end
   if not (drawing and mesh) then return end
   local sh = getShader()
   if texture then mesh:setTexture(texture) end
@@ -663,6 +786,8 @@ function ShadowMap.finish(sig)
   love.graphics.setColor(1, 1, 1, 1)
   lastSig = sig
   ready = true
+  -- SHADOW COPY (with READ_COPY off this only frees an old read map)
+  copyForRead()
 end
 
 -- ------- TEST184: the WORLD LAYER
@@ -763,6 +888,7 @@ end
 -- could not be made (the caller falls back to the one-pass map).
 function ShadowMap.beginCast()
   if not (world and world.ready and world.fit) then return false end
+  readOk = false
   local cs = getCastShader()
   if not cs then return false end
   loadFit(world.fit)
@@ -813,6 +939,7 @@ function ShadowMap.invalidate()
   end
   active = nil
   canvas, canvasRes, blank = nil, 0, nil
+  ShadowMap.releaseRead()
   drawing, ready, lastSig = false, false, nil
   ShadowMap.dropWorld()
 end

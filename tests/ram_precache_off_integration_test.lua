@@ -36,6 +36,13 @@ T.check(Mesher.cancelSpeculative("SPECULATIVE", false), "an eager job can be can
 T.eq(Mesher.jobPending("SPECULATIVE", false), false, "cancelled eager job leaves the queue")
 T.eq(Mesher.cancelSpeculative("VISIBLE", true), false, "live neighbour jobs cannot be cancelled")
 T.eq(Mesher.jobPending("VISIBLE", true), true, "live generation remains queued")
+local shared = { id = "SHARED_BODY" }
+Mesher.request(shared, false, nil, false)
+Mesher.request(shared, true, nil, "visible")
+T.check(Mesher.cancelSpeculative(shared.id, false), "unused RING can be cancelled")
+T.eq(Mesher.jobPriority(shared.id, false), nil, "unused RING leaves the queue")
+T.eq(Mesher.jobPending(shared.id, true), true, "shared visible BODY survives RING cancellation")
+T.eq(Mesher.cancelSpeculative(shared.id, false), false, "repeated cancellation preserves live BODY")
 
 Mesher.invalidate()
 Ram.setting:setIndex(1)

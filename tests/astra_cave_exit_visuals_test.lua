@@ -34,11 +34,14 @@ for id,def in pairs(maps)do
   total=total+1;roles[q.caveExitRole]=true
   local inside=false
   for _,p in ipairs(ps)do
-   local x0,z0=p.x*16,p.z*16;local x1=x0+(p.face=='south' and p.width*16 or 16);local z1=z0+(p.face=='east' and p.width*16 or 16)
+   local x0,z0=p.x*16,p.z*16+(p.outset or 0);local x1=x0+(p.face=='south' and p.width*16 or 16);local z1=z0+(p.face=='east' and p.width*16 or 16)
    local valid=true
    for _,v in ipairs({q[1],q[2],q[3],q[4]})do
     valid=valid and v[1]>=x0 and v[1]<=x1 and v[3]>=z0 and v[3]<=z1 and v[2]>=0 and v[2]<=24
     for _,a in ipairs(v)do ok(a==a and math.abs(a)<1e8,'finite')end
+    if id=='VICTORY_ROAD_1F' then
+     ok(v[3]>=17*16+12,'complete entrance moved away from the Strength approach')
+    end
    end
    if valid then
     inside=true
@@ -51,11 +54,20 @@ for id,def in pairs(maps)do
     end
    end
   end
-  ok(inside,id..' geometry confined to authored mouth cells')
+  ok(inside,id..' geometry confined to authored visual mouth footprint')
   local u,v={},{};for a=1,3 do u[a]=q[2][a]-q[1][a];v[a]=q[4][a]-q[1][a]end
   local cross={u[2]*v[3]-u[3]*v[2],u[3]*v[1]-u[1]*v[3],u[1]*v[2]-u[2]*v[1]}
   ok(cross[1]^2+cross[2]^2+cross[3]^2>0,'nondegenerate quad')
   for _,uv in ipairs(q.uv)do ok(uv[1]>0 and uv[1]<1 and uv[2]>0 and uv[2]<1,'atlas-safe UV')end
+ end
+ if id=='VICTORY_ROAD_1F' then
+  local lo,hi={math.huge,math.huge,math.huge},{-math.huge,-math.huge,-math.huge}
+  for _,q in ipairs(S.objectQuads)do for i=1,4 do for a=1,3 do
+   lo[a]=math.min(lo[a],q[i][a]);hi[a]=math.max(hi[a],q[i][a])
+  end end end
+  ok(lo[1]==128 and hi[1]==160,'whole shell retains original width and lateral placement')
+  ok(lo[2]==0 and hi[2]==24,'whole shell retains original height')
+  ok(lo[3]==284 and hi[3]==300,'whole shell translated twelve pixels outward without shrinking depth')
  end
  if #ps>0 then
   for _,role in ipairs({'daylight','lit-floor','ceiling','roof','inner-west','inner-east','lintel'})do ok(roles[role],id..' '..role)end

@@ -651,7 +651,8 @@ function VoxelScene.prefetch(state)
   local ready = hostReady
   for i, nb in ipairs(nbs) do
     if RenderDistance.neighbor(nb, state.player) then
-      ChunkMesher.request(nb.map, true, nil, "visible")
+      ChunkMesher.request(nb.map, true, nil,
+        ChunkMesher.neighborPriority(state.map, nb.map.id))
       nbMeshBuf[i], nbWaterBuf[i], _, nbVisualShadowBuf[i] =
         ChunkMesher.pair(nb.map, true)
       if not nbMeshBuf[i] then

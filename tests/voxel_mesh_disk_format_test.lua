@@ -121,10 +121,10 @@ local terrainB = { n = 1, chunks = { string.rep("b", 24) }, spans = { 4, 5, 6, 7
 local water = { n = 0 }
 local aux = { grass = { n = 0, spans = {} }, flowers = { n = 0, spans = {} }, figures = {} }
 
-local fpA = Disk.fingerprint(map, "full", nil, "terrain")
-check(Disk.saveTerrain(map, "full", nil, terrainA, water), "OFF terrain saves")
+local fpA = Disk.fingerprint(map, "ring", nil, "terrain")
+check(Disk.saveTerrain(map, "ring", nil, terrainA, water), "OFF terrain saves")
 check(Disk.saveAux(map, aux), "OFF aux saves")
-local keyA = assert(findKey("full-terrain", fpA), "OFF variant key missing")
+local keyA = assert(findKey("ring-terrain", fpA), "OFF variant key missing")
 local auxKeyA = assert(findKey("deco", Disk.fingerprint(map, "aux", nil, "aux")),
   "OFF aux variant key missing")
 local blobA, auxBlobA = stored[keyA], stored[auxKeyA]
@@ -134,8 +134,10 @@ eq(readU32(blobA, 9), Disk.CACHE_REVISION, "fixed header stores cache revision")
 eq(#blobA:sub(1, 12), 12, "FORMAT 3 compatibility header is fixed-size")
 check(not blobA:sub(1, 12):find(fpA, 1, true),
   "exact visual fingerprint is not serialized in the FORMAT 3 header")
-check(keyA:match("/full%-terrain/variant%-%x+$") ~= nil and #keyA:match("variant%-(%x+)$") == 16,
+check(keyA:match("/ring%-terrain/variant%-%x+$") ~= nil and #keyA:match("variant%-(%x+)$") == 16,
   "geometry identity is a 64-bit variant path component")
+check(not Disk.complete(map, false, nil), "ring alone cannot certify a whole map")
+check(Disk.saveTerrain(map, "body", nil, terrainA, water), "shared body saves")
 check(Disk.complete(map, false, nil), "title resume recognizes the current FORMAT 3 variant")
 
 local prefix = Disk.DIRECTORY .. "/"
@@ -151,29 +153,30 @@ local ordered = {
 Disk.orderRamNames(ordered, { "FORMAT_TEST", "NEIGHBOR" })
 eq(ordered[1], prefix .. "FORMAT_TEST/deco/variant-0000000000000006",
   "RAM ordering recognizes current-map FORMAT 3 deco")
-eq(ordered[2], prefix .. "FORMAT_TEST/full-terrain/variant-0000000000000004",
-  "RAM ordering recognizes current-map FORMAT 3 full terrain")
+eq(ordered[2], prefix .. "FORMAT_TEST/body-terrain/variant-0000000000000003",
+  "RAM ordering loads the current shared body before any border")
 eq(ordered[3], prefix .. "NEIGHBOR/body-terrain/variant-0000000000000005",
   "RAM ordering recognizes neighbor FORMAT 3 body terrain")
 eq(ordered[4], prefix .. "NEIGHBOR/deco",
   "RAM ordering still recognizes legacy flat neighbor deco")
 
 mode = "full"
-local fpB = Disk.fingerprint(map, "full", nil, "terrain")
-check(Disk.saveTerrain(map, "full", nil, terrainB, water), "FULL terrain saves beside OFF")
+local fpB = Disk.fingerprint(map, "ring", nil, "terrain")
+check(Disk.saveTerrain(map, "ring", nil, terrainB, water), "FULL terrain saves beside OFF")
 check(Disk.saveAux(map, aux), "FULL aux saves beside OFF")
-local keyB = assert(findKey("full-terrain", fpB), "FULL variant key missing")
+local keyB = assert(findKey("ring-terrain", fpB), "FULL variant key missing")
 check(keyA ~= keyB and stored[keyA] and stored[keyB],
   "different geometry variants coexist instead of overwriting one flat file")
+check(Disk.saveTerrain(map, "body", nil, terrainB, water), "second visual body saves")
 local stats = Disk.stats()
-check(stats.files == 4 and stats.maps == 1 and stats.aux == 2 and stats.full == 2,
+check(stats.files == 6 and stats.maps == 1 and stats.aux == 2 and stats.full == 2,
   "nested FORMAT 3 variants are classified correctly by cache stats")
 local blobB = stored[keyB]
-local loadedB = assert(Disk.loadTerrain(map, "full"), "FULL variant reloads")
+local loadedB = assert(Disk.loadTerrain(map, "ring"), "FULL variant reloads")
 eq(loadedB.terrain.chunks[1], terrainB.chunks[1], "FULL selects its own variant body")
 
 mode = "off"
-local loadedA = assert(Disk.loadTerrain(map, "full"), "OFF variant reloads")
+local loadedA = assert(Disk.loadTerrain(map, "ring"), "OFF variant reloads")
 eq(loadedA.terrain.chunks[1], terrainA.chunks[1], "OFF selects its own variant body")
 
 local emptyTrees = { count = 0, tN = 0, bN = 0, cells = {}, parts = {} }
@@ -202,7 +205,7 @@ check(Disk.loadTreeParts(map, "balanced", "abc123") ~= nil,
 
 -- Replace the new OFF records with exact legacy FORMAT 2 flat records. Resume
 -- and gameplay must reuse them without duplicating the user's existing cache.
-local legacyTerrain = Disk.DIRECTORY .. "/FORMAT_TEST/full-terrain"
+local legacyTerrain = Disk.DIRECTORY .. "/FORMAT_TEST/ring-terrain"
 local legacyAux = Disk.DIRECTORY .. "/FORMAT_TEST/deco"
 stored[keyA], stored[auxKeyA] = nil, nil
 stored[legacyTerrain] = legacyBlob(fpA, blobA)
@@ -214,13 +217,13 @@ Disk.beginSession(false)
 mode = "full"
 stored[keyB] = nil
 clearTrace()
-check(Disk.loadTerrain(map, "full") == nil,
+check(Disk.loadTerrain(map, "ring") == nil,
   "a legacy OFF record cannot satisfy the FULL geometry variant")
 check(saw("reject-variant"), "legacy mismatch is diagnosed as a variant mismatch")
 local mismatchReads = reads[legacyTerrain] or 0
 
 mode = "off"
-local legacyA = assert(Disk.loadTerrain(map, "full"),
+local legacyA = assert(Disk.loadTerrain(map, "ring"),
   "legacy mismatch does not poison the flat record for a later matching mode")
 eq(legacyA.terrain.chunks[1], terrainA.chunks[1], "matching legacy body remains usable")
 check((reads[legacyTerrain] or 0) > mismatchReads,
@@ -232,13 +235,13 @@ Disk.dropRam()
 mode = "full"
 stored[keyB] = withU32(blobB, 9, Disk.CACHE_REVISION + 1)
 clearTrace()
-check(Disk.loadTerrain(map, "full") == nil, "wrong cache revision is rejected")
+check(Disk.loadTerrain(map, "ring") == nil, "wrong cache revision is rejected")
 check(saw("reject-cache-version"), "revision mismatch has an explicit diagnostic")
 
 Disk.dropRam()
 stored[keyB] = withU32(blobB, 5, 99)
 clearTrace()
-check(Disk.loadTerrain(map, "full") == nil, "wrong BAVC format is rejected")
+check(Disk.loadTerrain(map, "ring") == nil, "wrong BAVC format is rejected")
 local formatRejected, formatDetail = saw("reject-cache-header")
 check(formatRejected and tostring(formatDetail):find("unsupported BAVC format", 1, true),
   "format mismatch is reported as format/header incompatibility")
@@ -246,12 +249,12 @@ check(formatRejected and tostring(formatDetail):find("unsupported BAVC format", 
 Disk.dropRam()
 stored[keyB] = blobB:sub(1, 12) .. "bad"
 clearTrace()
-check(Disk.loadTerrain(map, "full") == nil, "malformed payload is rejected after a valid header")
+check(Disk.loadTerrain(map, "ring") == nil, "malformed payload is rejected after a valid header")
 check(saw("reject-cache-body"), "payload corruption has a distinct body diagnostic")
 
 Disk.dropRam()
 stored[keyB] = blobB
-local restored = assert(Disk.loadTerrain(map, "full"), "valid FORMAT 3 survives after rejection reset")
+local restored = assert(Disk.loadTerrain(map, "ring"), "valid FORMAT 3 survives after rejection reset")
 eq(restored.terrain.chunks[1], terrainB.chunks[1], "valid variant still decodes normally")
 
 -- <=0.1.83 has a flat native-filesystem backend. FORMAT 3 logical variants
@@ -280,19 +283,26 @@ check(LegacyDisk.bind({ save = { version = "yellow" } }),
   "legacy native-filesystem cache backend binds")
 LegacyDisk.fingerprint = Disk.fingerprint
 mode = "off"
-local legacyFp = LegacyDisk.fingerprint(map, "full", nil, "terrain")
-check(LegacyDisk.saveTerrain(map, "full", nil, terrainA, water),
+local legacyFp = LegacyDisk.fingerprint(map, "ring", nil, "terrain")
+check(LegacyDisk.saveTerrain(map, "ring", nil, terrainA, water),
   "FORMAT 3 variant writes through legacy flat filesystem adapter")
 local legacyPhysical
 for path in pairs(legacyFiles) do
-  if path:find("FORMAT_TEST.full.terrain.variant-", 1, true) then legacyPhysical = path end
+  if path:find("FORMAT_TEST.ring.terrain.variant-", 1, true) then legacyPhysical = path end
 end
 check(legacyPhysical and legacyPhysical:match("%.variant%-%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%.bavc$"),
   "legacy backend flattens the nested variant into a safe physical filename")
 local legacyNames = LegacyDisk.ramPlan({ "FORMAT_TEST" })
-local wantedLegacyLogical = LegacyDisk.DIRECTORY .. "/FORMAT_TEST/full-terrain/variant-"
+local wantedLegacyLogical = LegacyDisk.DIRECTORY .. "/FORMAT_TEST/ring-terrain/variant-"
   .. LegacyDisk.variantId(legacyFp)
 check(legacyNames[1] == wantedLegacyLogical,
   "legacy backend enumerates the flattened file back to its FORMAT 3 logical key")
+check(LegacyDisk.saveTerrain(map, "full", nil, terrainA, water),
+  "old FULL product remains writable for rollback consumers")
+check(LegacyDisk.loadTerrain(map, "full") ~= nil,
+  "old FULL product remains readable")
+local activeNames=LegacyDisk.ramPlan({"FORMAT_TEST"})
+eq(#activeNames,1,"unused historical FULL must not consume preload RAM")
+eq(activeNames[1],wantedLegacyLogical,"active preload retains RING")
 
 print(checks .. " checks passed (voxel cache FORMAT 3 + legacy migration)")

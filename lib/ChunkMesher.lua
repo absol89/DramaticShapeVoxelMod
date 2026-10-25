@@ -81,6 +81,7 @@ do
 end
 
 local ChunkMesher = {}
+local Parts = V.require("MeshParts")
 
 -- Exact TEST435 material identities. These remain visual classifiers only;
 -- Battle Art collision and source map tiles are never changed.
@@ -723,6 +724,8 @@ local function shadeRect(c, shade, axisU, u0, u1, axisV, v0, v1, tone)
 end
 
 local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
+  local ringOnly = bodyOnly == "ring"
+  bodyOnly = bodyOnly == true
   local LG={} -- Group city material state to stay within Lua/LuaJIT local limits.
   -- TEST206: while LG.rockTag is set, faces are tagged with Cerulean
   -- Cave's slate finish (ReferenceMaterials rkBlue, the cave mouths' 218)
@@ -3336,6 +3339,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
       local k = keyOf(tx, ty)
       local s, tile = S.shapeAt[k], S.tileAt[k]
       local inBody = tx >= 0 and ty >= 0 and tx < tw and ty < th
+      if ringOnly and inBody then s = nil end
       if not inBody and masked(tx * 8, ty * 8, tx * 8 + 8, ty * 8 + 8) then
         s = nil
       end
@@ -4042,7 +4046,11 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     -- claimed cells (the ROM statue's lifted art inside the room's statue)
     local roomOwned = S.roomClaim
       and S.roomClaim[keyOf(math.floor((x0 + x1) / 16), math.floor((z0 + z1) / 16))]
-    if not roomOwned and (not q.borderBounds or (not bodyOnly and not maskedClosed(
+    local bodyProp = not q.borderBounds and (q.own
+      or outwardOnEdge(q, x0, z0, x1, z1)
+      or (x1 > 0 and x0 < bw and z1 > 0 and z0 < bh))
+    if not roomOwned and (not ringOnly or not bodyProp)
+        and (not q.borderBounds or (not bodyOnly and not maskedClosed(
           q.borderBounds[1],q.borderBounds[2],q.borderBounds[3],q.borderBounds[4])))
         and (q.own or outwardOnEdge(q, x0, z0, x1, z1)
         or keepQuad(x0, z0, x1, z1)) then
@@ -4163,6 +4171,24 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           local z0 = math.min(sc[1][3], sc[2][3], sc[3][3], sc[4][3])
           local z1 = math.max(sc[1][3], sc[2][3], sc[3][3], sc[4][3])
           ok = keepQuad(x0, z0, x1, z1)
+        end
+        if ok and ringOnly then
+          local bodyKeep
+          if interior then
+            bodyKeep = true
+          elseif not overBody then
+            bodyKeep = false
+          elseif st.keepTree or st.forestTree then
+            bodyKeep = mx + .25 > 0 and mx - .25 < bw
+              and mz + .25 > 0 and mz - .25 < bh
+          else
+            local x0 = math.min(sc[1][1], sc[2][1], sc[3][1], sc[4][1])
+            local x1 = math.max(sc[1][1], sc[2][1], sc[3][1], sc[4][1])
+            local z0 = math.min(sc[1][3], sc[2][3], sc[3][3], sc[4][3])
+            local z1 = math.max(sc[1][3], sc[2][3], sc[3][3], sc[4][3])
+            bodyKeep = x1 > 0 and x0 < bw and z1 > 0 and z0 < bh
+          end
+          if bodyKeep then ok = false end
         end
         if ok and not st.hideCrown then
           local shade=q.referenceMaterial and V.require('ReferenceMaterials').encode(q.referenceMaterial,q.shade)
@@ -4577,6 +4603,7 @@ local function releaseEntry(c)
   releaseVisualMeshes(c.fullVisuals)
   releaseVisualMeshes(c.bodyVisuals)
   c.fullVisuals, c.bodyVisuals = nil, nil
+  c.terrainView, c.waterView, c.visualViews = nil, nil, nil
   releaseFigures(c.figures)
   c.figures = nil
   c.stale = nil
@@ -4712,7 +4739,7 @@ local function runJob(job)
   -- Revision-36 records include suppressible sign streams plus tree/pillar
   -- registries, so those features no longer make a cache hit ineligible.
   local cached = not sessionVessel and cacheTerrain
-    and MeshDisk.loadTerrain(map, job.slot, job.masks) or nil
+    and MeshDisk.loadTerrain(map, job.slot == "full" and "ring" or job.slot, job.masks) or nil
   if cached then
     CacheTrace.log("upload-cached", job.id, "slot=" .. job.slot)
     restoreRegistrySnapshot(map, cached.registry)
@@ -4732,7 +4759,7 @@ local function runJob(job)
     local annotatedVisuals = mapHasVisualObjects(map)
     local sink, waterSink = newSink(), newSink()
     local visualSinks = annotatedVisuals and {} or nil
-    runGeometry(map, job.slot == "body", job.masks, sink, waterSink,
+    runGeometry(map, job.slot == "body" and true or "ring", job.masks, sink, waterSink,
       visualSinks)
     local terrainRaw = sink.raw and sink.raw() or nil
     local waterRaw = waterSink.raw and waterSink.raw() or nil
@@ -4758,7 +4785,7 @@ local function runJob(job)
     end
     if terrainRaw and waterRaw and cacheTerrain then
       local savedTerrain, terrainError =
-        MeshDisk.saveTerrain(map, job.slot, job.masks, terrainRaw, waterRaw,
+        MeshDisk.saveTerrain(map, job.slot == "full" and "ring" or job.slot, job.masks, terrainRaw, waterRaw,
           visualRaw, registrySnapshot(map))
       if not savedTerrain then
         print("[warn] voxel terrain cache write failed for " .. tostring(job.id)
@@ -4807,7 +4834,19 @@ local function priorityValue(priority)
   return 0
 end
 
+-- Finish the next crossing before distant scenery. Ring work uses 1.25;
+-- the current body remains 2 (3 when promoted during a crossing).
+function ChunkMesher.neighborPriority(map, id)
+  for _, connection in pairs(map.def and map.def.connections or {}) do
+    if connection.map == id then return 1.75 end
+  end
+  return .75
+end
+
 function ChunkMesher.request(map, bodyOnly, masks, priority)
+  -- FULL is now a view over BODY + RING. Even an isolated interior needs
+  -- its shared body; a warm neighbour must never upload that body twice.
+  if not bodyOnly then ChunkMesher.request(map, true, nil, priority) end
   local slot = bodyOnly and "body" or "full"
   local c = cache[map.id]
   local stale = c and c.stale and (c.stale[slot] or c.stale.aux)
@@ -4818,6 +4857,7 @@ function ChunkMesher.request(map, bodyOnly, masks, priority)
   local key = jobKey(map.id, slot)
   local job = jobIndex[key]
   local requested = priorityValue(priority)
+  if slot == "full" and requested == 2 then requested = 1.25 end
   if not job then
     CacheTrace.log("queue", map.id, "slot=" .. slot .. " priority=" .. requested)
     jobFailures[key] = nil
@@ -4839,7 +4879,7 @@ function ChunkMesher.request(map, bodyOnly, masks, priority)
   -- first so it can draw immediately as the current-map fallback; otherwise
   -- the new full job (priority 2) starves the nearly-ready body (priority 1)
   -- and recreates the Android flowers-without-terrain delay at the seam.
-  if slot == "full" and requested == 2 then
+  if slot == "full" and requested == 1.25 then
     local body = jobIndex[jobKey(map.id, "body")]
     if body then body.priority = math.max(body.priority or 0, 3) end
   end
@@ -4935,7 +4975,12 @@ end
 function ChunkMesher.cancelSpeculative(mapId, bodyOnly)
   local key = jobKey(mapId, bodyOnly and "body" or "full")
   local job = jobIndex[key]
-  if not job or (job.priority or 0) > 0 then return false end
+  if job and (job.priority or 0) > 0 then return false end
+  -- A speculative FULL request also queues its shared BODY. Cancel both
+  -- when eager precaching stops, but retain a BODY promoted to live use.
+  local canceledBody = not bodyOnly
+    and ChunkMesher.cancelSpeculative(mapId, true) or false
+  if not job then return canceledBody end
   cancelJob(job)
   jobIndex[key] = nil
   for i = #jobs, 1, -1 do
@@ -4949,6 +4994,7 @@ end
 -- probe; a failed build and a completed build both stop being pending.
 function ChunkMesher.jobPending(mapId, bodyOnly)
   return jobIndex[jobKey(mapId, bodyOnly and "body" or "full")] ~= nil
+    or (not bodyOnly and jobIndex[jobKey(mapId, "body")] ~= nil)
     or jobIndex[jobKey(mapId, "work-legendary-mature")] ~= nil
     or jobIndex[jobKey(mapId, "work-legendary-sapling")] ~= nil
 end
@@ -4981,14 +5027,18 @@ end
 function ChunkMesher.seasonalState(map, bodyOnly)
   local c=map and cache[map.id]
   local slot=bodyOnly and "body" or "full"
-  local ready=c and c[slot] and not(c.stale and c.stale[slot])
-    and not jobIndex[jobKey(map.id,slot)]
+  -- An empty ring is a successful answer, not missing terrain. Seasonal
+  -- work follows the complete view, including its shared body lifecycle.
+  local ready=c and c[slot]~=nil and c.body~=nil
+    and not(c.stale and (c.stale[slot] or c.stale.body))
+    and not ChunkMesher.jobPending(map.id,bodyOnly)
   return ready and true or false, map and (gen[map.id] or 0) or 0
 end
 
 function ChunkMesher.slotKnown(map, bodyOnly)
   local c = map and cache[map.id]
-  return c ~= nil and c[bodyOnly and "body" or "full"] ~= nil
+  return c ~= nil and c.body ~= nil
+    and c[bodyOnly and "body" or "full"] ~= nil
 end
 
 -- Advance queued builds inside a per-frame time budget. A partially built body
@@ -5056,6 +5106,7 @@ end
 -- static per map id -- a map's connections never change -- so it caches
 -- like everything else.
 function ChunkMesher.get(map, bodyOnly, masks)
+  if not bodyOnly then ChunkMesher.get(map, true, nil) end
   local slot = bodyOnly and "body" or "full"
   local c = entry(map.id)
   if c.grass == nil or c.flowers == nil or (c.stale and c.stale.aux) then
@@ -5066,7 +5117,7 @@ function ChunkMesher.get(map, bodyOnly, masks)
     if c.stale then c.stale.aux = nil end
   end
   if c[slot] == nil or (c.stale and c.stale[slot]) then
-    local ok, mesh, water, visuals = pcall(ChunkMesher.build, map, bodyOnly,
+    local ok, mesh, water, visuals = pcall(ChunkMesher.build, map, bodyOnly and true or "ring",
       masks, true, mapHasVisualObjects(map))
     if not ok then
       print("[warn] voxel mesh build failed for " .. tostring(map.id)
@@ -5085,13 +5136,21 @@ function ChunkMesher.get(map, bodyOnly, masks)
     local job = jobIndex[key]
     if job then finishJob(job, true) end
   end
+  if not bodyOnly then
+    c.terrainView = Parts.join(c.body, c.full, c.terrainView)
+    return c.terrainView
+  end
   return c[slot] or nil
 end
 
 -- The cached mesh, or nil -- never builds. The async path's read side.
 function ChunkMesher.peek(map, bodyOnly)
   local c = cache[map.id]
-  local mesh = c and c[bodyOnly and "body" or "full"]
+  if not bodyOnly and c then
+    c.terrainView = Parts.join(c.body, c.full, c.terrainView)
+    return c.terrainView
+  end
+  local mesh = c and c.body
   return mesh or nil
 end
 
@@ -5108,6 +5167,20 @@ function ChunkMesher.pair(map, bodyOnly)
   if not c then return nil, nil end
   local slot = bodyOnly and "body" or "full"
   local list = c[visualSlot(slot)]
+  local terrain, water = c[slot] or nil, c[waterSlot(slot)] or nil
+  if not bodyOnly then
+    c.terrainView = Parts.join(c.body, terrain, c.terrainView)
+    c.waterView = Parts.join(c.bodyWater, water, c.waterView)
+    terrain, water = c.terrainView, c.waterView
+    local merged = {}
+    c.visualViews = c.visualViews or {}
+    for id, mesh in pairs(c.bodyVisuals or {}) do merged[id] = mesh end
+    for id, mesh in pairs(list or {}) do
+      merged[id] = Parts.join(merged[id], mesh, c.visualViews[id])
+    end
+    c.visualViews = merged
+    list = merged
+  end
   local visible, shadow = nil, nil
   if type(list) == "table" then
     local ids = {}
@@ -5120,7 +5193,7 @@ function ChunkMesher.pair(map, bodyOnly)
       if visualObjectVisible(id) then visible[#visible + 1] = record end
     end
   end
-  return c[slot] or nil, c[waterSlot(slot)] or nil, visible, shadow
+  return terrain, water, visible, shadow
 end
 
 function ChunkMesher.grass(map)

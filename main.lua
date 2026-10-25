@@ -1171,6 +1171,13 @@ SETTINGS[#SETTINGS+1]={ParadeReplay.setting,
   "Choose a float ride, then close all menus to play it. Returns you here afterward. OFF cancels.",full=true}
 SETTINGS[#SETTINGS+1]={V.require('ParadeDiagnostics').setting,
   "Show frame rate and timing details during the Champion parade.",full=true}
+SETTINGS[#SETTINGS+1]={V.require('ParadeSwitches').depthSetting,
+  "Test switch for the parade black screen. TEST266: the scene's depth buffer "
+  .."is private (current). TEST265: the older readable depth buffer, as in "
+  .."TEST264. Takes effect on the next frame.",full=true}
+SETTINGS[#SETTINGS+1]={V.require('ParadeSwitches').cullSetting,
+  "Test switch for the parade black screen. ON: the culling fix (current). "
+  .."OFF: culling as in TEST264.",full=true}
 local schema = {}
 for _, entry in ipairs(SETTINGS) do
   -- Provider-only settings should not leave a dead row when the optional
@@ -1300,6 +1307,7 @@ local OPTION_CATEGORIES = {
     Shadows.setting, AntiAlias.setting, V.require("Voxel3D").precisionSetting,
     AntiAlias.scaleSetting, V.require("PerfProbe").setting,
     V.require('ParadeDiagnostics').setting,
+    V.require('ParadeSwitches').depthSetting, V.require('ParadeSwitches').cullSetting,
   } },
   { id = "pokemon", label = "POKEMON ART", settings = {
     InterfaceSprites.setting, InterfaceSprites.scalingSetting,

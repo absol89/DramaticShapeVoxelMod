@@ -235,6 +235,9 @@ local function legacyName(key)
   if product == "full-terrain" then
     return LEGACY_ROOT .. "/" .. id .. ".full.terrain" .. variantSuffix .. ".bavc"
   end
+  if product == "ring-terrain" then
+    return LEGACY_ROOT .. "/" .. id .. ".ring.terrain" .. variantSuffix .. ".bavc"
+  end
   if product == "body-terrain" then
     return LEGACY_ROOT .. "/" .. id .. ".body.terrain" .. variantSuffix .. ".bavc"
   end
@@ -259,6 +262,12 @@ local function legacyKey(name)
   if id and #variant == #VARIANT_PREFIX + 16 then
     return LOGICAL_DIRECTORY .. "/" .. id .. "/body-terrain/" .. variant
   end
+  id, variant = name:match("^(.-)%.ring%.terrain%.(" .. VARIANT_PATTERN .. ")%.bavc$")
+  if id and #variant == #VARIANT_PREFIX + 16 then
+    return LOGICAL_DIRECTORY .. "/" .. id .. "/ring-terrain/" .. variant
+  end
+  id = name:match("^(.-)%.ring%.terrain%.bavc$")
+  if id then return LOGICAL_DIRECTORY .. "/" .. id .. "/ring-terrain" end
   local treeId, product, treeVariant = name:match(
     "^(.-)%.(tree%-%w[%w_-]*%-%w[%w_-]*)%.(" .. VARIANT_PATTERN .. ")%.bavc$")
   if treeId and product and treeVariant and #treeVariant == #VARIANT_PREFIX + 16 then
@@ -592,6 +601,9 @@ function Disk.fingerprint(map, slot, masks, kind)
     end
   end
   if mapId=='OAKS_LAB' then parts[#parts+1]=V.require('OakLabRoom').REVISION end
+  if mapId=='VICTORY_ROAD_1F' and kind=='terrain' then
+    parts[#parts+1]=V.require('CaveExitVisuals').VICTORY_ROAD_REVISION
+  end
   if mapId=='REDS_HOUSE_1F' then parts[#parts+1]=V.require('RedsHouseRoom').REVISION end
   if mapId=='REDS_HOUSE_2F' then parts[#parts+1]=V.require('RedsBedroomRoom').REVISION end
   if mapId=='CELADON_MART_ROOF' then parts[#parts+1]=V.require('CeladonRoof').REVISION end
@@ -1032,15 +1044,16 @@ function Disk.orderRamNames(names, priority)
     local current = mapRank == 1
     local phase
     if current then
-      -- Decorations are small and required beside the current full terrain;
-      -- the current map's neighbour-only BODY duplicate can wait.
+      -- Shared BODY is required by the current view; RING is only its delta.
       phase = product == "deco" and 1
-           or product == "full-terrain" and 2
-           or product == "body-terrain" and 5 or 7
+           or product == "body-terrain" and 2
+           or product == "ring-terrain" and 5
+           or product == "full-terrain" and 6 or 7
     elseif mapRank < math.huge then
       -- Connected strips are drawn as BODY meshes during the first frame.
       phase = product == "body-terrain" and 3
            or product == "deco" and 4
+           or product == "ring-terrain" and 6
            or product == "full-terrain" and 6 or 7
     else
       phase = 7
@@ -1074,7 +1087,12 @@ function Disk.ramPlan(priority)
   -- the ordinary session RAM mirror.
   local groups = {}
   for _, key in ipairs(listed or {}) do
-    if key:sub(1, #Disk.DIRECTORY + 1) == Disk.DIRECTORY .. "/" then
+    local tail = key:sub(#Disk.DIRECTORY + 2)
+    local retiredFull = tail:match("^[^/]+/full%-terrain$")
+      or tail:match("^[^/]+/full%-terrain/")
+    -- Keep historical FULL files on disk for rollback, but do not spend
+    -- the live RAM budget preloading an unused duplicate of BODY.
+    if not retiredFull and key:sub(1, #Disk.DIRECTORY + 1) == Disk.DIRECTORY .. "/" then
       local base = key:match("^(.-)/" .. VARIANT_PATTERN .. "$")
                    or key
       local group = groups[base]
@@ -1374,7 +1392,8 @@ end
 -- for: shared grass/flower/figure data and its terrain+water stream.
 function Disk.complete(map, bodyOnly, masks)
   if not map or not Disk.staticEligible(map) then return false end
-  local slot = bodyOnly and "body" or "full"
+  if not bodyOnly and not Disk.complete(map, true, nil) then return false end
+  local slot = bodyOnly and "body" or "ring"
   local auxFp = Disk.fingerprint(map, "aux", nil, "aux")
   local terrainFp = Disk.fingerprint(map, slot, masks, "terrain")
   local auxBase = basePathFor(map, "aux", "aux")
@@ -1394,7 +1413,7 @@ function Disk.completeDetails(map, bodyOnly, masks)
     return false, { { kind = "map", path = tostring(map.id or "-"),
                       physical = "-", error = "map is not static-cache eligible" } }
   end
-  local slot = bodyOnly and "body" or "full"
+  local slot = bodyOnly and "body" or "ring"
   local auxFp = Disk.fingerprint(map, "aux", nil, "aux")
   local terrainFp = Disk.fingerprint(map, slot, masks, "terrain")
   local auxBase = basePathFor(map, "aux", "aux")
@@ -1415,6 +1434,10 @@ function Disk.completeDetails(map, bodyOnly, masks)
         physical = physicalPath(failedPath or check.path), error = err,
       }
     end
+  end
+  if not bodyOnly then
+    local _, bodyFailures = Disk.completeDetails(map, true, nil)
+    for _, failure in ipairs(bodyFailures) do failures[#failures + 1] = failure end
   end
   return #failures == 0, failures
 end
@@ -1438,11 +1461,11 @@ function Disk.stats()
       out.bytes = out.bytes + (size or 0)
       local id, product = name:match("^([^/]+)/([^/]+)")
       if id and (product == "deco" or product == "aux"
-          or product == "full-terrain" or product == "body-terrain"
+          or product == "full-terrain" or product == "ring-terrain" or product == "body-terrain"
           or product:match("^tree%-.+$")) then maps[id] = true end
       if product == "deco" or product == "aux" then
         out.aux = out.aux + 1
-      elseif product == "full-terrain" then
+      elseif product == "full-terrain" or product == "ring-terrain" then
         out.full = out.full + 1
       elseif product == "body-terrain" then
         out.body = out.body + 1

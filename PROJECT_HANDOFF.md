@@ -1,3 +1,58 @@
+# BODY/RING release check - 2026-10-25
+
+See docs/BODY-RING-RELEASE-CHECK.md. Eleven focused suites, production LuaJIT
+compilation and five donor render probes pass. The SDK integration exposed an
+orphaned speculative BODY when RAM precache switched OFF: cancellation now
+clears speculative BODY + RING while preserving visible BODY. Added regression
+coverage; updated two older scheduler/preload-order test fixtures. Direct SDK
+runs pass 26/26; a nested Python discovery limitation is documented separately.
+All 12 changed production files match live staging after line-ending normalization.
+Only the corrected ChunkMesher.lua needed deployment; verified backup and logs
+are in engine tmp/body-ring-release-check-20261025. No player state/cache/assets
+changes. No commit or push; Android/iOS playtest acceptance remains pending.
+
+# Shared terrain streaming and Victory Road placement � 2026-10-23
+
+Uncommitted follow-up on legendary-update-1.11.2. BODY is shared between neighbor
+and current-map rendering; RING stores only remaining geometry. Draw consumers
+handle non-owning MeshParts views; disk caches preserve old BODY and separate new
+RING keys. Prioritize direct crossings over distant scenery. No manifest, media,
+player options or save changes. See docs/STREAMING-BODY-RING.md for validation,
+cache compatibility and remaining Android/upload limitations.
+
+The user's annotated Victory Road screenshot requests translation of the entire
+exit box, rather than the earlier edge inset. The shell now moves 12px
+south into the decorative border, retaining dimensions and source warps/collision.
+An isolated Yellow source fixture captures the same cell (7,16), yaw 0, pitch .18,
+FULL Legendary, voxel camera 7, with distinct before/after cache fingerprints.
+
+Inspected matched rendered before/after PNGs: the entire frame/floor/light panel
+moves back and exposes the approach. Both captures assert identical Yellow map,
+player and camera state. The test instance auto-quit; player progress untouched.
+Eight production Lua files were deployed to the requested staging folder with
+SHA-256 verification. Backups and deployment.json are retained under engine tmp/
+battleart-streaming/staging-backup-20261023-224440. Restart is required. New RING
+records need generation; old BODY files remain reusable except the revised cave.
+No cache purge was performed. Real Strength movement and Android remain untested.
+All 346 production files compile under LuaJIT; cave regression 13,271 checks,
+partition 569, cache format 47, storage 7, Legendary OFF 30; item-ball and
+transition regressions pass. No tracked PNG/JPG/JPEG files. No commit or push.
+
+# TEST267 follow-up integration — 2026-10-23
+
+Merged the user's IterationTEST267 source into legendary-update-1.11.2 after
+release 1.11.2, preserving optional item balls, the user-verified Legendary OFF
+fix, manifest provenance/version and raster exclusions. Five production files
+changed and ParadeSwitches.lua was added. Master/tag stay at 39ff49d; this work
+is uncommitted and has not been pushed. The six changed production Lua files were deployed to the user-requested staging folder on 2026-10-23 with SHA-256 verification. Originals and a deployment manifest are retained in tmp/test267-integration/staging-backup-20261023-173010 under the engine workspace. No assets, manifest, saves or options were changed; a full game restart and user Elite Four playtest remain pending.
+
+See docs/TEST267-INTEGRATION.md for scope, three-way baseline reconstruction,
+validation and diagnostic defaults. All 345 production files compile under
+LuaJIT; 11 supplied suites and both local preservation regressions pass using
+the documented runtimes/fixtures. No live rendering or handheld crash claim.
+SCENE DEPTH defaults to TEST266 non-readable depth as supplied; TEST265 restores
+the sampled-depth water/effects path. Shadow copying adds a read canvas.
+
 # Release 1.11.2 — 2026-10-23
 
 User confirmed the staged Legendary OFF fix worked after playtesting. This is

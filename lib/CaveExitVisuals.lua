@@ -1,11 +1,11 @@
 -- Authored flat cave mouths only. LAST_MAP is checked against the exact
 -- exported warp and source tile33 footprint; ladders and interior links keep
--- their existing geometry. The shell lives wholly in the warp cells, never
--- cuts the surrounding maze walls, and does not change gameplay data.
-local M = {}
+-- their existing geometry. Victory Road moves its complete visual shell outward
+-- into the decorative border; source warp cells and collision stay unchanged.
+local M = {VICTORY_ROAD_REVISION='victory-road-exit-outset-12-v1'}
 local profiles = {
  {map='MT_MOON_1F',x=14,z=35,width=2,face='south',destWarp=2},
- {map='VICTORY_ROAD_1F',x=8,z=17,width=2,face='south',destWarp=3},
+ {map='VICTORY_ROAD_1F',x=8,z=17,width=2,face='south',destWarp=3,outset=12},
  {map='VICTORY_ROAD_2F',x=29,z=7,width=2,face='east',destWarp=4},
  {map='DIGLETTS_CAVE_ROUTE_2',x=2,z=7,width=2,face='south',destWarp=1},
  {map='DIGLETTS_CAVE_ROUTE_11',x=2,z=7,width=2,face='south',destWarp=5},
@@ -48,9 +48,12 @@ function M.build(S,map,data,perRow)
  local aw,ah=data:getDimensions();local emitted=0
  for _,p in ipairs(placements) do
   local width=p.width*16
+  -- Translate the whole mouth away from the Strength approach, including
+  -- its floor and light panel; retain the authored shell dimensions.
+  local outset=p.outset or 0
   local function point(x,y,z)
    if p.face=='east' then return {p.x*16+z,y,p.z*16+width-x} end
-   return {p.x*16+x,y,p.z*16+z}
+   return {p.x*16+x,y,p.z*16+z+outset}
   end
   local function quad(a,b,c,d,donor,shade,role)
    local uv={donor[1]/aw,donor[2]/ah}
