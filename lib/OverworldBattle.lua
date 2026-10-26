@@ -1516,7 +1516,11 @@ function OverworldBattle.install()
     -- keyed to alpha because the original battle field was itself white.
     local pokemon = OverworldBattle.isPokemonPic(self, img)
     local sealBottom = pokemon or OverworldBattle.pinnedPic(self, img)
-    return BattlePics.filled(out, sealBottom)
+    -- Identify the pre-fade ROM pattern rather than guessing from species or
+    -- applying a back mask to a front, trainer, animation or provider picture.
+    local source=(self.player and img==self.player.sprite
+      and BattleArt.playerSide()=='back') and img or nil
+    return BattlePics.filled(out, sealBottom, source)
   end
 
 

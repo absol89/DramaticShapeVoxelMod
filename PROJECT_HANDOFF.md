@@ -1,3 +1,20 @@
+# PR62 and reviewed ROM back alpha - 2026-10-26
+
+PR #62 merged to master as 3051809 and pushed to absol89. A separate follow-up
+adds fingerprint-guarded reference corrections for 49 ROM back patterns after
+comparing all 151 Red backs. ROM fronts/trainers and authored/provider art keep
+their existing path; PR62 tags still opt out. Palette/fade color and extra ink
+outside the 28px reference crop are preserved. No PNG/JPG or private sprite
+pictures are added. See docs/ROM-BACK-ALPHA.md for implementation and evidence.
+
+Combined synthetic regression passes 25 checks; production hints match all 151
+Red outputs; 347 files compile; SDK loading and focused preservation checks
+pass. Two pre-existing fixture limitations are documented. Inspected packaged
+Red GPU captures show Fearow/Pikachu/Jigglypuff with 154/19/0 changed pixels.
+Four production files are deployed to live staging with verified backups under
+engine tmp/rom-alpha-integration/live-backup-20261026-010638. Restart for user
+playtesting. Player saves/options remain untouched; handheld testing pending.
+
 # BODY/RING release check - 2026-10-25
 
 See docs/BODY-RING-RELEASE-CHECK.md. Eleven focused suites, production LuaJIT

@@ -100,6 +100,8 @@ local function newCache()
   }
 end
 local cache = newCache()
+local sourceMasks = setmetatable({}, { __mode = 'k' })
+local RomBackAlpha = V.require('RomBackAlpha')
 
 -- What an enclosed hole is filled with when the pic itself offers nothing
 -- better. White, because white is what the battle field was: this restores the
@@ -297,11 +299,29 @@ end
 -- sealBottom for a pic pinned to the text box rather than standing on the map:
 -- see the header. A caller that does not say defaults to the map, which is
 -- where all but one of this mod's pics are.
-function BattlePics.filled(img, sealBottom)
+function BattlePics.filled(img, sealBottom, romBackSource)
   if not img then return img end
   sealBottom = sealBottom and true or false
   local slot = cache[sealBottom]
-  local hit = slot[img]
+  local mask
+  if romBackSource then
+    local known=sourceMasks[romBackSource]
+    if known==nil then
+      local ok,value=pcall(function()
+        local source=readBack(romBackSource)
+        if not source then return nil end
+        local found=RomBackAlpha.identify(source)
+        source:release()
+        return found
+      end)
+      known=(ok and value) or false
+      sourceMasks[romBackSource]=known
+    end
+    mask=known or nil
+  end
+  local key=mask or false
+  local bucket=slot[img]
+  local hit = bucket and bucket[key]
   if hit ~= nil then return hit or img end
 
   local made = nil
@@ -332,6 +352,7 @@ function BattlePics.filled(img, sealBottom)
         end
       end
     end
+    if mask then changed=RomBackAlpha.apply(data,mask,fr,fg,fb) or changed end
     -- nothing enclosed: hand the original back rather than a copy of it
     if not changed then return end
     local out = love.graphics.newImage(data)
@@ -339,12 +360,14 @@ function BattlePics.filled(img, sealBottom)
     made = out
   end)
 
-  slot[img] = (ok and made) or false
+  if not bucket then bucket={};slot[img]=bucket end
+  bucket[key] = (ok and made) or false
   return made or img
 end
 
 function BattlePics.invalidate()
   cache = newCache()
+  sourceMasks = setmetatable({}, { __mode = 'k' })
 end
 
 return BattlePics
